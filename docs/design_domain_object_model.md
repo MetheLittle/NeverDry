@@ -48,6 +48,12 @@ backend allows (see the design decision below).
 
 ## Class diagram
 
+![UML class diagram of the NeverDry domain model](assets/domain_model_uml.svg)
+
+*Rendered diagram (`assets/domain_model_uml.svg`) — blue is the liters contract going
+down, green is the truth flowing back. The Mermaid source below is the normative
+definition; keep the two in sync.*
+
 ```mermaid
 classDiagram
     direction TB
