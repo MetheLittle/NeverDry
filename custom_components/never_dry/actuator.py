@@ -161,6 +161,10 @@ class DeliveryQuality(StrEnum):
     PARTIAL = "partial"
     DELAYED = "delayed"
     LOW_CONFIDENCE = "low_confidence"
+    # The user hand-watered and pressed "Mark irrigated": the amount is assumed
+    # (the recommended liters), declared by a human rather than measured. Used by
+    # :class:`ManualActuator` for valve-less, hand-watered plants.
+    DECLARED = "declared"
 
 
 class DeliveryMode(StrEnum):
@@ -1349,3 +1353,95 @@ class MasterActuator(Actuator):
         """Cancel the off-linger, then unload the base actuator."""
         self._cancel_linger()
         super().async_unload()
+
+
+# ── Manual actuator (a valve-less "how": a human with a watering can) ───────
+
+
+class ManualActuator:
+    """A valve-less actuator for hand-watered plants (house plants).
+
+    The third materialization of the domain's "how": there is no hardware to
+    drive. Instead of opening a valve it raises an **alert** when a zone's deficit
+    says water is due, and the delivery completes when the user presses **Mark
+    irrigated**. It deliberately does *not* extend :class:`Actuator` — that base
+    is all valve machinery (FSM, switch commands, watchdog, liveness), none of
+    which applies to a human with a watering can. What it shares is the delivery
+    *contract*: it returns a :class:`DeliveryResult`, so the Zone settles its
+    deficit exactly as it does for a valve, unaware the "backend" was a person.
+
+    It leans on things that already exist rather than inventing them: the alert is
+    a notification (any ``on_alert`` sink — a persistent notification, a mobile
+    push, the notifier seam), and **Mark irrigated** is the existing
+    ``reset_deficit`` action, reused here as the delivery *confirmation*.
+
+    The asynchronous, human-paced nature is already modelled by
+    :class:`DeliveryResult`: :meth:`request_irrigation` returns a ``delayed``
+    pending result, :meth:`mark_irrigated` the final ``declared`` one — a human is
+    the extreme case of "a backend that measures late".
+
+    Pairing note: a house plant is watered manually (this actuator) *and* its
+    demand is not weather-driven, so it pairs with a VWC / indoor water-balance
+    model, not ``ETModel``. Actuation and model are orthogonal axes: a house plant
+    picks the manual "how" and the indoor "how much".
+    """
+
+    role = "manual"
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        on_alert: Callable[[str, float, float | None], None] | None = None,
+        on_clear: Callable[[str], None] | None = None,
+    ) -> None:
+        """Configure a manual actuator; ``on_alert``/``on_clear`` raise/clear the user alert."""
+        self._name = name
+        self._on_alert = on_alert
+        self._on_clear = on_clear
+        self._pending_liters: float = 0.0
+        self._pending: bool = False
+
+    @property
+    def name(self) -> str:
+        """Human-facing name for the alert."""
+        return self._name
+
+    @property
+    def is_pending(self) -> bool:
+        """``True`` while an alert is open awaiting the user's confirmation."""
+        return self._pending
+
+    @property
+    def pending_liters(self) -> float:
+        """The recommended liters the open alert asks the user to pour."""
+        return self._pending_liters
+
+    def request_irrigation(self, liters: float, *, deficit_mm: float | None = None) -> DeliveryResult:
+        """Raise the "water this plant" alert; return a pending :class:`DeliveryResult`.
+
+        Nothing is actuated: the result is ``delayed`` with zero delivered so far,
+        settled only when the user confirms via :meth:`mark_irrigated`. A repeated
+        request while one is pending just refreshes the recommended amount.
+        """
+        self._pending_liters = liters
+        self._pending = True
+        if self._on_alert is not None:
+            self._on_alert(self._name, liters, deficit_mm)
+        return DeliveryResult(0.0, DeliveryQuality.DELAYED, 0.0, liters, detail="awaiting_manual")
+
+    def mark_irrigated(self, liters: float | None = None) -> DeliveryResult:
+        """Confirm the plant was hand-watered; return the ``declared`` result and clear the alert.
+
+        With no explicit ``liters`` the recommended amount is assumed (the user
+        followed the advice); an explicit figure lets a careful user declare how
+        much they actually poured. Either way the amount is *declared*, not
+        measured. The Zone settles its deficit with this result.
+        """
+        requested = self._pending_liters
+        delivered = requested if liters is None else max(0.0, liters)
+        self._pending = False
+        self._pending_liters = 0.0
+        if self._on_clear is not None:
+            self._on_clear(self._name)
+        return DeliveryResult(delivered, DeliveryQuality.DECLARED, 0.0, requested, detail="user_marked")

@@ -148,9 +148,15 @@ classDiagram
         +follow(any_zone_driver_active)
     }
 
+    class ManualActuator {
+        +role : manual
+        +request_irrigation(liters) DeliveryResult
+        +mark_irrigated(liters?) DeliveryResult
+    }
+
     class DeliveryResult {
         +liters_delivered
-        +quality : measured, estimated, partial, delayed, low_confidence
+        +quality : measured, estimated, partial, delayed, low_confidence, declared
         +elapsed_s
         +revise(measured_liters)
     }
@@ -219,10 +225,17 @@ classDiagram
     Zone ..> Deficit : holds, settles
     Zone "1" --> "1" ZoneDriver : requests liters
     ZoneDriver ..> DeliveryResult : returns
+    Zone ..> ManualActuator : requests (manual how)
+    ManualActuator ..> DeliveryResult : returns (declared)
     Zone ..> DeliveryResult : settles deficit with
     Scheduler --> Zone : decides when, queues
     MasterDriver ..> ZoneDriver : ON while any is active
 ```
+
+`ManualActuator` is a third materialization of the *how* — but deliberately **not** a
+`Driver`: there is no entity, no FSM, no safety layers to inherit. It shares only the delivery
+**contract** (`→ DeliveryResult`), so the Zone settles its deficit identically whether the
+water came from a valve or a watering can.
 
 Reading keys: liters flow down the association `Zone → ZoneDriver` and truth flows back up as
 a `DeliveryResult`; the `Scheduler` never touches drivers — it only decides *which zone when*
@@ -296,6 +309,38 @@ result) is **replenished within the same session**, instead of surfacing a day l
 residual deficit. This is a direct synergy between the DeliveryResult contract and the
 cycle & soak rule — it requires truthful per-cycle accounting to work.
 
+### Manual actuation: a valve-less *how* for hand-watered plants
+
+*Idea 2026-07-26.* Not every plant has a valve. A **house plant** is watered by hand, so its
+"actuation" is a person: NeverDry raises an **alert** when the deficit says water is due, and
+the user presses **Mark irrigated** once they have watered. `ManualActuator` models this as a
+third materialization of the *how* — a materialization that proves the abstraction, because it
+has **no hardware at all**.
+
+It deliberately does not extend `Driver`/`Actuator`: there is no entity, no FSM, no watchdog,
+no liveness. It shares only the delivery **contract** (`→ DeliveryResult`), so the Zone settles
+its deficit identically whether the water came from a valve or a watering can. Two existing
+pieces are reused rather than reinvented: the alert is a **notification**, and **Mark
+irrigated** is the existing `reset_deficit` action, here doubling as the delivery confirmation.
+The human-paced, asynchronous nature is already covered by the DeliveryResult contract:
+`request_irrigation()` returns a `delayed` pending result and `mark_irrigated()` the final one,
+tagged with a new **`declared`** quality (assumed/declared by a human, not measured) — a person
+is simply the extreme case of "a backend that measures late".
+
+**Actuation and model are orthogonal.** A house plant picks the manual *how* **and** the right
+*how much*: indoors the demand is not weather-driven, so it pairs with a VWC / indoor
+water-balance model, **not** `ETModel`. The two axes (`Actuator` family × `WaterBalanceModel`
+family) compose freely — a house plant is just one corner of that grid.
+
+**To explore (open questions, not decided):**
+- A **placement attribute** on the Zone — `indoor` / `outdoor` / `greenhouse` — that could
+  select sensible defaults (which water-balance model, exposure, whether ET applies at all).
+- A **pot-based characterization** for house-plant zones: today a zone's water is `area × root
+  depth`; a potted plant is bounded instead by **pot volume**, and its evapotranspiring surface
+  is better described by **plant height / canopy diameter** than by ground area. This likely
+  wants its own "pot" water model (a sibling of the VWC/ET models) rather than stretching the
+  open-field geometry.
+
 ### Serial vs parallel irrigation: a Scheduler policy
 
 *From the GH #74 review (fpytloun, 2026-07-06) and the shared-resource discussion earlier in
@@ -339,7 +384,8 @@ about a dead valve *before* the next scheduled run, not from a failed one.
 | Scheduler | ⚠️ implicit and minimal: deficit-triggered daily cycle inside `IrrigationController`; no cron/sequences/calendars (deliberately — that is Irrigation Unlimited's territory). Concurrency is de-facto serial, not an explicit policy |
 | ZoneDriver | ⚠️ exists but internal: `ValveOperator` (FSM, safety layers, latency tracker) + valve/switch adapter (GH #74/#94); native volume delivery in progress. Delivered liters returned as a bare float — no DeliveryResult qualifier yet. **Scaffold extracted**: `actuator.py` (`Actuator`/`ZoneActuator`/`MasterActuator`), inert until wired |
 | MasterDriver | ❌ not implemented (GH #95); its scaffold lives in `actuator.py` (`MasterActuator`) |
-| WaterBalanceModel | ⚠️ implicit today: the ET/VWC fork inside `DrynessIndexSensor._on_sensor_change` + the per-zone loop, with the ET formula duplicated in `ETSensor`. **Scaffold extracted**: `water_balance_model.py` (`WaterBalanceModel` + `ETModel`/`VWCSystemModel`/`VWCPerZoneModel`), pure, inert until wired |
+| ManualActuator | ❌ not implemented; **scaffold extracted**: `ManualActuator` in `actuator.py` (valve-less, `request_irrigation`/`mark_irrigated` → `DeliveryResult(declared)`), inert. For hand-watered house plants — a *how* with no hardware |
+| WaterBalanceModel | ⚠️ implicit today: the ET/VWC fork inside `DrynessIndexSensor._on_sensor_change` + the per-zone loop, with the ET formula duplicated in `ETSensor`. **Scaffold extracted**: `water_balance_model.py` (`WaterBalanceModel` + `ETBalanceModel` tiers `ETModel`/`HargreavesModel`/`PenmanMonteithModel` + `VWCSystemModel`/`VWCPerZoneModel`), pure, inert until wired |
 | Deficit | ❌ today a bare `float` (`_zone_deficit`, `DrynessIndexSensor._deficit`) with the frame left implicit. **Scaffold extracted**: `Deficit` value object in `water_balance_model.py` |
 
 The refactoring direction is symmetric on both axes: make the **Driver** base explicit when
