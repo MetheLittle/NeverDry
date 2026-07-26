@@ -39,10 +39,17 @@ Driver side, and modeling it explicitly buys the same thing the Driver did:
 | ↳ `ETModel`, `VWCSystemModel`, `VWCPerZoneModel` | ↳ `ZoneDriver`, `MasterDriver` |
 | **Deficit** (mm + reference frame) — the value returned | **DeliveryResult** (liters + quality) — the value returned |
 
-- **WaterBalanceModel** — a strategy that produces a `Deficit`. Its three concretes mirror the
+- **WaterBalanceModel** — a strategy that produces a `Deficit`. Its concretes mirror the
   reference frames of the [Water-Balance Reference Model](design_water_balance_reference_model.md):
-  `ETModel` (temperature + rain, stateful forward-Euler integration), `VWCSystemModel` (one
-  system moisture probe, stateless), `VWCPerZoneModel` (a per-zone probe — the AI-174 target).
+  the ET frame is an abstract `ETBalanceModel` (shared forward-Euler integration, pluggable ET
+  rate) with three **tiers** by input cost — `ETModel` (temperature-only, today's baseline; any
+  user can run it), `HargreavesModel` (FAO-56 Hargreaves-Samani; adds the diurnal temperature
+  range, its radiation term is computed from latitude + date, so still **no extra sensor**), and
+  `PenmanMonteithModel` (FAO-56 Penman-Monteith, physically grounded, needs humidity + wind + net
+  radiation — inputs not every user has); plus `VWCSystemModel` (one system moisture probe,
+  stateless) and `VWCPerZoneModel` (a per-zone probe — the AI-174 target). Adding a tier is one
+  new `et_rate`, not a new integrator: the "user picks the ET method their sensors support"
+  design falls straight out of the output seam.
 - **Deficit** — the value object every model returns: millimetres **plus the reference frame**
   they are defined against. A bare number is not enough — the reference model's load-bearing rule
   is that *two deficits are comparable only within one frame*, so the frame (and, for per-zone
@@ -158,10 +165,26 @@ classDiagram
         +reset() Deficit
     }
 
+    class ETBalanceModel {
+        <<abstract>>
+        +kc
+        +et_rate(inputs) mm/h
+        +step(inputs) Deficit
+    }
+
     class ETModel {
-        +alpha, t_base, kc
+        +alpha, t_base
         +et_hourly(temp_c) mm/h
-        +step(ETStep) Deficit
+    }
+
+    class HargreavesModel {
+        +latitude_deg
+        +et0_daily(Tmax, Tmin, doy) mm/day
+    }
+
+    class PenmanMonteithModel {
+        +pressure_kpa
+        +et0_daily(T, rh, wind, Rn) mm/day
     }
 
     class VWCSystemModel {
@@ -183,7 +206,10 @@ classDiagram
 
     Driver <|-- ZoneDriver
     Driver <|-- MasterDriver
-    WaterBalanceModel <|-- ETModel
+    WaterBalanceModel <|-- ETBalanceModel
+    ETBalanceModel <|-- ETModel
+    ETBalanceModel <|-- HargreavesModel
+    ETBalanceModel <|-- PenmanMonteithModel
     WaterBalanceModel <|-- VWCSystemModel
     VWCSystemModel <|-- VWCPerZoneModel
     System "1" o-- "*" Zone : feeds ET+rain to

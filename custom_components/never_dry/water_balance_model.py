@@ -44,6 +44,7 @@ GH #123 (the deficit reference-frame bug this model makes impossible).
 from __future__ import annotations
 
 import abc
+import math
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import ClassVar
@@ -57,6 +58,15 @@ DEFAULT_D_MAX: float = 100.0
 DEFAULT_FIELD_CAPACITY: float = 0.30
 DEFAULT_ROOT_DEPTH: float = 0.30
 DEFAULT_KC: float = 1.0
+
+# Standard sea-level atmospheric pressure [kPa], for the FAO-56 Penman-Monteith
+# psychrometric constant. A site can override it (it varies with altitude).
+DEFAULT_PRESSURE_KPA: float = 101.3
+
+# Solar constant [MJ/m²/min], for the Hargreaves extraterrestrial radiation Ra.
+_SOLAR_CONSTANT_MJ_MIN: float = 0.0820
+# MJ/m²/day of radiation → equivalent mm/day of evaporation (FAO-56 eq. 20).
+_MJ_TO_MM_EVAP: float = 0.408
 
 # Metres → millimetres. A VWC fraction over a root depth in metres yields metres
 # of water; x1000 expresses the deficit in the model's canonical millimetres.
@@ -163,6 +173,51 @@ class ETStep:
 
 
 @dataclass(frozen=True)
+class PenmanStep:
+    """One integration step for :class:`PenmanMonteithModel` — a richer weather reading.
+
+    Superset of :class:`ETStep`: it carries the same ``dt_h`` / ``temp_c`` /
+    ``rain_mm`` the integrator needs, plus the extra inputs the FAO-56
+    Penman-Monteith reference equation requires and *not every user has* — which
+    is exactly why Penman-Monteith is a higher tier than the temperature-only
+    :class:`ETModel`:
+
+    * ``rh_pct`` — relative humidity [%], for the vapour-pressure deficit
+    * ``wind_m_s`` — wind speed at 2 m [m/s] (``u2``)
+    * ``net_radiation_mj`` — net radiation [MJ/m²/day] (``Rn``); soil heat flux
+      ``G`` is taken as 0 for daily steps
+    """
+
+    dt_h: float
+    temp_c: float
+    rh_pct: float
+    wind_m_s: float
+    net_radiation_mj: float
+    rain_mm: float = 0.0
+
+
+@dataclass(frozen=True)
+class HargreavesStep:
+    """One integration step for :class:`HargreavesModel` — a temperature-range reading.
+
+    The middle tier: it needs only the daily temperature **range** (``tmax_c`` /
+    ``tmin_c``) plus the calendar ``day_of_year``, because its radiation term is
+    the *extraterrestrial* radiation computed from latitude and date (FAO-56
+    eq. 21) — no humidity, wind or radiation **sensor** required. Latitude is a
+    site constant held on the model, not on the step.
+
+    * ``tmax_c`` / ``tmin_c`` — daily max/min temperature [°C]
+    * ``day_of_year`` — 1..365/366, for the astronomical radiation
+    """
+
+    dt_h: float
+    tmax_c: float
+    tmin_c: float
+    day_of_year: int
+    rain_mm: float = 0.0
+
+
+@dataclass(frozen=True)
 class VWCReading:
     """One reading for a VWC model: the current volumetric water content.
 
@@ -174,7 +229,7 @@ class VWCReading:
 
 
 # Union of everything a model's :meth:`WaterBalanceModel.step` may accept.
-ModelInput = ETStep | VWCReading
+ModelInput = ETStep | HargreavesStep | PenmanStep | VWCReading
 
 
 # ── The abstract water-balance model (the "how much" seam) ──────────────────
@@ -236,36 +291,34 @@ class WaterBalanceModel(abc.ABC):
         return self.deficit
 
 
-# ── Strategy 1: ET water balance (temperature + rain, stateful) ─────────────
+# ── ET frame: shared forward-Euler integration, pluggable ET method ─────────
 
 
-class ETModel(WaterBalanceModel):
-    """Forward-Euler ET water balance: ``D += ET_h · Kc · Δt - rain``, clamped.
+class ETBalanceModel(WaterBalanceModel):
+    """Abstract ET-frame model: owns the integration, subclasses supply the ET rate.
 
-    The evapotranspiration demand is the same simplified linear estimate the
-    integration uses today (:func:`et_hourly`). ``Kc`` (the crop coefficient) is
-    a **Zone** attribute in the domain model, not a property of the physics: a
-    per-zone model instance is built with that zone's ``kc``, while the *system
-    reference* model uses ``kc = 1.0``. Each zone owns its own instance because
-    irrigation resets are per-zone and independent — a shared reference cannot be
-    scaled proportionally after the fact (reference model D1/D4).
+    All ET methods share the same water balance — forward-Euler
+    ``D += ET_h · Kc · Δt - rain``, clamped — and the same reference frame (the
+    deficit is relative to the shared weather feeds, so it is comparable across
+    zones). They differ **only** in how the hourly ET rate is computed, which is
+    the single abstract hook :meth:`et_rate`. This is the "ET tier" seam: a
+    temperature-only estimate (:class:`ETModel`) and the fuller FAO-56
+    Penman-Monteith (:class:`PenmanMonteithModel`) are two rates behind one
+    integrator, not two integrators.
+
+    ``Kc`` (the crop coefficient) is a **Zone** attribute in the domain model,
+    not a property of the physics: a per-zone instance is built with that zone's
+    ``kc``, while the *system reference* uses ``kc = 1.0``. Each zone owns its own
+    instance because irrigation resets are per-zone and independent — a shared
+    reference cannot be scaled proportionally after the fact (reference model
+    D1/D4).
     """
 
     is_stateful: ClassVar[bool] = True
 
-    def __init__(
-        self,
-        *,
-        alpha: float = DEFAULT_ALPHA,
-        t_base: float = DEFAULT_T_BASE,
-        kc: float = DEFAULT_KC,
-        d_max: float = DEFAULT_D_MAX,
-        initial_mm: float = 0.0,
-    ) -> None:
-        """Configure ET sensitivity ``alpha``, base temperature ``t_base`` and ``kc``."""
+    def __init__(self, *, kc: float = DEFAULT_KC, d_max: float = DEFAULT_D_MAX, initial_mm: float = 0.0) -> None:
+        """Configure the crop coefficient ``kc`` and the deficit clamp ``d_max``."""
         super().__init__(d_max=d_max, initial_mm=initial_mm)
-        self._alpha = alpha
-        self._t_base = t_base
         self._kc = kc
 
     @property
@@ -278,26 +331,201 @@ class ETModel(WaterBalanceModel):
         """The crop coefficient this instance integrates with (1.0 for the reference)."""
         return self._kc
 
-    @staticmethod
-    def et_hourly(temp_c: float, *, alpha: float = DEFAULT_ALPHA, t_base: float = DEFAULT_T_BASE) -> float:
-        """Instantaneous ET estimate [mm/h] — ``max(0, alpha · (T - T_base) / 24)``.
-
-        The single source of the ET formula today written twice (``ETSensor`` and
-        ``DrynessIndexSensor``); the abstraction unifies it here.
-        """
-        return max(0.0, alpha * (temp_c - t_base) / 24.0)
+    @abc.abstractmethod
+    def et_rate(self, inputs: ModelInput) -> float:
+        """Return the ET rate [mm/h] for this step (the only thing ET methods vary)."""
 
     def step(self, inputs: ModelInput) -> Deficit:
-        """Integrate one ``ETStep``: add ``ET_h · Kc · Δt``, subtract rain, clamp."""
-        if not isinstance(inputs, ETStep):
-            raise TypeError(f"ETModel.step expects ETStep, got {type(inputs).__name__}")
-        et_h = self.et_hourly(inputs.temp_c, alpha=self._alpha, t_base=self._t_base)
+        """Integrate one step: add ``ET_h · Kc · Δt``, subtract rain, clamp.
+
+        The concrete :meth:`et_rate` type-guards its own input DTO, so ``dt_h`` and
+        ``rain_mm`` are only read once the input is known to be the right shape.
+        """
+        et_h = self.et_rate(inputs)
         self._value_mm = _clamp(
             self._value_mm + et_h * self._kc * inputs.dt_h - inputs.rain_mm,
             0.0,
             self._d_max,
         )
         return self.deficit
+
+
+# ── Strategy 1a: simplified temperature-only ET (today's model) ─────────────
+
+
+class ETModel(ETBalanceModel):
+    """Simplified temperature-only ET — the linear estimate NeverDry uses today.
+
+    Needs a single input, temperature, which makes it the baseline tier: any user
+    with a weather/temperature sensor can run it. The demand is
+    :func:`et_hourly`, the same formula written twice today (``ETSensor`` and
+    ``DrynessIndexSensor``) that the abstraction unifies here.
+    """
+
+    def __init__(
+        self,
+        *,
+        alpha: float = DEFAULT_ALPHA,
+        t_base: float = DEFAULT_T_BASE,
+        kc: float = DEFAULT_KC,
+        d_max: float = DEFAULT_D_MAX,
+        initial_mm: float = 0.0,
+    ) -> None:
+        """Configure ET sensitivity ``alpha``, base temperature ``t_base`` and ``kc``."""
+        super().__init__(kc=kc, d_max=d_max, initial_mm=initial_mm)
+        self._alpha = alpha
+        self._t_base = t_base
+
+    @staticmethod
+    def et_hourly(temp_c: float, *, alpha: float = DEFAULT_ALPHA, t_base: float = DEFAULT_T_BASE) -> float:
+        """Instantaneous ET estimate [mm/h] — ``max(0, alpha · (T - T_base) / 24)``."""
+        return max(0.0, alpha * (temp_c - t_base) / 24.0)
+
+    def et_rate(self, inputs: ModelInput) -> float:
+        """The temperature-only ET rate [mm/h] from an :class:`ETStep`."""
+        if not isinstance(inputs, ETStep):
+            raise TypeError(f"ETModel.step expects ETStep, got {type(inputs).__name__}")
+        return self.et_hourly(inputs.temp_c, alpha=self._alpha, t_base=self._t_base)
+
+
+# ── Strategy 1b: FAO-56 Penman-Monteith ET (higher tier, more inputs) ───────
+
+
+class PenmanMonteithModel(ETBalanceModel):
+    """FAO-56 Penman-Monteith reference ET — the physically-grounded higher tier.
+
+    Same ET frame and same integrator as :class:`ETModel`; it only computes a
+    better ET rate, at the cost of inputs not every user has: relative humidity,
+    wind speed and net radiation (see :class:`PenmanStep`). This is the concrete
+    payoff of abstracting at the *output*: a setup can move from ``ETModel`` to
+    ``PenmanMonteithModel`` — or fall back — and the Zone still just reads a
+    :class:`Deficit`, unaware of which tier produced it.
+
+    The reference equation (FAO-56 eq. 6) yields ET₀ in mm/day; the integrator
+    works in mm/h, so the rate is ET₀/24. Soil heat flux ``G`` is taken as 0
+    (daily assumption).
+    """
+
+    def __init__(
+        self,
+        *,
+        kc: float = DEFAULT_KC,
+        pressure_kpa: float = DEFAULT_PRESSURE_KPA,
+        d_max: float = DEFAULT_D_MAX,
+        initial_mm: float = 0.0,
+    ) -> None:
+        """Configure ``kc`` and site atmospheric ``pressure_kpa`` (altitude-dependent)."""
+        super().__init__(kc=kc, d_max=d_max, initial_mm=initial_mm)
+        self._pressure_kpa = pressure_kpa
+
+    @staticmethod
+    def _saturation_vapour_pressure(temp_c: float) -> float:
+        """Saturation vapour pressure e°(T) [kPa] — FAO-56 eq. 11."""
+        return 0.6108 * math.exp(17.27 * temp_c / (temp_c + 237.3))
+
+    @classmethod
+    def et0_daily(
+        cls,
+        *,
+        temp_c: float,
+        rh_pct: float,
+        wind_m_s: float,
+        net_radiation_mj: float,
+        pressure_kpa: float = DEFAULT_PRESSURE_KPA,
+    ) -> float:
+        """FAO-56 Penman-Monteith reference ET₀ [mm/day] (eq. 6, ``G = 0``)."""
+        es = cls._saturation_vapour_pressure(temp_c)
+        ea = es * max(0.0, min(rh_pct, 100.0)) / 100.0
+        vpd = es - ea
+        # Slope of the saturation vapour-pressure curve Δ [kPa/°C] — FAO-56 eq. 13.
+        delta = 4098.0 * es / (temp_c + 237.3) ** 2
+        # Psychrometric constant gamma [kPa/°C] — FAO-56 eq. 8.
+        gamma = 0.000665 * pressure_kpa
+        numerator = 0.408 * delta * net_radiation_mj + gamma * (900.0 / (temp_c + 273.0)) * wind_m_s * vpd
+        denominator = delta + gamma * (1.0 + 0.34 * wind_m_s)
+        return max(0.0, numerator / denominator)
+
+    def et_rate(self, inputs: ModelInput) -> float:
+        """The Penman-Monteith ET rate [mm/h] from a :class:`PenmanStep` (ET₀/24)."""
+        if not isinstance(inputs, PenmanStep):
+            raise TypeError(f"PenmanMonteithModel.step expects PenmanStep, got {type(inputs).__name__}")
+        et0 = self.et0_daily(
+            temp_c=inputs.temp_c,
+            rh_pct=inputs.rh_pct,
+            wind_m_s=inputs.wind_m_s,
+            net_radiation_mj=inputs.net_radiation_mj,
+            pressure_kpa=self._pressure_kpa,
+        )
+        return et0 / 24.0
+
+
+# ── Strategy 1c: Hargreaves-Samani ET (middle tier, computed radiation) ─────
+
+
+class HargreavesModel(ETBalanceModel):
+    """FAO-56 Hargreaves-Samani ET — the middle tier between temperature-only and Penman.
+
+    Physically better than :class:`ETModel` (it captures the diurnal temperature
+    range and the seasonal/latitude radiation cycle) yet needs **no extra
+    sensor**: its radiation term is the *extraterrestrial* radiation ``Ra``,
+    computed purely from latitude and day-of-year (FAO-56 eq. 21). So the only
+    inputs are daily max/min temperature and the date — the sweet spot for users
+    who have a temperature sensor but no humidity/wind/radiation gear.
+
+    ``ET0 = 0.0023 · (Tmean + 17.8) · sqrt(Tmax - Tmin) · Ra_mm`` [mm/day], with
+    ``Tmean = (Tmax + Tmin) / 2`` and ``Ra_mm`` the extraterrestrial radiation
+    expressed in mm/day. Latitude is a site constant on the model; the date rides
+    on each :class:`HargreavesStep`. The rate is ET0/24 for the hourly integrator.
+    """
+
+    def __init__(
+        self,
+        *,
+        latitude_deg: float,
+        kc: float = DEFAULT_KC,
+        d_max: float = DEFAULT_D_MAX,
+        initial_mm: float = 0.0,
+    ) -> None:
+        """Configure the site ``latitude_deg`` (drives the astronomical radiation) and ``kc``."""
+        super().__init__(kc=kc, d_max=d_max, initial_mm=initial_mm)
+        self._latitude_deg = latitude_deg
+
+    @staticmethod
+    def extraterrestrial_radiation(day_of_year: int, latitude_deg: float) -> float:
+        """Extraterrestrial radiation Ra [MJ/m²/day] — FAO-56 eq. 21 (no sensor needed)."""
+        phi = math.radians(latitude_deg)
+        # Inverse relative Earth-Sun distance (eq. 23) and solar declination (eq. 24).
+        dr = 1.0 + 0.033 * math.cos(2.0 * math.pi / 365.0 * day_of_year)
+        decl = 0.409 * math.sin(2.0 * math.pi / 365.0 * day_of_year - 1.39)
+        # Sunset hour angle (eq. 25), guarded for polar day/night.
+        cos_ws = -math.tan(phi) * math.tan(decl)
+        ws = math.acos(max(-1.0, min(1.0, cos_ws)))
+        return (
+            (24.0 * 60.0 / math.pi)
+            * _SOLAR_CONSTANT_MJ_MIN
+            * dr
+            * (ws * math.sin(phi) * math.sin(decl) + math.cos(phi) * math.cos(decl) * math.sin(ws))
+        )
+
+    @classmethod
+    def et0_daily(cls, *, tmax_c: float, tmin_c: float, day_of_year: int, latitude_deg: float) -> float:
+        """FAO-56 Hargreaves-Samani reference ET₀ [mm/day]."""
+        tmean = (tmax_c + tmin_c) / 2.0
+        trange = max(0.0, tmax_c - tmin_c)
+        ra_mm = _MJ_TO_MM_EVAP * cls.extraterrestrial_radiation(day_of_year, latitude_deg)
+        return max(0.0, 0.0023 * (tmean + 17.8) * math.sqrt(trange) * ra_mm)
+
+    def et_rate(self, inputs: ModelInput) -> float:
+        """The Hargreaves ET rate [mm/h] from a :class:`HargreavesStep` (ET₀/24)."""
+        if not isinstance(inputs, HargreavesStep):
+            raise TypeError(f"HargreavesModel.step expects HargreavesStep, got {type(inputs).__name__}")
+        et0 = self.et0_daily(
+            tmax_c=inputs.tmax_c,
+            tmin_c=inputs.tmin_c,
+            day_of_year=inputs.day_of_year,
+            latitude_deg=self._latitude_deg,
+        )
+        return et0 / 24.0
 
 
 # ── Strategy 2: VWC from a system probe (stateless measurement) ─────────────
