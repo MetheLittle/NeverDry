@@ -1,7 +1,7 @@
 # Design — Domain Object Model
 
 **Status:** Draft
-**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model)
+**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object)
 **Related:** GH #74 (actuator abstraction discussion), GH #94 (`valve.*` support), GH #95 (master valve/pump), [Water-Balance Reference Model](design_water_balance_reference_model.md) (where the deficit lives), [Domain Model Anomalies](design_domain_model_anomalies.md) (code-verified audit against this model)
 
 ## Purpose
@@ -25,6 +25,42 @@ as the codebase evolves. For the current module/data-flow architecture see
 ZoneDriver and MasterDriver are two specializations of a common **Driver** base, which owns
 what they share: the entity adapter, ON/OFF command with state confirmation, adaptive
 latency/timeout, and the safety layers (watchdog, close on error/stop/restart).
+
+## The water-balance model (the *how much*)
+
+Where the **Driver** abstracts the *how* of actuation, the **WaterBalanceModel** abstracts the
+*how much*: the scientific computation of a zone's water demand. It is the object that turns
+whatever inputs a user's setup provides into a **Deficit**. It has two symmetries with the
+Driver side, and modeling it explicitly buys the same thing the Driver did:
+
+| Sensing side (*how much*) | Actuation side (*how*) |
+|---|---|
+| **WaterBalanceModel** (abstract strategy) | **Driver** (abstract) |
+| ↳ `ETModel`, `VWCSystemModel`, `VWCPerZoneModel` | ↳ `ZoneDriver`, `MasterDriver` |
+| **Deficit** (mm + reference frame) — the value returned | **DeliveryResult** (liters + quality) — the value returned |
+
+- **WaterBalanceModel** — a strategy that produces a `Deficit`. Its three concretes mirror the
+  reference frames of the [Water-Balance Reference Model](design_water_balance_reference_model.md):
+  `ETModel` (temperature + rain, stateful forward-Euler integration), `VWCSystemModel` (one
+  system moisture probe, stateless), `VWCPerZoneModel` (a per-zone probe — the AI-174 target).
+- **Deficit** — the value object every model returns: millimetres **plus the reference frame**
+  they are defined against. A bare number is not enough — the reference model's load-bearing rule
+  is that *two deficits are comparable only within one frame*, so the frame (and, for per-zone
+  probes, the source identity) travels with the value.
+
+**The seam is the output, not the input.** The three models share no inputs — ET needs weather,
+VWC needs a probe, and not every user has a soil-moisture sensor. What they share is the
+**output**: every model yields a `Deficit` in mm. This is precisely why plug-and-play works at
+the output and not the input: each model copes with the sensors it has and exposes the same
+quantity, so a setup can switch models (or fall back ET ⇄ VWC) without the Zone knowing which
+one ran. This also unifies the ET formula that today lives in two places (`ETSensor` and
+`DrynessIndexSensor`) into a single `ETModel.et_hourly`.
+
+Ownership follows the reference model unchanged: the **System** owns the shared feeds/probe, the
+**Zone** owns its `Deficit` and its `Kc`. The model is the *mechanism* the Zone uses to advance
+that deficit; `Kc` is passed into a per-zone `ETModel` instance (the system reference uses
+`Kc = 1.0`), because per-zone irrigation resets are independent and a shared reference cannot be
+scaled proportionally after the fact.
 
 ## Translation chain
 
@@ -112,10 +148,49 @@ classDiagram
         +revise(measured_liters)
     }
 
+    class WaterBalanceModel {
+        <<abstract>>
+        +reference_frame : ReferenceFrame
+        +is_stateful : bool
+        +deficit : Deficit
+        +step(inputs) Deficit
+        +apply_irrigation(mm) Deficit
+        +reset() Deficit
+    }
+
+    class ETModel {
+        +alpha, t_base, kc
+        +et_hourly(temp_c) mm/h
+        +step(ETStep) Deficit
+    }
+
+    class VWCSystemModel {
+        +field_capacity, root_depth
+        +step(VWCReading) Deficit
+    }
+
+    class VWCPerZoneModel {
+        +source : probe/zone id
+    }
+
+    class Deficit {
+        +value_mm
+        +frame : ReferenceFrame
+        +source : per-zone identity
+        +is_comparable_to(other) bool
+        +as_liters(area_m2) liters
+    }
+
     Driver <|-- ZoneDriver
     Driver <|-- MasterDriver
+    WaterBalanceModel <|-- ETModel
+    WaterBalanceModel <|-- VWCSystemModel
+    VWCSystemModel <|-- VWCPerZoneModel
     System "1" o-- "*" Zone : feeds ET+rain to
     System "1" o-- "0..1" MasterDriver : declares
+    Zone "1" --> "1" WaterBalanceModel : advances deficit via
+    WaterBalanceModel ..> Deficit : returns
+    Zone ..> Deficit : holds, settles
     Zone "1" --> "1" ZoneDriver : requests liters
     ZoneDriver ..> DeliveryResult : returns
     Zone ..> DeliveryResult : settles deficit with
@@ -236,8 +311,14 @@ about a dead valve *before* the next scheduled run, not from a failed one.
 | System | ✅ explicit: config entry globals, `ETSensor`, `DrynessIndexSensor` — now the **feed hub / broadcaster** (temperature + rain → `et_h`, `rain_delta` → zones). Its `_deficit` accumulator is being **retired as ET state** and survives only as the interim VWC-system value (Water-Balance Reference Model, D2/D5) |
 | Zone | ✅ explicit: `IrrigationZoneSensor`, per-zone config (Kc, area, sun exposure). `_zone_deficit` is **authoritative**; a new zone **starts at 0** (D4), not seeded from the global. Cycle & soak: not implemented |
 | Scheduler | ⚠️ implicit and minimal: deficit-triggered daily cycle inside `IrrigationController`; no cron/sequences/calendars (deliberately — that is Irrigation Unlimited's territory). Concurrency is de-facto serial, not an explicit policy |
-| ZoneDriver | ⚠️ exists but internal: `ValveOperator` (FSM, safety layers, latency tracker) + valve/switch adapter (GH #74/#94); native volume delivery in progress. Delivered liters returned as a bare float — no DeliveryResult qualifier yet |
-| MasterDriver | ❌ not implemented (GH #95) |
+| ZoneDriver | ⚠️ exists but internal: `ValveOperator` (FSM, safety layers, latency tracker) + valve/switch adapter (GH #74/#94); native volume delivery in progress. Delivered liters returned as a bare float — no DeliveryResult qualifier yet. **Scaffold extracted**: `actuator.py` (`Actuator`/`ZoneActuator`/`MasterActuator`), inert until wired |
+| MasterDriver | ❌ not implemented (GH #95); its scaffold lives in `actuator.py` (`MasterActuator`) |
+| WaterBalanceModel | ⚠️ implicit today: the ET/VWC fork inside `DrynessIndexSensor._on_sensor_change` + the per-zone loop, with the ET formula duplicated in `ETSensor`. **Scaffold extracted**: `water_balance_model.py` (`WaterBalanceModel` + `ETModel`/`VWCSystemModel`/`VWCPerZoneModel`), pure, inert until wired |
+| Deficit | ❌ today a bare `float` (`_zone_deficit`, `DrynessIndexSensor._deficit`) with the frame left implicit. **Scaffold extracted**: `Deficit` value object in `water_balance_model.py` |
 
-The refactoring direction is to make the Driver base explicit when implementing GH #95, so
-MasterDriver inherits the existing safety layers rather than reimplementing them.
+The refactoring direction is symmetric on both axes: make the **Driver** base explicit when
+implementing GH #95 (so `MasterActuator` inherits the safety layers rather than reimplementing
+them), and make the **WaterBalanceModel** explicit so the ET/VWC switch becomes polymorphic
+dispatch over a shared `Deficit` output instead of an `if self._vwc_sensor:` fork with a
+duplicated ET formula. Both scaffolds already exist as pure/self-contained modules; the
+remaining phase is wiring the existing call sites onto them.
