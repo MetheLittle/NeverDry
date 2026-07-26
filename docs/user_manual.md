@@ -191,6 +191,8 @@ The Kc values are interpolated linearly between seasons. The hemisphere is auto-
 
 After each zone, you are asked whether to add another zone or complete setup. You can add as many zones as you need.
 
+> **A zone added later starts at zero deficit.** A brand-new zone begins as if freshly watered and builds its deficit up from there as the weather dries it out — it does not copy the current deficit of your existing zones. This is intentional: it avoids a new zone spuriously reporting "irrigation due" the moment you add it. If you *want* all your zones to share the same starting point, click **"Mark irrigated"** on each zone — this resets a zone's deficit to zero without opening the valve, aligning them all.
+
 ### Step 4: Verify
 
 After setup, check that these entities exist in **Settings → Devices & Services → Entities**:
@@ -244,6 +246,33 @@ Shows the volume of water needed for this specific zone in liters.
 | `flow_rate_lpm` | Valve flow rate |
 | `threshold_mm` | Mode A trigger threshold |
 | `irrigating` | `true` if this zone is currently being irrigated |
+
+### Water totals: Rain Yearly and Irrigated Yearly
+
+Each zone reports two yearly totals in **liters**, kept as two clean, separate
+figures rather than one mixed number:
+
+- **Rain Yearly [L]** — the rain this zone received this year. Rain is a system
+  quantity measured once in millimeters, then projected onto each zone by its
+  area: `Rain Yearly [L] = accumulated rain [mm] × zone area [m²]` (1 mm over
+  1 m² = 1 liter).
+- **Irrigated Yearly [L]** — the water **you** delivered by irrigation this year
+  (irrigation only, rain excluded). This is the meaningful *consumption* figure
+  and feeds the Home Assistant Energy dashboard's water tracking. To get the
+  grand total of water the zone received, add the two.
+
+**How the accumulation works.** The rain millimeters are accumulated by NeverDry
+from your configured rain sensor as rain falls, and the total **resets on 1
+January** (calendar-year accumulation). Because NeverDry can only count rain from
+the moment it is installed, the **first year is partial**: it accumulates from
+the installation date up to 31 December, and only from the following 1 January
+onward does it cover a full calendar year. Irrigation is counted the same way —
+per calendar year — so a freshly installed system starts both totals building
+up from the install date.
+
+If you want these totals to reflect rain that fell *before* NeverDry was
+installed, that historical rain cannot be reconstructed from a live sensor; the
+totals are only guaranteed correct from the install date forward.
 
 ## 7. Irrigation logic — how it all works
 
@@ -317,7 +346,9 @@ This diagram shows the complete irrigation decision flow, from weather data to v
 │  last_volume_delivered = measured    │
 │  last_irrigation_source = button /   │
 │    scheduled / reactive / manual     │
-│  deficit: full reset OR -mm × η      │
+│  deficit: -delivered mm × η          │
+│  (zeroed only if target fully met;   │
+│   full reset only by mark_irrigated) │
 │  fire never_dry_irrigation_complete  │
 │  (event source = same string as      │
 │   last_irrigation_source)            │
@@ -363,7 +394,7 @@ What happens:
    - `is_irrigating` flips back to `False`.
    - `last_irrigated` is stamped with the current time.
    - `last_irrigation_source` is set to `"manual"`.
-   - The deficit is reduced by the delivered volume. With a flow meter the reduction is exact; without one (or with a zero reading) the deficit is fully reset.
+   - The deficit is reduced by the delivered volume. With a flow meter the reduction is exact; without one (or with a zero reading) the volume is estimated as `flow_rate × elapsed time`. The deficit is never fully reset by closing the valve — only **Mark irrigated** does that. If the zone has neither a flow meter nor a `flow_rate`, the deficit is left unchanged and a warning is logged.
    - `last_volume_delivered` is updated and `never_dry_irrigation_complete` is fired on the HA event bus with `source: manual`.
 
 > **No deficit → manual open still works.** If you open the valve when the zone has no deficit, NeverDry still tracks the session and updates `last_irrigated`; the deficit just cannot go below zero. The monitor falls back to the safety timeout because there is no volume target to aim for.
@@ -402,7 +433,7 @@ Its purpose is to keep NeverDry from over-watering on top of irrigation it has n
 | **On open** | Detected via switch state change. `is_irrigating=True`, flow meter baseline saved, auto-close monitor started. | NeverDry commands `switch.turn_on` via ValveOperator. FSM verifies the open. `is_irrigating=True`. | Nothing — no valve is opened. |
 | **During delivery** | Monitor polls the flow meter (or sleeps for the estimated duration) tracking how much water has flowed. | `_deliver_water` runs the chosen delivery mode (`estimated_flow`, `flow_meter`, `volume_preset`). | Nothing. |
 | **On close** | Whichever of (volume target reached, estimated duration elapsed, safety timeout) fires first → NeverDry calls `switch.turn_off`. The user can also close manually at any time. | Target reached, user pressed Stop, or `delivery_timeout` fires → NeverDry calls `switch.turn_off`. | Nothing. |
-| **After close** | `is_irrigating=False`, `last_irrigated=now`, `last_irrigation_source="manual"`, deficit adjusted by measured volume (or fully reset without measurement), `never_dry_irrigation_complete` event fired with `source: "manual"`. | `is_irrigating=False`, `last_irrigated=now`, `last_irrigation_source` and the event `source` both set to `"button"`/`"reactive"`/`"scheduled"` depending on the trigger, deficit reset (full delivery) or reduced (partial). | Deficit reset to zero, `last_irrigated=now`, `last_irrigation_source="mark_irrigated"`. No event. |
+| **After close** | `is_irrigating=False`, `last_irrigated=now`, `last_irrigation_source="manual"`, deficit reduced by the measured volume (or by the `flow_rate × elapsed` estimate without a meter; never fully reset), `never_dry_irrigation_complete` event fired with `source: "manual"`. | `is_irrigating=False`, `last_irrigated=now`, `last_irrigation_source` and the event `source` both set to `"button"`/`"reactive"`/`"scheduled"` depending on the trigger, deficit reset (full delivery) or reduced (partial). | Deficit reset to zero, `last_irrigated=now`, `last_irrigation_source="mark_irrigated"`. No event. |
 
 ### 7.3 Why the auto-close on manual open?
 
@@ -627,7 +658,7 @@ The card groups the zone's entities by time horizon:
 - **Deficit vs threshold** — a bar showing how close the zone is to needing water
 - **Next session** — planned volume and run duration
 - **Last session** — last irrigated, duration, volume, and water delivered
-- **Totals** — yearly water and cumulative rain
+- **Totals** — Rain Yearly and Irrigated Yearly (liters, per zone)
 - **Parameters** — threshold, flow rate, area, Kc, efficiency, mode
 - **Actions** — *Irrigate now*, *Mark as irrigated*, and *Reset valve* as real buttons
 

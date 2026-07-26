@@ -30,6 +30,10 @@ class TestDeficitAccumulation:
     def test_rain_reduces_deficit(self, di_sensor, hass_mock, make_state):
         """Rain should reduce accumulated deficit."""
         di_sensor._deficit = 5.0
+        # Known rain baseline (post-restore steady state): the first tick
+        # after boot fixes the baseline without crediting (2026-07-17 fix).
+        di_sensor._last_rain = 0.0
+        di_sensor._last_rain_event_ts = datetime(2020, 1, 1)
 
         hass_mock.states.get.side_effect = lambda eid: {
             "sensor.temperature": make_state(9.0),  # T=T_base → ET=0
@@ -44,6 +48,10 @@ class TestDeficitAccumulation:
     def test_deficit_never_negative(self, di_sensor, hass_mock, make_state):
         """Deficit is clipped to zero (no negative values)."""
         di_sensor._deficit = 1.0
+        # Known rain baseline (post-restore steady state): the first tick
+        # after boot fixes the baseline without crediting (2026-07-17 fix).
+        di_sensor._last_rain = 0.0
+        di_sensor._last_rain_event_ts = datetime(2020, 1, 1)
 
         hass_mock.states.get.side_effect = lambda eid: {
             "sensor.temperature": make_state(9.0),
@@ -272,6 +280,10 @@ class TestRainDelta:
     def test_event_mode_first_rain(self, di_sensor, hass_mock, make_state):
         """First rain event should reduce deficit by the event amount."""
         di_sensor._deficit = 10.0
+        # Known rain baseline (post-restore steady state): the first tick
+        # after boot fixes the baseline without crediting (2026-07-17 fix).
+        di_sensor._last_rain = 0.0
+        di_sensor._last_rain_event_ts = datetime(2020, 1, 1)
         hass_mock.states.get.side_effect = lambda eid: {
             "sensor.temperature": make_state(9.0),  # T=T_base → ET=0
             "sensor.rain": make_state(2.0),
@@ -314,6 +326,10 @@ class TestRainDelta:
         the deficit twice (regression for the value-equality dedup bug).
         """
         di_sensor._deficit = 10.0
+        # Known rain baseline (post-restore steady state): the first tick
+        # after boot fixes the baseline without crediting (2026-07-17 fix).
+        di_sensor._last_rain = 0.0
+        di_sensor._last_rain_event_ts = datetime(2020, 1, 1)
 
         def make_rain(ts):
             s = make_state(2.0)
@@ -337,6 +353,10 @@ class TestRainDelta:
     def test_event_mode_new_event(self, di_sensor, hass_mock, make_state):
         """New rain event with different value should subtract."""
         di_sensor._deficit = 10.0
+        # Known rain baseline (post-restore steady state): the first tick
+        # after boot fixes the baseline without crediting (2026-07-17 fix).
+        di_sensor._last_rain = 0.0
+        di_sensor._last_rain_event_ts = datetime(2020, 1, 1)
 
         # First event: 2mm
         hass_mock.states.get.side_effect = lambda eid: {
@@ -373,6 +393,10 @@ class TestRainDelta:
         }
         sensor = DrynessIndexSensor(hass_mock, config)
         sensor._deficit = 10.0
+        # Known rain baseline (post-restore steady state): the first tick
+        # after boot fixes the baseline without crediting (2026-07-17 fix).
+        sensor._last_rain = 0.0
+        sensor._last_rain_event_ts = datetime(2020, 1, 1)
 
         # Rain total goes from 0 to 3mm
         hass_mock.states.get.side_effect = lambda eid: {
@@ -393,7 +417,11 @@ class TestRainDelta:
         assert sensor._deficit == pytest.approx(5.0, abs=0.01)
 
     def test_daily_total_mode_midnight_reset(self, hass_mock, make_state):
-        """Daily total sensor resets at midnight — handle gracefully."""
+        """Daily total sensor resets at midnight — the drop credits nothing.
+
+        The day's rain was already credited as the counter climbed; the
+        reset itself is not new precipitation, so the deficit is unchanged.
+        """
         from never_dry.const import (
             CONF_RAIN_SENSOR,
             CONF_RAIN_SENSOR_TYPE,
@@ -411,7 +439,7 @@ class TestRainDelta:
         sensor._deficit = 10.0
         sensor._last_rain = 8.0  # accumulated 8mm yesterday
 
-        # Midnight reset: sensor drops to 1.0 (new day, 1mm rain)
+        # Midnight reset: sensor drops to 1.0 (new day)
         hass_mock.states.get.side_effect = lambda eid: {
             "sensor.temperature": make_state(9.0),
             "sensor.rain": make_state(1.0),
@@ -419,12 +447,17 @@ class TestRainDelta:
         sensor._last_update = datetime.now() - timedelta(seconds=1)
         sensor._on_sensor_change(MagicMock())
 
-        # Should treat 1.0 as new rain (not -7.0 delta)
-        assert sensor._deficit == pytest.approx(9.0, abs=0.01)
+        # A drop is never rain: deficit unchanged, baseline rebased to 1.0.
+        assert sensor._deficit == pytest.approx(10.0, abs=0.01)
+        assert sensor._last_rain == pytest.approx(1.0)
 
     def test_rain_zeroes_deficit(self, di_sensor, hass_mock, make_state):
         """Heavy rain should zero out the deficit (never goes negative)."""
         di_sensor._deficit = 3.0
+        # Known rain baseline (post-restore steady state): the first tick
+        # after boot fixes the baseline without crediting (2026-07-17 fix).
+        di_sensor._last_rain = 0.0
+        di_sensor._last_rain_event_ts = datetime(2020, 1, 1)
         hass_mock.states.get.side_effect = lambda eid: {
             "sensor.temperature": make_state(9.0),
             "sensor.rain": make_state(20.0),
@@ -440,6 +473,10 @@ class TestRainUnits:
     def test_rain_inches_converted_to_mm(self, di_sensor, hass_mock, make_state):
         """1 inch of rain must reduce the deficit by 25.4 mm."""
         di_sensor._deficit = 30.0
+        # Known rain baseline (post-restore steady state): the first tick
+        # after boot fixes the baseline without crediting (2026-07-17 fix).
+        di_sensor._last_rain = 0.0
+        di_sensor._last_rain_event_ts = datetime(2020, 1, 1)
         hass_mock.states.get.side_effect = lambda eid: {
             "sensor.temperature": make_state(9.0),  # ET = 0
             "sensor.rain": make_state(1.0, unit="in"),
@@ -451,6 +488,10 @@ class TestRainUnits:
     def test_rain_mm_not_converted(self, di_sensor, hass_mock, make_state):
         """Rain in mm must not be multiplied by the inches factor."""
         di_sensor._deficit = 10.0
+        # Known rain baseline (post-restore steady state): the first tick
+        # after boot fixes the baseline without crediting (2026-07-17 fix).
+        di_sensor._last_rain = 0.0
+        di_sensor._last_rain_event_ts = datetime(2020, 1, 1)
         hass_mock.states.get.side_effect = lambda eid: {
             "sensor.temperature": make_state(9.0),
             "sensor.rain": make_state(5.0, unit="mm"),
@@ -462,6 +503,10 @@ class TestRainUnits:
     def test_rain_no_unit_treated_as_mm(self, di_sensor, hass_mock, make_state):
         """Rain sensor without unit_of_measurement is treated as mm (backward compat)."""
         di_sensor._deficit = 8.0
+        # Known rain baseline (post-restore steady state): the first tick
+        # after boot fixes the baseline without crediting (2026-07-17 fix).
+        di_sensor._last_rain = 0.0
+        di_sensor._last_rain_event_ts = datetime(2020, 1, 1)
         hass_mock.states.get.side_effect = lambda eid: {
             "sensor.temperature": make_state(9.0),
             "sensor.rain": make_state(3.0),  # no unit
@@ -473,6 +518,10 @@ class TestRainUnits:
     def test_half_inch_rain_converts_correctly(self, di_sensor, hass_mock, make_state):
         """0.5 in rain == 12.7 mm."""
         di_sensor._deficit = 20.0
+        # Known rain baseline (post-restore steady state): the first tick
+        # after boot fixes the baseline without crediting (2026-07-17 fix).
+        di_sensor._last_rain = 0.0
+        di_sensor._last_rain_event_ts = datetime(2020, 1, 1)
         hass_mock.states.get.side_effect = lambda eid: {
             "sensor.temperature": make_state(9.0),
             "sensor.rain": make_state(0.5, unit="in"),
@@ -518,3 +567,335 @@ class TestTemperatureUnitsEndToEnd:
         di._last_update = datetime.now() - timedelta(hours=1)
         di._on_sensor_change(MagicMock())
         assert di._deficit == pytest.approx(5.0, abs=0.01)
+
+
+class TestRainBaselineAcrossRestart:
+    """The rain baseline must survive restarts (field bug 2026-07-17).
+
+    _last_rain started at 0.0 on every boot, so a cumulative/24h rain
+    sensor reading was re-credited in full at the first tick after
+    restart — 14.2 mm of rain wiped every zone deficit on reboot.
+    """
+
+    def _daily_sensor(self, hass_mock):
+        from never_dry.const import (
+            CONF_RAIN_SENSOR,
+            CONF_RAIN_SENSOR_TYPE,
+            CONF_TEMP_SENSOR,
+            RAIN_TYPE_DAILY_TOTAL,
+        )
+        from never_dry.sensor import DrynessIndexSensor
+
+        return DrynessIndexSensor(
+            hass_mock,
+            {
+                CONF_TEMP_SENSOR: "sensor.temperature",
+                CONF_RAIN_SENSOR: "sensor.rain",
+                CONF_RAIN_SENSOR_TYPE: RAIN_TYPE_DAILY_TOTAL,
+            },
+        )
+
+    def test_first_reading_after_boot_fixes_baseline_without_credit(self, hass_mock, make_state):
+        """The exact field scenario: 14.2 mm of 24h rain at boot must NOT
+        be credited — it predates this boot."""
+        sensor = self._daily_sensor(hass_mock)
+        sensor._deficit = 10.0
+        hass_mock.states.get.side_effect = lambda eid: {
+            "sensor.temperature": make_state(9.0),
+            "sensor.rain": make_state(14.2),
+        }[eid]
+        sensor._last_update = datetime.now() - timedelta(seconds=1)
+        sensor._on_sensor_change(MagicMock())
+
+        assert sensor._deficit == pytest.approx(10.0, abs=0.01)
+        assert sensor._last_rain == pytest.approx(14.2)
+
+        # New rain AFTER the baseline fix is credited normally.
+        hass_mock.states.get.side_effect = lambda eid: {
+            "sensor.temperature": make_state(9.0),
+            "sensor.rain": make_state(17.2),
+        }[eid]
+        sensor._last_update = datetime.now() - timedelta(seconds=1)
+        sensor._on_sensor_change(MagicMock())
+        assert sensor._deficit == pytest.approx(7.0, abs=0.01)
+
+    def test_restored_baseline_credits_downtime_rain(self, hass_mock, make_state):
+        """With a restored baseline, rain fallen while HA was down IS credited."""
+        sensor = self._daily_sensor(hass_mock)
+        sensor._deficit = 10.0
+        sensor._last_rain = 10.0  # restored from rain_baseline_mm
+        hass_mock.states.get.side_effect = lambda eid: {
+            "sensor.temperature": make_state(9.0),
+            "sensor.rain": make_state(14.2),
+        }[eid]
+        sensor._last_update = datetime.now() - timedelta(seconds=1)
+        sensor._on_sensor_change(MagicMock())
+        assert sensor._deficit == pytest.approx(10.0 - 4.2, abs=0.01)
+
+    def test_event_sensor_restored_event_not_recredited(self, hass_mock, make_state):
+        """Event mode: the state present at boot is the restore of an event
+        already counted before the restart — no re-credit."""
+        from never_dry.const import CONF_RAIN_SENSOR, CONF_TEMP_SENSOR
+        from never_dry.sensor import DrynessIndexSensor
+
+        sensor = DrynessIndexSensor(
+            hass_mock,
+            {CONF_TEMP_SENSOR: "sensor.temperature", CONF_RAIN_SENSOR: "sensor.rain"},
+        )
+        sensor._deficit = 10.0
+        rain_state = make_state(2.0)
+        rain_state.last_updated = datetime(2026, 6, 1, 12, 0, 0)
+        hass_mock.states.get.side_effect = lambda eid: rain_state if eid == "sensor.rain" else make_state(9.0)
+        sensor._last_update = datetime.now() - timedelta(seconds=1)
+        sensor._on_sensor_change(MagicMock())
+        assert sensor._deficit == pytest.approx(10.0, abs=0.01)
+
+        # A genuinely NEW event (fresh timestamp) is credited.
+        rain2 = make_state(2.0)
+        rain2.last_updated = datetime(2026, 6, 1, 12, 5, 0)
+        hass_mock.states.get.side_effect = lambda eid: rain2 if eid == "sensor.rain" else make_state(9.0)
+        sensor._last_update = datetime.now() - timedelta(seconds=1)
+        sensor._on_sensor_change(MagicMock())
+        assert sensor._deficit == pytest.approx(8.0, abs=0.01)
+
+    def test_rain_baseline_exposed_in_attributes(self, hass_mock, make_state):
+        """The baseline is persisted through extra_state_attributes."""
+        sensor = self._daily_sensor(hass_mock)
+        assert "rain_baseline_mm" not in sensor.extra_state_attributes
+        sensor._last_rain = 14.2
+        assert sensor.extra_state_attributes["rain_baseline_mm"] == pytest.approx(14.2)
+
+
+class TestRollingWindowRainSensor:
+    """A rolling accumulation sensor (e.g. '24h rain') ages out old rain.
+
+    Field bug 2026-07-18: at 05:00 with clear skies the sensor dropped
+    14.2 → 13.2 mm as yesterday's rain left the 24h window. The drop was
+    read as a midnight rollover and the whole residual (13.2 mm) was
+    credited as fresh rain, wiping every zone deficit. The intake now
+    credits only positive increments, so any drop credits nothing.
+    """
+
+    def _daily_sensor(self, hass_mock):
+        from never_dry.const import (
+            CONF_RAIN_SENSOR,
+            CONF_RAIN_SENSOR_TYPE,
+            CONF_TEMP_SENSOR,
+            RAIN_TYPE_DAILY_TOTAL,
+        )
+        from never_dry.sensor import DrynessIndexSensor
+
+        return DrynessIndexSensor(
+            hass_mock,
+            {
+                CONF_TEMP_SENSOR: "sensor.temperature",
+                CONF_RAIN_SENSOR: "sensor.rain",
+                CONF_RAIN_SENSOR_TYPE: RAIN_TYPE_DAILY_TOTAL,
+            },
+        )
+
+    def _tick(self, sensor, hass_mock, make_state, rain_value):
+        hass_mock.states.get.side_effect = lambda eid: {
+            "sensor.temperature": make_state(9.0),  # T == T_base → ET = 0
+            "sensor.rain": make_state(rain_value),
+        }[eid]
+        sensor._last_update = datetime.now() - timedelta(seconds=1)
+        sensor._on_sensor_change(MagicMock())
+
+    def test_window_ageing_drop_credits_nothing(self, hass_mock, make_state):
+        """The exact field scenario: 14.2 → 13.2 must credit 0 mm."""
+        sensor = self._daily_sensor(hass_mock)
+        sensor._deficit = 54.25
+        sensor._last_rain = 14.2
+
+        self._tick(sensor, hass_mock, make_state, 13.2)
+
+        assert sensor._deficit == pytest.approx(54.25, abs=0.01)
+        # Baseline follows the reading so later drops credit nothing either.
+        assert sensor._last_rain == pytest.approx(13.2)
+
+    def test_gradual_window_decay_credits_nothing(self, hass_mock, make_state):
+        """Step-by-step ageing (13.2 → 10.0 → 4.0 → 1.5) credits nothing."""
+        sensor = self._daily_sensor(hass_mock)
+        sensor._deficit = 20.0
+        sensor._last_rain = 13.2
+
+        for reading in (10.0, 4.0, 1.5):
+            self._tick(sensor, hass_mock, make_state, reading)
+
+        assert sensor._deficit == pytest.approx(20.0, abs=0.01)
+        assert sensor._last_rain == pytest.approx(1.5)
+
+    def test_decay_to_zero_credits_nothing(self, hass_mock, make_state):
+        """Window fully drained (13.2 → 0.0) credits nothing."""
+        sensor = self._daily_sensor(hass_mock)
+        sensor._deficit = 20.0
+        sensor._last_rain = 13.2
+
+        self._tick(sensor, hass_mock, make_state, 0.0)
+
+        assert sensor._deficit == pytest.approx(20.0, abs=0.01)
+        assert sensor._last_rain == pytest.approx(0.0)
+
+    def test_midnight_reset_credits_increments_not_the_drop(self, hass_mock, make_state):
+        """A midnight rollover credits nothing on the drop, then credits the
+        fresh accumulation as the counter climbs: 8.0 → 0.5 (0 mm), 0.5 → 3.0
+        (2.5 mm). This is exactly the true daily-total case from #123: rain
+        that falls after the reset is credited via the positive increment."""
+        sensor = self._daily_sensor(hass_mock)
+        sensor._deficit = 10.0
+        sensor._last_rain = 8.0
+
+        self._tick(sensor, hass_mock, make_state, 0.5)
+        assert sensor._deficit == pytest.approx(10.0, abs=0.01)  # drop credits 0
+
+        self._tick(sensor, hass_mock, make_state, 3.0)
+        assert sensor._deficit == pytest.approx(7.5, abs=0.01)  # +2.5 mm
+
+    def test_rain_after_window_ageing_credited_normally(self, hass_mock, make_state):
+        """New rain arriving after an ageing drop is credited from the
+        rebased baseline: 14.2 → 13.2 (ageing), then 13.2 → 16.2 → 3 mm."""
+        sensor = self._daily_sensor(hass_mock)
+        sensor._deficit = 10.0
+        sensor._last_rain = 14.2
+
+        self._tick(sensor, hass_mock, make_state, 13.2)
+        self._tick(sensor, hass_mock, make_state, 16.2)
+
+        assert sensor._deficit == pytest.approx(7.0, abs=0.01)
+
+
+class TestRainBaselineEntityGuard:
+    """A restored rain baseline is only valid for the sensor that wrote it.
+
+    After the rain sensor becomes editable from the options flow, a
+    baseline persisted by the OLD sensor must not be compared against the
+    NEW sensor's readings — the scales are unrelated and the difference
+    would be credited as phantom rain.
+    """
+
+    def _daily_sensor(self, hass_mock, rain_entity="sensor.rain"):
+        from never_dry.const import (
+            CONF_RAIN_SENSOR,
+            CONF_RAIN_SENSOR_TYPE,
+            CONF_TEMP_SENSOR,
+            RAIN_TYPE_DAILY_TOTAL,
+        )
+        from never_dry.sensor import DrynessIndexSensor
+
+        sensor = DrynessIndexSensor(
+            hass_mock,
+            {
+                CONF_TEMP_SENSOR: "sensor.temperature",
+                CONF_RAIN_SENSOR: rain_entity,
+                CONF_RAIN_SENSOR_TYPE: RAIN_TYPE_DAILY_TOTAL,
+            },
+        )
+        sensor.async_write_ha_state = MagicMock()
+        return sensor
+
+    def _last_state(self, attributes):
+        last = MagicMock()
+        last.state = "10.0"
+        last.attributes = attributes
+        return last
+
+    def test_baseline_entity_exposed_in_attributes(self, hass_mock):
+        sensor = self._daily_sensor(hass_mock)
+        sensor._last_rain = 14.2
+        assert sensor.extra_state_attributes["rain_baseline_entity"] == "sensor.rain"
+
+    @pytest.mark.asyncio
+    async def test_matching_entity_baseline_restored(self, hass_mock):
+        from unittest.mock import AsyncMock
+
+        sensor = self._daily_sensor(hass_mock)
+        sensor.async_get_last_state = AsyncMock(
+            return_value=self._last_state(
+                {"rain_baseline_mm": 14.2, "rain_baseline_entity": "sensor.rain"},
+            )
+        )
+        await sensor.async_added_to_hass()
+        assert sensor._last_rain == pytest.approx(14.2)
+
+    @pytest.mark.asyncio
+    async def test_changed_entity_baseline_discarded(self, hass_mock):
+        from unittest.mock import AsyncMock
+
+        sensor = self._daily_sensor(hass_mock, rain_entity="sensor.new_rain")
+        sensor.async_get_last_state = AsyncMock(
+            return_value=self._last_state(
+                {"rain_baseline_mm": 14.2, "rain_baseline_entity": "sensor.old_rain"},
+            )
+        )
+        await sensor.async_added_to_hass()
+        # Baseline belongs to the old sensor → None sentinel: the next
+        # reading fixes a fresh baseline without crediting.
+        assert sensor._last_rain is None
+
+    @pytest.mark.asyncio
+    async def test_legacy_baseline_without_entity_discarded(self, hass_mock):
+        """Pre-upgrade states have no rain_baseline_entity: safer to drop
+        the baseline once than to risk comparing across sensors."""
+        from unittest.mock import AsyncMock
+
+        sensor = self._daily_sensor(hass_mock)
+        sensor.async_get_last_state = AsyncMock(
+            return_value=self._last_state({"rain_baseline_mm": 14.2}),
+        )
+        await sensor.async_added_to_hass()
+        assert sensor._last_rain is None
+
+
+class TestVwcModeBypassesEtModel:
+    """With a VWC sensor configured the ET model must be fully bypassed.
+
+    Tester report 2026-07-18: the 'ET Hourly Estimate' entity kept
+    updating from temperature and the recorder backfill replayed the
+    ET/rain water balance even in VWC mode — both suggested the ET model
+    was still driving the deficit.
+    """
+
+    def test_et_entity_not_created_in_vwc_mode(self, hass_mock, base_config):
+        from never_dry.const import CONF_VWC_SENSOR
+        from never_dry.sensor import ETSensor, _create_entities
+
+        entities, _, _ = _create_entities(
+            hass_mock,
+            {**base_config, CONF_VWC_SENSOR: "sensor.soil_vwc"},
+            "entryA",
+        )
+        assert not any(isinstance(e, ETSensor) for e in entities)
+
+    def test_et_entity_created_without_vwc(self, hass_mock, base_config):
+        from never_dry.sensor import ETSensor, _create_entities
+
+        entities, _, _ = _create_entities(hass_mock, base_config, "entryA")
+        assert any(isinstance(e, ETSensor) for e in entities)
+
+    @pytest.mark.asyncio
+    async def test_backfill_skipped_in_vwc_mode(self, hass_mock, base_config):
+        from unittest.mock import AsyncMock
+
+        from never_dry.const import CONF_VWC_SENSOR
+
+        sensor = DrynessIndexSensor(
+            hass_mock,
+            {**base_config, CONF_VWC_SENSOR: "sensor.soil_vwc"},
+        )
+        sensor.async_write_ha_state = MagicMock()
+        sensor._backfill_from_recorder = AsyncMock()
+        sensor.async_get_last_state = AsyncMock(return_value=None)
+        await sensor.async_added_to_hass()
+        sensor._backfill_from_recorder.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_backfill_still_runs_without_vwc(self, hass_mock, base_config):
+        from unittest.mock import AsyncMock
+
+        sensor = DrynessIndexSensor(hass_mock, base_config)
+        sensor.async_write_ha_state = MagicMock()
+        sensor._backfill_from_recorder = AsyncMock()
+        sensor.async_get_last_state = AsyncMock(return_value=None)
+        await sensor.async_added_to_hass()
+        sensor._backfill_from_recorder.assert_awaited_once()

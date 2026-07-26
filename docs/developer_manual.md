@@ -278,6 +278,19 @@ All configuration keys (`CONF_*`), service names (`SERVICE_*`), system types, pl
 
 The source string column applies to both the zone's `last_irrigation_source` attribute and the `source` field of the `never_dry_irrigation_complete` HA event — they are kept in sync so an automation can filter on either. Trigger 4 sets the attribute but emits no event. The legacy fallback string `"automatic"` is only used if `_irrigate_zones` is called without a preceding `_current_source` assignment (defensive default; not reachable from production paths).
 
+#### Session accounting matrix (start × stop)
+
+Who opened the valve and who closed it are independent axes: every combination must account the water actually delivered (duration and liters) and reduce the deficit proportionally. **`mark_irrigated` is the only path that unconditionally zeroes the deficit.**
+
+| Start | Stop | Volume accounted | Deficit effect |
+|---|---|---|---|
+| NeverDry (button / service / scheduler) | NeverDry — volume target reached, estimated duration elapsed, or `delivery_timeout` | measured (flow meter) or planned volume × elapsed fraction | full delivery → 0 via `reset_deficit`; partial → `max(0, start − delivered × η / area)` in `_settle_irrigated_zones` |
+| NeverDry | External close — HA switch, Zigbee app, physical button, hardware self-close | elapsed fraction, detected by the delivery loop (`_wait_with_stop_check` / `_valve_closed_externally`); the valve-state listener event is suppressed | proportional reduction (never a full reset) |
+| NeverDry | `never_dry.stop` / `never_dry.stop_zone` | elapsed fraction | proportional reduction |
+| External open (HA switch, Zigbee app, physical button) | User closes it (any path) | flow meter (cumulative diff or rate × duration); no meter, invalid baseline, or zero reading → estimate `flow_rate × elapsed` | proportional reduction; nothing measurable (no meter **and** no `flow_rate`) → deficit left unchanged + warning |
+| External open | Auto-close monitor — volume target, estimated duration, or `delivery_timeout` | same as the row above | proportional reduction — reaches 0 only if the full target volume was actually delivered |
+| `mark_irrigated` button / service | — | derived from the current deficit (`volume_liters`) | **full reset to 0 — the only unconditional zeroing path** |
+
 **External-vs-commanded discrimination** lives in `_on_valve_state_change`. The callback fires for every state change on a tracked valve entity; the gating is:
 
 1. If a `ValveOperator` is registered for the valve and its FSM state is **not** `IDLE`, the controller is driving the valve — return.
@@ -292,8 +305,8 @@ For an external `off → on` transition:
 For an external `on → off` transition:
 - Cancel the monitor task (the OFF transition is either the user closing or the monitor's own `switch.turn_off` completing).
 - Call `zone.set_irrigating(False)`.
-- Compute the delivered volume from the flow meter (cumulative diff or rate × duration). Reduce the deficit proportionally; if no flow meter is present, the deficit is fully reset (same semantics as `mark_irrigated`, since the user did open the valve and we have no evidence to estimate otherwise).
-- Stamp `_last_irrigated`, `_last_volume_delivered`, `_last_irrigation_source = "manual"`, and fire `never_dry_irrigation_complete` with `source: "manual"`.
+- Compute the delivered volume from the flow meter (cumulative diff or rate × duration). If there is no flow meter, no valid baseline, or the meter measured zero, estimate `flow_rate × elapsed` from the configured guard flow rate and the tracked session duration. Reduce the deficit proportionally (`delivered × η / area`). The deficit is **never fully reset** on a valve close: with no flow meter *and* no `flow_rate` it is left unchanged and a warning suggests `mark_irrigated`.
+- Stamp `_last_irrigated`, `_last_volume_delivered`, credit the session/total/yearly water counters, set `_last_irrigation_source = "manual"`, and fire `never_dry_irrigation_complete` with `source: "manual"`.
 
 **`_external_session_monitor(entity_id, zone_name)`** is the auto-close brain. Started from the open detection, it must terminate the manual session at the **minimum** of:
 
@@ -412,6 +425,92 @@ python tests/e2e/smoke.py
 | `reset_deficit` | — | `reset` service completes without error |
 | `config_reload` | — | Config entry reloads and comes back loaded |
 
+### 7.2 Irrigation end-trigger coverage matrix
+
+An irrigation session can be terminated by **eight distinct triggers**. Every
+pair of triggers is a potential race (one fires while the other is armed), and
+each race must leave the valve closed and the deficit settled exactly once.
+This matrix maps each pair to the test(s) that cover it — empty cells are
+known coverage gaps. It is the reference for the valve driver abstraction
+(AI-123), where the safety layers change from *command-close* to
+*verify-close* and every one of these races must be revisited per driver.
+
+**Triggers:**
+
+| Code | Trigger | Where it fires |
+|------|---------|----------------|
+| `TARGET` | Volume target reached (measured, integrated, or device-native) | `_deliver_flow_meter` / `_deliver_flow_rate` loops; smart-valve self-close (`volume_preset`) |
+| `EST` | Estimated duration elapsed (guard-flow timer) | `_deliver_estimated_flow`; manual-open session monitor |
+| `TIMEOUT` | `delivery_timeout` safety limit | all delivery loops; manual safety-close |
+| `STOP` | Global emergency stop (`never_dry.stop`) | `_should_abort` in every loop |
+| `STOPZ` | Per-zone stop (`never_dry.stop_zone`) | `_stop_zone` flag in every loop |
+| `EXT` | External close: hardware auto-close, user manual off, on-device fail-safe / max-duration timer | `_valve_closed_externally`; valve state listener |
+| `WDOG` | ValveOperator software watchdog (`max_open_duration_s`) | `ValveOperator._watchdog` force `turn_off` |
+| `UNLOAD` | Config entry unload / HA restart (`controller.async_stop`) | task cancellation + settle in `finally` |
+
+**Matrix** — diagonal = trigger alone; cell (row, col) = the two triggers
+interacting (symmetric: lower triangle mirrors the upper). Test names without
+prefix live in `tests/test_delivery_modes.py`; `[C]` = `test_controller.py`,
+`[CO]` = `test_controller_with_operator.py`, `[H]` = `test_controller_handlers.py`,
+`[V]` = `test_valve_operator.py`, `[M]` = `test_end_trigger_matrix.py`
+(race-matrix tests: each asserts the deficit decrement, the last-session
+volume/running-time coherence, and single-settle).
+
+| | TARGET | EST | TIMEOUT | STOP | STOPZ | EXT | WDOG | UNLOAD |
+|---|---|---|---|---|---|---|---|---|
+| **TARGET** | `test_closes_at_target_volume` · `test_measured_flow_wins_over_estimate` · `test_meter_reset_adjusts_baseline` · `test_sends_volume_to_number_entity` | n/a¹ | `test_flow_meter_timeout_zero_flow_credits_estimate` · `test_flow_rate_timeout_zero_flow_credits_estimate` · `test_timeout_with_dead_flow_meter_settles_deficit` · `test_timeout_forces_close` | `test_stop_during_flow_meter` · `test_stop_during_flow_rate` · `test_stop_during_preset` · `[CO] test_volume_preset_stop_during_run` · `[CO] test_irrigate_zones_clears_snapshot_on_abort` | `test_stop_zone_ends_flow_meter` | `test_external_close_ends_flow_rate` | `[V] test_watchdog_cancelled_on_normal_close` | `[M] test_unload_mid_flow_meter_settles_measured_partial` |
+| **EST** | | `test_opens_waits_closes` · `test_dispatches_estimated_flow` · `[C] test_estimated_duration_used_when_no_flow_meter` | covered implicitly² | `[C] test_stop_interrupts_cycle` · `[C] test_no_event_on_stop` | `[M] test_stop_zone_mid_estimated_flow_credits_elapsed_fraction` | `[C] test_manual_close_cancels_monitor_task` · `[C] test_manual_close_records_session_duration` | `[M] test_watchdog_forced_close_mid_estimated_flow_credits_elapsed_fraction`⁵ | `[M] test_unload_mid_estimated_flow_credits_elapsed_fraction` |
+| **TIMEOUT** | | | `[C] test_no_target_falls_back_to_timeout` · `test_zero_flow_without_flow_rate_cannot_estimate` | `[M] test_stop_just_before_timeout_settles_once` | `[M] test_stop_zone_just_before_timeout_settles_once` | `[M] test_external_close_before_timeout_settles_estimate` | `[M] test_watchdog_close_races_delivery_timeout_single_settle`⁵ | `[M] test_unload_races_delivery_timeout_single_settle` |
+| **STOP** | | | | `[C] test_stop_closes_all_valves` · `[CO] test_emergency_stop_closes_in_parallel` · `[C] test_stop_sets_running_false` · `[C] test_stop_is_never_throttled` | `[M] test_global_stop_and_stop_zone_together_settle_once` | `[M] test_global_stop_with_valve_already_closed_externally` | `[M] test_global_stop_races_watchdog_force_close`⁵ | `[M] test_global_stop_then_unload_settles_once` |
+| **STOPZ** | | | | | `[H] TestHandleStopZone::test_closes_valve_and_clears_state` | `[M] test_stop_zone_with_valve_already_closed_externally` | `[M] test_stop_zone_races_watchdog_force_close`⁵ | `[M] test_stop_zone_then_unload_settles_once` |
+| **EXT** | | | | | | `[C] test_manual_close_no_meter_never_full_resets` · `[C] test_manual_close_no_meter_credits_flow_rate_estimate` · `[C] test_flow_meter_compensates_deficit` · `[C] test_manual_close_fires_event` | `[M] test_external_close_then_late_watchdog_off_no_double_settle`⁵ | `[M] test_external_close_then_unload_no_double_settle` |
+| **WDOG** | | | | | | | `[V] test_watchdog_fires_and_calls_turn_off` · `[V] test_watchdog_fires_critical_notification` · `[V] test_watchdog_not_started_when_valve_not_open` | `[V] test_watchdog_cancelled_on_unload` |
+| **UNLOAD** | | | | | | | | `[V] test_async_unload_releases_subscriptions` · `[M] test_unload_mid_flow_meter_settles_measured_partial` (controller side) |
+
+Notes:
+
+1. `TARGET` and `EST` are never armed together for the same zone: a delivery
+   mode either aims at a volume target or sleeps for the estimated duration.
+2. `EST × TIMEOUT`: the manual-session monitor sleeps for
+   `min(estimated duration, delivery_timeout)`; the estimated-duration test
+   exercises the `min()` but no test forces the timeout side to win.
+3. `TIMEOUT × WDOG`: both derive from `delivery_timeout`; the `[M]` test
+   verifies that firing both in the same window is harmless (idempotent
+   close, single settle).
+4. `controller.async_stop()` mid-delivery (entry reload / HA restart) is
+   covered by the `[M] *_unload_*` tests; the operator-side unload by `[V]`.
+5. In `[M]` tests the watchdog side is *simulated*: the forced
+   `switch.turn_off` is represented by the valve state flipping to `off`
+   mid-loop, which is exactly how the controller perceives it. The
+   watchdog's own firing logic is covered in `test_valve_operator.py`. The
+   production seam is exercised end to end by
+   `[CO] test_watchdog_real_operator_mid_estimated_flow_settles_once`: a
+   real `ValveOperator` wired into `_irrigate_zones`, its watchdog task
+   actually firing and the state echo feeding both the FSM and the
+   controller listener. With the driver abstraction this test becomes the
+   per-driver regression harness for the WDOG cells.
+
+All previously-empty cells are now covered by `test_end_trigger_matrix.py`:
+every `[M]` test asserts the same contract — deficit decremented by exactly
+the credited volume, last-session history (volume + running time) internally
+coherent, and settle executed exactly once even when two triggers fire in the
+same window. The hardware max-duration *arming* is covered separately by the
+`test_hw_max_duration_*` family in `test_valve_operator.py` (write-on-open,
+idempotency, MQTT fallback); the resulting close surfaces as `EXT`.
+
+**Constants used by the `[M]` race-matrix tests:**
+
+| Constant | Value | Defined in | Description |
+|----------|-------|-----------|-------------|
+| `FLOW_METER_POLL_INTERVAL_S` | 2 s | `const.py` (product) | Poll cadence of the metered delivery loops; every race lands on a multiple of this tick |
+| `DEFAULT_DELIVERY_TIMEOUT_S` | 3600 s | `const.py` (product) | Production safety-timeout floor; the tests override it per zone to keep loops short |
+| `TIMEOUT_S` | 4 s (= 2 polls) | `test_end_trigger_matrix.py` | Per-zone `delivery_timeout` used in the tests: two poll windows, so a race can land before, inside, or at expiry |
+| `AREA` | 20 m² | `test_end_trigger_matrix.py` | Zone area; with `EFF` it converts credited liters into the expected deficit decrement (`mm = L × EFF / AREA`) |
+| `EFF` | 0.90 | `test_end_trigger_matrix.py` | Zone distribution efficiency |
+| `FLOW` | 8 L/min | `test_end_trigger_matrix.py` | Guard flow rate: drives the estimated duration, the guard-flow fallback credit (`L = FLOW × elapsed / 60`) and the timeout scaling |
+| zone deficits | 0.02–0.05 mm | per test | Deliberately tiny so the guard-scaled `delivery_timeout` stays at the configured 4 s floor (loops end in seconds, compatible with the guard-duration timeout scaling) |
+| `VALVE`, `METER` | entity ids | `test_end_trigger_matrix.py` | Scripted through the `_Env` helper: mutable valve state (`on`/`off`) simulates external/watchdog closes; `meter_step` makes the meter progress (measured credit) or stay frozen (guard-flow fallback credit) |
+
 ## 8. Adding a new ET tier
 
 To add a new ET calculation method (e.g., Hargreaves-Samani):
@@ -425,6 +524,28 @@ To add a new ET calculation method (e.g., Hargreaves-Samani):
 7. Add tests in `test_never_dry_sensor.py`
 
 ## 9. Versioning and releases
+
+### Branching model
+
+Two long-lived branches (adopted 2026-07-16):
+
+| Branch | Role | Rules |
+|--------|------|-------|
+| `main` | **Production.** What HACS users install: every release tag (`vX.Y.Z`) is cut from here. | Protected. No direct pushes; changes land only via reviewed PRs from `develop` (or hotfix branches). Must always be releasable. |
+| `develop` | **Integration & testing.** Where feature/fix branches merge first and where field testing on the test HA instance happens. | Feature branches (`feature/*`, `fix/*`, `docs/*`) branch off `develop` and merge back into it. Deploy to the test HA instance from here. |
+
+Flow:
+
+```
+feature/x ──┐
+fix/y ──────┼──► develop ──(field-verified, PR)──► main ──(tag vX.Y.Z)──► HACS release
+docs/z ─────┘
+```
+
+- **Merge into `develop`** as soon as a branch is green (CI + local suite); `develop` is allowed to hold work that is not yet field-verified.
+- **PR `develop` → `main`** only when the accumulated changes have been verified on the test installation. Releases stay event-driven (milestones, HACS deadlines) or monthly — never one release per bugfix.
+- **Hotfixes**: branch from `main`, fix, PR back to `main`, then merge `main` back into `develop` to keep the branches converged.
+- **Testers without a dev setup** cannot point HACS at a branch: HACS installs GitHub *releases* from `main` only. To give testers early builds, publish a **pre-release** (e.g. `v0.11.0-beta.1`) — users who enable beta versions in HACS ("Redownload" → show beta) receive it; everyone else stays on the latest stable. Manual installation (copying `custom_components/never_dry/` from a branch checkout) remains possible for developers.
 
 ### Version scheme
 
