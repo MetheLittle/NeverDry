@@ -246,6 +246,14 @@ _OPERATION_FOR_FAILURE: dict[FailureKind, str] = {
     FailureKind.CLOSE_LEAK: "close",
 }
 
+# For each command, the normalized entity level that already satisfies it and the
+# observation that confirms it. Used to confirm by *level* instead of waiting for
+# a state-change *edge* that a switch already in that state will never emit.
+_CONFIRM_FOR_CMD: dict[ValveEvent, tuple[str, ValveEvent]] = {
+    ValveEvent.CMD_OPEN: ("on", ValveEvent.OBS_SWITCH_ON),
+    ValveEvent.CMD_CLOSE: ("off", ValveEvent.OBS_SWITCH_OFF),
+}
+
 
 # ── The abstract actuator (the model's ``Driver``) ─────────────────────────
 
@@ -533,13 +541,44 @@ class Actuator(abc.ABC):
         return None
 
     async def _run_cycle(self, cmd: ValveEvent, terminals: tuple[ValveState, ...]) -> OperationResult:
-        """Dispatch ``cmd`` and await the resulting cycle completion."""
+        """Dispatch ``cmd`` and await the resulting cycle completion.
+
+        After dispatching, if the actuator already reads the *level* the command
+        asks for, synthesize the confirming observation instead of waiting for a
+        state-change *edge*: a ``switch.*``/``valve.*`` already in the target
+        state emits no fresh event, so the FSM would wait on an edge that never
+        comes and time out into a spurious ``OPEN_FAILED``/``CLOSE_*`` — which,
+        across retries, escalates a *physically working* valve to MAINTENANCE
+        (field incident: zone 'Giardino Pino', a Zigbee valve whose confirmation
+        lagged the tight adaptive timeout). Confirming by level makes an
+        already-open/closed valve report success without forcing actuation. When
+        a real edge does arrive it is a harmless noop — the FSM has already left
+        the awaited state.
+        """
         loop = asyncio.get_event_loop()
         self._completion = loop.create_future()
         self._expected_terminal = terminals
         self._cmd_start_time = monotonic()
         await self._dispatch(cmd)
+        if not self._completion.done():
+            await self._confirm_if_already_at_level(cmd)
         return await self._completion
+
+    async def _confirm_if_already_at_level(self, cmd: ValveEvent) -> None:
+        """Confirm ``cmd`` from the current entity *level* when no edge will come.
+
+        Reads the normalized state (a level, not an edge). If it already matches
+        the level the command targets, dispatch the confirming observation so the
+        FSM completes at once. The synthetic confirmation goes straight to the FSM
+        and is never recorded as a latency sample, so it cannot skew the adaptive
+        timeout.
+        """
+        confirm = _CONFIRM_FOR_CMD.get(cmd)
+        if confirm is None:
+            return
+        target_level, obs_event = confirm
+        if self._read_normalized_state() == target_level:
+            await self._dispatch(obs_event)
 
     def _is_retryable(self, outcome: OperationResult) -> bool:
         """``True`` if ``outcome`` describes a transient (comms) failure."""
