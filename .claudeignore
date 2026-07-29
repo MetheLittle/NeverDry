@@ -1,0 +1,25 @@
+# .claudeignore — keep secrets and local artifacts out of AI/agent context.
+# Mirrors the secret-bearing and local-only entries of .gitignore.
+
+# Secrets & credentials
+secrets/
+.env
+.env.*
+*.key
+*.pem
+config/secrets.yaml
+.secrets.baseline
+
+# Local agent / tooling state
+.sestante/
+.coding_agent/
+.code_reader/
+
+# Build / cache / heavy dirs (noise, not secrets)
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
