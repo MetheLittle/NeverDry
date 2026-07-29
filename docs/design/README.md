@@ -16,6 +16,8 @@ New contributors: see [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) first.
   above the FSM: hardening applied and the invariants to preserve.
 - [`unit-system.md`](unit-system.md) — metric-internal architecture (SI core,
   imperial only at the edges).
+- [`dependency-management.md`](dependency-management.md) — **Accepted (ADR)**: why
+  NeverDry uses pip + `manifest.json`, not `uv`.
 
 **2. Direction (open for input)**
 - [`actuator-abstraction.md`](actuator-abstraction.md) — **Draft** proposal for
