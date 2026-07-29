@@ -12,3 +12,15 @@ repos:
       - id: bandit
         args: [-r, custom_components/never_dry/, --severity-level, medium, --confidence-level, medium]
         pass_filenames: false
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: (?x)^(
+            \.venv/|
+            \.pytest_cache/|
+            \.ruff_cache/|
+            docs/gh-pages/.*\.(png|ico)
+          )$
