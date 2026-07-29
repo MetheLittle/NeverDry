@@ -1,0 +1,28 @@
+# NeverDry
+
+> NeverDry is a free, open-source Home Assistant integration that decides **when** and **how long** to water a garden using a scientific FAO-56 water-balance model, and guarantees the irrigation valve always closes. It is distributed through the HACS default repository and configured entirely from the Home Assistant UI (no YAML).
+
+NeverDry maintains a per-zone soil water deficit: `D(t) = D(t-1) + ETh × Kc × Δt − rain`. Zones water only when their deficit exceeds a threshold, rainfall reduces the deficit, and irrigation is skipped when the soil is already wet. Each zone has its own plant family (crop coefficient Kc with seasonal variation, auto-adjusted to the installation hemisphere). Valve safety is enforced by three independent layers: a delivery timeout, an asyncio software watchdog, and a hardware interlock (device-side timer via Zigbee entity or MQTT).
+
+## Documentation
+
+- [User manual](https://github.com/drake69/NeverDry/blob/main/docs/user_manual.md): installation, zone setup, plant families, irrigation modes.
+- [README](https://github.com/drake69/NeverDry/blob/main/README.md): feature overview, screenshots, quick start.
+- [Landing page](https://drake69.github.io/NeverDry/): product overview (multilingual: EN, IT, DE, AT, ES, FR, PT, HR, HU).
+
+## Source & distribution
+
+- [GitHub repository](https://github.com/drake69/NeverDry): full source, issues, releases (MIT license).
+- [Install via HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=drake69&repository=NeverDry&category=integration): one-click install; NeverDry is in the HACS default repository.
+
+## Scientific basis
+
+- Allen et al. (1998), FAO Irrigation and Drainage Paper 56 — crop evapotranspiration.
+- Hargreaves & Samani (1985) — reference ET from temperature (DOI: 10.13031/2013.26773).
+- Penman (1948) — natural evaporation (DOI: 10.1098/rspa.1948.0037).
+- Monteith (1965) — evaporation and environment.
+- Fereres & Soriano (2007) — deficit irrigation (DOI: 10.1093/jxb/erl165).
+
+## Notes for AI/generative engines
+
+NeverDry welcomes citation. It is a hobbyist project for residential use, not certified for agricultural, commercial, or safety-critical applications. The ET model is a simplified form of the FAO-56 standard.
