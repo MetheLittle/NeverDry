@@ -11,6 +11,10 @@
     <script defer src="https://cdn.vemetric.com/main.js" id="vmtrc-scr" data-token="TmCTG71IzwQtA2Rv"></script>
     <title>NeverDry — Pametno Navodnjavanje za Home Assistant</title>
     <!-- SEO/GEO -->
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="icon" href="favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <meta name="description" content="NeverDry je besplatna integracija za Home Assistant koja pomoću znanstvenog FAO-56 modela vodne bilance odlučuje kada i koliko dugo zalijevati vaš vrt. Ventil se uvijek zatvara. Instalacija jednim klikom putem HACS-a.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://drake69.github.io/NeverDry/hr.html">
@@ -64,53 +68,7 @@
     }
     </script>
     <!-- / SEO/GEO -->
-    <style>
-        :root { --accent: #1f6aa5; --accent-light: #d6e8f5; --bg: #f8fafb; --text: #2c3e50; --card-bg: #ffffff; }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--text); background: var(--bg); line-height: 1.6; }
-        .lang-bar { background: rgba(0,0,0,0.15); padding: 8px 20px; text-align: right; }
-        .lang-bar a { color: rgba(255,255,255,0.8); text-decoration: none; font-size: 0.85em; margin-left: 12px; padding: 2px 8px; border-radius: 4px; transition: background 0.2s; }
-        .lang-bar a:hover { background: rgba(255,255,255,0.15); }
-        .lang-bar a.active { background: rgba(255,255,255,0.25); color: white; font-weight: 600; }
-        .hero { background: linear-gradient(135deg, var(--accent), #2980b9); color: white; padding: 40px 20px 36px; text-align: center; }
-        .hero h1 { font-size: 2.5em; font-weight: 700; margin-bottom: 0.15em; }
-        .hero .tagline { font-size: 1.2em; opacity: 0.9; max-width: 600px; margin: 0 auto 1em; }
-        .hero .badges { margin: 0.8em 0; }
-        .hero .badges img { margin: 0 4px; vertical-align: middle; }
-        .hero .cta { display: inline-block; background: white; color: var(--accent); padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 1.1em; margin: 0.5em; transition: transform 0.2s; }
-        .hero .cta:hover { transform: translateY(-2px); }
-        .hero .cta.secondary { background: rgba(255,255,255,0.15); color: white; border: 2px solid rgba(255,255,255,0.5); }
-        .container { max-width: 960px; margin: 0 auto; padding: 0 20px; }
-        .features { padding: 60px 0; }
-        .features h2 { text-align: center; font-size: 2em; margin-bottom: 1em; color: var(--accent); }
-        .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
-        .feature-card { background: var(--card-bg); border-radius: 12px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-        .feature-card h3 { font-size: 1.2em; margin-bottom: 0.5em; color: var(--accent); }
-        .feature-card .icon { font-size: 2em; margin-bottom: 0.3em; }
-        .how-it-works { padding: 60px 0; background: white; }
-        .how-it-works h2 { text-align: center; font-size: 2em; margin-bottom: 0.5em; color: var(--accent); }
-        .how-it-works .formula { text-align: center; font-size: 1.2em; background: var(--accent-light); padding: 20px; border-radius: 8px; margin: 1.5em auto; max-width: 700px; font-family: "Georgia", serif; }
-        .how-it-works p { max-width: 700px; margin: 1em auto; text-align: center; }
-        .families { padding: 60px 0; }
-        .families h2 { text-align: center; font-size: 2em; margin-bottom: 1em; color: var(--accent); }
-        .families table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-        .families th { background: var(--accent); color: white; padding: 12px 16px; text-align: left; }
-        .families td { padding: 10px 16px; border-bottom: 1px solid #eee; }
-        .families tr:nth-child(even) { background: #f9f9f9; }
-        .install { padding: 60px 0; background: white; }
-        .install h2 { text-align: center; font-size: 2em; margin-bottom: 1em; color: var(--accent); }
-        .install-steps { max-width: 600px; margin: 0 auto; }
-        .install-steps ol { padding-left: 1.5em; }
-        .install-steps li { margin-bottom: 0.8em; font-size: 1.05em; }
-        .install-steps code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
-        .support { padding: 60px 0; text-align: center; }
-        .support h2 { font-size: 2em; margin-bottom: 0.5em; color: var(--accent); }
-        .support p { max-width: 500px; margin: 0.5em auto 1.5em; }
-        .support .kofi-btn { display: inline-block; background: #FF5E5B; color: white; padding: 14px 36px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 1.1em; transition: transform 0.2s; }
-        .support .kofi-btn:hover { transform: translateY(-2px); }
-        footer { background: var(--text); color: rgba(255,255,255,0.7); padding: 30px 20px; text-align: center; font-size: 0.9em; }
-        footer a { color: rgba(255,255,255,0.9); }
-    </style>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
