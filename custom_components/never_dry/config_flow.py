@@ -108,7 +108,7 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
     t_unit = "°F" if is_imperial else "°C"
     d_unit = "in" if is_imperial else "mm"
     t_base_default = _c_to_f(DEFAULT_T_BASE) if is_imperial else DEFAULT_T_BASE
-    d_max_default = round(DEFAULT_D_MAX * _MM_TO_IN, 1) if is_imperial else DEFAULT_D_MAX
+    d_max_default = round(DEFAULT_D_MAX * _MM_TO_IN, 2) if is_imperial else DEFAULT_D_MAX
 
     return vol.Schema(
         {
@@ -145,7 +145,7 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
                 selector.NumberSelectorConfig(
                     min=0.5 if is_imperial else 10.0,
                     max=20.0 if is_imperial else 500.0,
-                    step=0.5 if is_imperial else 10.0,
+                    step=0.01 if is_imperial else 10.0,
                     mode="box",
                     unit_of_measurement=d_unit,
                 )
@@ -162,7 +162,7 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
     t_stored = current.get(CONF_T_BASE, DEFAULT_T_BASE)
     d_stored = current.get(CONF_D_MAX, DEFAULT_D_MAX)
     t_display = _c_to_f(t_stored) if is_imperial else t_stored
-    d_display = round(d_stored * _MM_TO_IN, 1) if is_imperial else d_stored
+    d_display = round(d_stored * _MM_TO_IN, 2) if is_imperial else d_stored
 
     return vol.Schema(
         {
@@ -210,7 +210,7 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
                 selector.NumberSelectorConfig(
                     min=0.5 if is_imperial else 10.0,
                     max=20.0 if is_imperial else 500.0,
-                    step=0.5 if is_imperial else 10.0,
+                    step=0.01 if is_imperial else 10.0,
                     mode="box",
                     unit_of_measurement=d_unit,
                 )
@@ -224,7 +224,7 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
     area_unit = "ft²" if is_imperial else "m²"
     flow_unit = "gal/h" if is_imperial else "L/h"
     depth_unit = "in" if is_imperial else "mm"
-    threshold_default = round(DEFAULT_THRESHOLD * _MM_TO_IN, 1) if is_imperial else DEFAULT_THRESHOLD
+    threshold_default = round(DEFAULT_THRESHOLD * _MM_TO_IN, 2) if is_imperial else DEFAULT_THRESHOLD
 
     return vol.Schema(
         {
@@ -308,7 +308,7 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                 selector.NumberSelectorConfig(
                     min=0.1 if is_imperial else 1.0,
                     max=4.0 if is_imperial else 100.0,
-                    step=0.1 if is_imperial else 1.0,
+                    step=0.01 if is_imperial else 1.0,
                     mode="box",
                     unit_of_measurement=depth_unit,
                 )
@@ -642,7 +642,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
 
         def _d_threshold(fallback):
             v = cur.get(CONF_ZONE_THRESHOLD, fallback)
-            return round(v * _MM_TO_IN, 1) if (imperial and v is not None) else v
+            return round(v * _MM_TO_IN, 2) if (imperial and v is not None) else v
 
         dm_opts = [
             DELIVERY_MODE_ESTIMATED_FLOW,
@@ -793,7 +793,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                     selector.NumberSelectorConfig(
                         min=0.1 if imperial else 1.0,
                         max=4.0 if imperial else 100.0,
-                        step=0.1 if imperial else 1.0,
+                        step=0.01 if imperial else 1.0,
                         mode="box",
                         unit_of_measurement=depth_unit,
                     )

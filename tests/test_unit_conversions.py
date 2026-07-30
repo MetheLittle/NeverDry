@@ -14,8 +14,13 @@ from never_dry.const import (
     CONF_ZONE_AREA,
     CONF_ZONE_FLOW_RATE,
     CONF_ZONE_THRESHOLD,
+    DEFAULT_D_MAX,
+    DEFAULT_THRESHOLD,
 )
 from never_dry.controller import IrrigationController
+from never_dry.unit_convert import (
+    MM_TO_IN as _MM_TO_IN,
+)
 from never_dry.unit_convert import (
     c_to_f as _c_to_f,
 )
@@ -28,6 +33,13 @@ from never_dry.unit_convert import (
 from never_dry.unit_convert import (
     zone_input_to_metric as _zone_input_to_metric,
 )
+
+
+# Mirrors the config-flow display rounding (config_flow.py: 2 decimals for
+# inches, issue #139). Kept here so the round-trip test guards the actual UI
+# behaviour without importing the flow (which needs HA fixtures).
+def _mm_to_display_in(mm: float) -> float:
+    return round(mm * _MM_TO_IN, 2)
 
 
 class TestTemperatureConversion:
@@ -95,6 +107,36 @@ class TestZoneInputToMetric:
         data = {CONF_ZONE_AREA: 100.0}
         _zone_input_to_metric(data, is_imperial=True)
         assert data[CONF_ZONE_AREA] == 100.0
+
+
+class TestImperialReconfigureRoundTrip:
+    """Issue #139.3: reconfiguring a zone in imperial must be STABLE — reopening
+    the edit form shows the same inches value the user set, and saving it does
+    not drift the stored mm. With 2-decimal display rounding this is idempotent;
+    with the old 1-decimal rounding every reconfigure nudged the value.
+    """
+
+    def test_threshold_reconfigure_is_idempotent(self):
+        # Metric stored value -> what the imperial form shows...
+        display1 = _mm_to_display_in(DEFAULT_THRESHOLD)
+        # ...what saving it stores back in mm...
+        stored1 = _zone_input_to_metric({CONF_ZONE_THRESHOLD: display1}, is_imperial=True)[CONF_ZONE_THRESHOLD]
+        # ...and reopening the form again.
+        display2 = _mm_to_display_in(stored1)
+        assert display2 == display1  # no manual re-fixing needed on every edit
+
+    def test_d_max_reconfigure_is_idempotent(self):
+        display1 = _mm_to_display_in(DEFAULT_D_MAX)
+        stored1 = _sensors_input_to_metric({CONF_D_MAX: display1}, is_imperial=True)[CONF_D_MAX]
+        display2 = _mm_to_display_in(stored1)
+        assert display2 == display1
+
+    def test_threshold_roundtrip_drift_bounded(self):
+        # First mm -> in(2dp) -> mm conversion must stay within half a display
+        # step (0.01 in = 0.254 mm -> <= 0.13 mm), far tighter than the old 1 dp.
+        display = _mm_to_display_in(DEFAULT_THRESHOLD)
+        stored = _zone_input_to_metric({CONF_ZONE_THRESHOLD: display}, is_imperial=True)[CONF_ZONE_THRESHOLD]
+        assert stored == pytest.approx(DEFAULT_THRESHOLD, abs=0.13)
 
 
 class TestControllerRateToLpm:

@@ -56,7 +56,7 @@
           "flow_meter_sensor": "Sensor entity that reports cumulative liters delivered. Required for flow_meter mode",
           "volume_entity": "Number entity on the smart valve that accepts a volume target in liters. Required for volume_preset mode",
           "delivery_timeout": "Maximum time to wait for flow_meter or volume_preset delivery before forcing valve close (safety limit)",
-          "threshold": "Deficit level (mm) that triggers automatic irrigation for this zone",
+          "threshold": "Deficit level that triggers automatic irrigation for this zone",
           "irrigation_time": "Time of day when NeverDry checks the deficit and irrigates if above threshold. Leave empty to disable automatic scheduling"
         }
       },
