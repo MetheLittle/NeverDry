@@ -2,17 +2,12 @@
 
 **Smart irrigation for Home Assistant** — knows exactly when your garden needs water, calculates how long to run the valve, and makes sure it actually closes.
 
-[![Tests](https://github.com/drake69/NeverDry/actions/workflows/tests.yml/badge.svg)](https://github.com/drake69/NeverDry/actions/workflows/tests.yml)
-[![codecov](https://codecov.io/gh/drake69/NeverDry/graph/badge.svg)](https://codecov.io/gh/drake69/NeverDry)
-[![HACS Validation](https://github.com/drake69/NeverDry/actions/workflows/hacs.yml/badge.svg)](https://github.com/drake69/NeverDry/actions/workflows/hacs.yml)
-[![Release](https://github.com/drake69/NeverDry/actions/workflows/release.yml/badge.svg)](https://github.com/drake69/NeverDry/actions/workflows/release.yml)
 [![Security](https://github.com/drake69/NeverDry/actions/workflows/security.yml/badge.svg)](https://github.com/drake69/NeverDry/actions/workflows/security.yml)
-[![Lint](https://github.com/drake69/NeverDry/actions/workflows/lint.yml/badge.svg)](https://github.com/drake69/NeverDry/actions/workflows/lint.yml)
-[![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5)](https://github.com/hacs/integration)
-[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+[![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5)](https://github.com/hacs/integration)
 [![GitHub release](https://img.shields.io/github/v/release/drake69/NeverDry)](https://github.com/drake69/NeverDry/releases)
 [![Downloads](https://img.shields.io/github/downloads/drake69/NeverDry/latest/total?color=41BDF5&label=downloads%20%28latest%29)](https://github.com/drake69/NeverDry/releases)
-[![GitHub stars](https://img.shields.io/github/stars/drake69/NeverDry?style=social)](https://github.com/drake69/NeverDry/stargazers)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+[![HA Community](https://img.shields.io/badge/Home%20Assistant-Community%20thread-41BDF5?logo=home-assistant&logoColor=white)](https://community.home-assistant.io/t/neverdry-smart-irrigation-that-calculates-when-and-how-long-to-water-fao-56-water-balance-hacs/1013835)
 <!-- Active installs (Home Assistant analytics). Currently no data: `never_dry` is not yet listed
      in analytics.home-assistant.io/custom_integrations.json (below HA's listing threshold).
      Uncomment when it appears — the badge auto-populates:
