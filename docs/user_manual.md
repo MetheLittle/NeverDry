@@ -274,6 +274,22 @@ If you want these totals to reflect rain that fell *before* NeverDry was
 installed, that historical rain cannot be reconstructed from a live sensor; the
 totals are only guaranteed correct from the install date forward.
 
+**Resetting the yearly totals.** Both totals reset on their own on 1 January,
+but you can clear them at any time from the **NeverDry** hub device, which
+carries two buttons:
+
+- **Reset yearly rain** — zeroes the system-wide yearly rain total (shared by
+  every zone's *Rain Yearly [L]*). Use it if the figure is wrong — for example
+  after changing rain sensor type — instead of waiting for the new year.
+- **Reset yearly water** — zeroes *Irrigated Yearly [L]* for every zone at once.
+  Each zone's lifetime total is preserved; only the year-to-date figure resets.
+
+Both are **state-only**: they restart the counters from zero but leave your
+historical charts (Energy dashboard statistics) untouched. Note that the yearly
+rain total is kept as a saved value that survives a restart *and a plain
+reinstall* — so if a wrong figure won't go away, this button is the way to clear
+it (reinstalling the integration on its own will not).
+
 ## 7. Irrigation logic — how it all works
 
 This diagram shows the complete irrigation decision flow, from weather data to valve control.
