@@ -310,3 +310,79 @@ class TestRegisterServicesMode:
         ctrl = IrrigationController(hass_mock, di_sensor, [zone])
         ctrl.register_services()
         assert len(di_sensor._zone_listeners) > before
+
+
+# ═══════════════════════════════════════════════
+#  _handle_reset_yearly_rain / _handle_reset_yearly_water
+# ═══════════════════════════════════════════════
+
+
+class TestHandleResetYearlyRain:
+    @pytest.mark.asyncio
+    async def test_clears_dryness_yearly_rain(self, controller, di_sensor):
+        di_sensor._yearly_rain = 1500.0
+        await controller._handle_reset_yearly_rain(_make_call({}))
+        assert di_sensor._yearly_rain == 0.0
+
+    @pytest.mark.asyncio
+    async def test_does_not_touch_deficit(self, controller, di_sensor):
+        di_sensor._deficit = 12.0
+        di_sensor._yearly_rain = 800.0
+        await controller._handle_reset_yearly_rain(_make_call({}))
+        assert di_sensor._deficit == 12.0  # deficit is a separate concern
+
+    @pytest.mark.asyncio
+    async def test_throttled_call_is_a_noop(self, controller, di_sensor):
+        di_sensor._yearly_rain = 500.0
+        with patch.object(controller, "_is_throttled", return_value=True):
+            await controller._handle_reset_yearly_rain(_make_call({}))
+        assert di_sensor._yearly_rain == 500.0  # skipped while throttled
+
+
+class TestHandleResetYearlyWater:
+    @pytest.mark.asyncio
+    async def test_clears_every_zone_yearly_water(self, controller, zone_orto, zone_prato):
+        zone_orto._yearly_water_delivered = 320.0
+        zone_prato._yearly_water_delivered = 90.0
+        await controller._handle_reset_yearly_water(_make_call({}))
+        assert zone_orto._yearly_water_delivered == 0.0
+        assert zone_prato._yearly_water_delivered == 0.0
+
+    @pytest.mark.asyncio
+    async def test_preserves_lifetime_total(self, controller, zone_orto):
+        zone_orto._yearly_water_delivered = 320.0
+        zone_orto._total_water_delivered = 5000.0
+        await controller._handle_reset_yearly_water(_make_call({}))
+        assert zone_orto._total_water_delivered == 5000.0  # lifetime meter untouched
+
+    @pytest.mark.asyncio
+    async def test_throttled_call_is_a_noop(self, controller, zone_orto):
+        zone_orto._yearly_water_delivered = 200.0
+        with patch.object(controller, "_is_throttled", return_value=True):
+            await controller._handle_reset_yearly_water(_make_call({}))
+        assert zone_orto._yearly_water_delivered == 200.0
+
+
+# ═══════════════════════════════════════════════
+#  DrynessIndexSensor.reset_yearly_rain / IrrigationZoneSensor.reset_yearly_water
+# ═══════════════════════════════════════════════
+
+
+class TestResetYearlyRainMethod:
+    def test_zeroes_total_and_reanchors_year(self, di_sensor):
+        di_sensor._yearly_rain = 1234.0
+        di_sensor._yearly_rain_year = 2020
+        di_sensor.reset_yearly_rain()
+        assert di_sensor._yearly_rain == 0.0
+        assert di_sensor._yearly_rain_year >= 2026  # re-anchored to current year
+
+
+class TestResetYearlyWaterMethod:
+    def test_zeroes_yearly_keeps_total(self, zone_orto):
+        zone_orto._yearly_water_delivered = 77.0
+        zone_orto._total_water_delivered = 999.0
+        zone_orto._yearly_water_year = 2020
+        zone_orto.reset_yearly_water()
+        assert zone_orto._yearly_water_delivered == 0.0
+        assert zone_orto._total_water_delivered == 999.0
+        assert zone_orto._yearly_water_year >= 2026

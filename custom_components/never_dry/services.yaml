@@ -2,6 +2,23 @@ reset:
   name: Reset deficit
   description: Reset the soil water deficit to zero (typically called after irrigation completes).
 
+reset_yearly_rain:
+  name: Reset yearly rain
+  description: >
+    Reset the year-to-date rain total to zero (system-wide). The total is a
+    single value shared by every zone's "Rain Yearly" sensor and normally
+    resets on its own on 1 January. Use this to clear a wrong value — for
+    example after switching rain sensor type — without waiting for the new
+    year or reinstalling. Historical statistics are left untouched.
+
+reset_yearly_water:
+  name: Reset yearly water
+  description: >
+    Reset the year-to-date irrigated-water total to zero for every zone. Each
+    zone keeps its own yearly counter and normally resets on 1 January; this
+    clears them all at once. The lifetime total delivered per zone and
+    historical statistics are left untouched.
+
 irrigate_zone:
   name: Irrigate zone
   description: >
