@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- System-wide reset buttons on the NeverDry hub device ([#142]):
+  - **Reset yearly rain** — clears the shared year-to-date rain total (behind every zone's *Rain Yearly [L]*) without waiting for 1 January. The total is a saved value that survives a restart and a plain reinstall, so this button is the way to clear a wrong figure — e.g. after switching rain sensor type.
+  - **Reset yearly water** — clears *Irrigated Yearly [L]* for every zone at once; each zone's lifetime total is preserved.
+  - Both are state-only: recorder long-term statistics (Energy dashboard) are left untouched.
+
 ### Fixed
 - Imperial units in the config flow and displays ([#139]):
   - Zone threshold help text no longer hardcodes "(mm)" — the field label already shows the user's unit (mm or in).
@@ -47,6 +53,7 @@ For releases prior to 0.11.0, see the [GitHub Releases](https://github.com/drake
 
 [Unreleased]: https://github.com/drake69/NeverDry/compare/v0.11.0...HEAD
 [0.11.0]: https://github.com/drake69/NeverDry/releases/tag/v0.11.0
+[#142]: https://github.com/drake69/NeverDry/pull/142
 [#139]: https://github.com/drake69/NeverDry/issues/139
 [#123]: https://github.com/drake69/NeverDry/issues/123
 [#116]: https://github.com/drake69/NeverDry/issues/116
