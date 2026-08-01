@@ -229,6 +229,31 @@ machinery rather than inventing a new one: a failed probe drives the FSM `unreac
 and the `UNREACHABLE_PASSIVE` / `UNREACHABLE_AT_IRRIGATION` notifications, so the user learns
 about a dead valve *before* the next scheduled run, not from a failed one.
 
+### Naming candidate: `System` is really `Weather` / `Environment` (proposal)
+
+**Status: Proposed (note, not yet decided).** The object today called **System** does one thing:
+it owns the shared **environmental feeds** (temperature + rain → `et_h`, `rain_delta`) and
+broadcasts them to the zones. "System" is a catch-all name that describes *where it sits*, not
+*what it does*. A name that matches its responsibility — **`Weather`** or **`Environment`** — would
+sharpen the ubiquitous language: the zones consume an environment, not "the system". (Caveat: it
+also *declares* the master valve/pump — a non-environmental concern; if the rename is adopted, that
+declaration may want to move, or stay as a documented exception.)
+
+**Extension enabled by the rename** — if the object is explicitly the environment/weather source, two
+forecast-driven properties become natural, both **configurable from the config flow** as properties of
+this entity:
+- **`rain_probability`** — actual rain probability (from the weather forecast), exposed as a feed
+  alongside temperature and rain.
+- **`rain_delay_above_threshold`** — if `rain_probability` is above a configurable threshold, delay
+  irrigation by a configurable amount. This is a *decision input* the environment provides; the
+  Scheduler/Zone consumes it (keeps the "environment supplies feeds, zone/scheduler decides" split
+  intact — the environment does not itself skip watering, it just raises the probability signal).
+
+Open questions before promoting to a decision: does the delay live as an Environment property or a
+Scheduler policy (cf. cycle&soak = Zone rule, serial/parallel = Scheduler policy)? Interaction with
+the existing rain-delta/water-balance rain memory (avoid double-counting forecast vs measured rain).
+Tracked in the backlog; keep here as a naming/evolution note until decided.
+
 ## Mapping to current code (2026-07-05)
 
 | Object | Current state |
