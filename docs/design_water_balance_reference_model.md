@@ -33,6 +33,18 @@ The load-bearing consequence: **two deficits are comparable only if they share a
 reference frame.** ET-mode siblings are comparable (shared weather). Two zones
 each measuring their own soil probe are **not**.
 
+**Model realization.** Each frame maps onto a concrete `WaterBalanceModel` (see
+[Domain Object Model](design_domain_object_model.md)): the ET frame is an
+abstract `ETBalanceModel` (shared integration) with two tiers —
+`ETModel` (temperature-only, today's baseline) and `PenmanMonteithModel`
+(FAO-56, needs humidity + wind + net radiation) — while system VWC →
+`VWCSystemModel` (stateless) and per-zone VWC → `VWCPerZoneModel`. A new ET tier
+is one new `et_rate`, not a new integrator. The frame travels on the `Deficit` value object
+each model returns, so the comparability rule above is enforced in code
+(`Deficit.is_comparable_to`) rather than left to convention. The abstraction is a
+pure, self-contained scaffold (`custom_components/never_dry/water_balance_model.py`),
+inert until a later phase wires today's `DrynessIndexSensor` ET/VWC fork onto it.
+
 ## Ownership: what lives at the system level vs in the zone
 
 | Element | Level | Notes |
