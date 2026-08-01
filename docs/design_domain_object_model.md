@@ -92,6 +92,12 @@ backend allows (see the design decision below).
 
 ## Class diagram
 
+![UML class diagram of the NeverDry domain model](assets/domain_model_uml.svg)
+
+*Rendered diagram (`assets/domain_model_uml.svg`) — blue is the liters contract going
+down, green is the truth flowing back. The Mermaid source below is the normative
+definition; keep the two in sync.*
+
 ```mermaid
 classDiagram
     direction TB
@@ -242,6 +248,110 @@ a `DeliveryResult`; the `Scheduler` never touches drivers — it only decides *w
 (and, with cycle & soak, may interleave another eligible zone during a soak pause);
 `MasterDriver` reacts to the aggregate driver activity, it takes no decisions. The liveness
 `ping()` lives in the abstract `Driver`, so both specializations inherit it.
+
+## The classes in detail
+
+Attribute-by-attribute and method-by-method reference for each class, with the
+responsibility that justifies every member. This expands the diagram above; the
+diagram stays the source of truth for relationships.
+
+### System
+
+The global model and shared infrastructure. *Declares* the master valve/pump but never
+commands it.
+
+| Member | Kind | Meaning |
+|---|---|---|
+| `alpha` | attr | ET sensitivity of the model (mm/°C/day) |
+| `d_max` | attr | Cap on the accumulable deficit (mm) |
+| `temperature_sensor` | attr | Shared temperature sensor |
+| `rain_sensor` | attr | Shared rain sensor (event or cumulative type) |
+| `compute_deficit() → mm` | method | FAO-56 water balance: reference deficit at Kc = 1 |
+
+### Zone
+
+The irrigation unit: translates the model into water demand and settles the deficit with
+the driver's reported truth.
+
+| Member | Kind | Meaning |
+|---|---|---|
+| `kc_or_plant_family` | attr | Crop coefficient (or the plant family that determines it) |
+| `area_m2` | attr | Irrigated surface |
+| `sun_exposure` | attr | Per-zone sun exposure factor |
+| `threshold_mm` | attr | Deficit threshold that triggers irrigation |
+| `cycle_soak_rule` | attr | Cycle & soak rule (dose/pause) — a Zone rule, not a scheduler one |
+| `deficit_mm` | attr | Current zone deficit |
+| `water_demand() → liters` | method | mm → liters via area and efficiency; liters are the contract towards the driver |
+| `settle(r: DeliveryResult)` | method | Scales the deficit by the actually-delivered liters — exactly once |
+
+### Scheduler
+
+The *when* and the concurrency policy. It never touches drivers: it only decides which
+zone runs in which window.
+
+| Member | Kind | Meaning |
+|---|---|---|
+| `time_windows` | attr | Time windows and calendars |
+| `concurrency` | attr | Serial or parallel zone runs |
+| `queue` | attr | Queue of eligible zones |
+| `next_eligible() → Zone` | method | Next zone to serve, per queue and windows |
+| `interleave_during_soak()` | method | During a soak pause it may interleave another eligible zone |
+
+### Driver «abstract»
+
+The common base of the two specializations: everything about commanding a physical entity
+and not blindly trusting the answer.
+
+| Member | Kind | Meaning |
+|---|---|---|
+| `entity_adapter` | attr | Adapter over the HA entity (`valve.*` or `switch.*`) |
+| `adaptive_timeout` | attr | Verification window adapted to observed latency (rolling mean + 3σ) |
+| `safety_layers` | attr | Watchdog; close on error/stop/restart |
+| `ping_interval_min` | attr | Active liveness: periodic ping, not just passive state |
+| `turn_on() / turn_off()` | method | Command with state confirmation (and bounded retry with backoff) |
+| `ping() → alive \| unreachable` | method | Reachability check independent of commands |
+
+### ZoneDriver
+
+The *how* for a single zone: receives liters, picks the actuation strategy, returns the
+truth.
+
+| Member | Kind | Meaning |
+|---|---|---|
+| `delivery_mode` | attr | `native_volume` when the device doses in liters, otherwise `time × flow` (seconds via flow rate) |
+| `flow_rate_lpm` | attr | Nominal guard flow rate (L/min) |
+| `flow_telemetry` | attr | Flow telemetry, when available (optional) |
+| `zero_flow_guard` | attr | Guard against zero-flow sessions |
+| `deliver(liters) → DeliveryResult` | method | Actuates the request and reports delivered liters with their degree of truth |
+
+### MasterDriver
+
+Coordinates the shared hydraulics (pump / master valve). Reacts to aggregate driver
+activity, takes no decisions, has no notion of liters.
+
+| Member | Kind | Meaning |
+|---|---|---|
+| `off_delay_s` | attr | Linger delay after the last active zone |
+| `follow(any_zone_driver_active)` | method | ON while any ZoneDriver is active, OFF (after the linger) when none is |
+
+### DeliveryResult
+
+The return trip of the truth: the driver does not just execute — it states how much it
+delivered and how much that figure can be trusted.
+
+| Member | Kind | Meaning |
+|---|---|---|
+| `liters_delivered` | attr | Liters actually delivered, as far as the backend allows to know |
+| `quality` | attr | `measured` · `estimated` · `partial` · `delayed` · `low_confidence` |
+| `elapsed_s` | attr | Real session duration |
+| `revise(measured_liters)` | method | Late revision for slow-reporting backends (e.g. Hydrawise): the true measure arrives later and corrects the estimate |
+
+**Proposed addition (backlog AI-163, not yet part of the model):** a `device_reported`
+quality level between `measured` and `estimated`, fed by the device's own end-of-session
+report (duration + start/end volume — e.g. Sonoff SWV via Z2M). Some valves cannot stream
+flow in real time but do report a trustworthy session total: more truthful than a
+`flow_rate × time` estimate, less than live metering. It belongs to the driver as a
+capability and will land with the driver abstraction.
 
 ## Design decisions
 
