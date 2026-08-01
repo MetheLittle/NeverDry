@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+- Imperial units in the config flow and displays ([#139]):
+  - Zone threshold help text no longer hardcodes "(mm)" — the field label already shows the user's unit (mm or in).
+  - Deficit, threshold and ET sensors now declare a display precision, so imperial users see meaningful decimals instead of values rounded to whole inches.
+  - Reconfiguring a zone in imperial is now stable: threshold and max-deficit round-trip through inches without drifting on every edit.
 
 ## [0.11.0] - 2026-07-26
 
@@ -43,5 +47,6 @@ For releases prior to 0.11.0, see the [GitHub Releases](https://github.com/drake
 
 [Unreleased]: https://github.com/drake69/NeverDry/compare/v0.11.0...HEAD
 [0.11.0]: https://github.com/drake69/NeverDry/releases/tag/v0.11.0
+[#139]: https://github.com/drake69/NeverDry/issues/139
 [#123]: https://github.com/drake69/NeverDry/issues/123
 [#116]: https://github.com/drake69/NeverDry/issues/116

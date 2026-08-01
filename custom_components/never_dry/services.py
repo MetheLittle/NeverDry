@@ -33,6 +33,8 @@ from .const import (
     SERVICE_MARK_IRRIGATED,
     SERVICE_RESET,
     SERVICE_RESET_VALVE,
+    SERVICE_RESET_YEARLY_RAIN,
+    SERVICE_RESET_YEARLY_WATER,
     SERVICE_SET_DEFICIT,
     SERVICE_STOP,
     SERVICE_STOP_ZONE,
@@ -55,6 +57,8 @@ _GLOBAL: dict[str, str] = {
     SERVICE_STOP: "_handle_stop",
     SERVICE_IRRIGATE_ALL: "_handle_irrigate_all",
     SERVICE_RESET: "_handle_reset",
+    SERVICE_RESET_YEARLY_RAIN: "_handle_reset_yearly_rain",
+    SERVICE_RESET_YEARLY_WATER: "_handle_reset_yearly_water",
 }
 
 

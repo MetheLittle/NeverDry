@@ -7,6 +7,8 @@ from never_dry.button import (
     IrrigateButton,
     MarkIrrigatedButton,
     ResetMaintenanceButton,
+    ResetYearlyRainButton,
+    ResetYearlyWaterButton,
     StopButton,
     _create_buttons,
 )
@@ -17,8 +19,13 @@ from never_dry.const import (
     DOMAIN,
     SERVICE_IRRIGATE_ZONE,
     SERVICE_MARK_IRRIGATED,
+    SERVICE_RESET_YEARLY_RAIN,
+    SERVICE_RESET_YEARLY_WATER,
     SERVICE_STOP_ZONE,
 )
+
+# Every config grows two system-wide hub buttons (reset yearly rain + water).
+HUB_BUTTONS = 2
 
 
 class TestButtonCreation:
@@ -32,7 +39,7 @@ class TestButtonCreation:
             ]
         }
         buttons = _create_buttons(hass_mock, config)
-        assert len(buttons) == 4  # MarkIrrigated + Irrigate per zone
+        assert len(buttons) == 4 + HUB_BUTTONS  # MarkIrrigated + Irrigate per zone + hub
 
     def test_button_types(self, hass_mock):
         config = {CONF_ZONES: [{CONF_ZONE_NAME: "Orto"}]}
@@ -40,21 +47,27 @@ class TestButtonCreation:
         assert isinstance(buttons[0], MarkIrrigatedButton)
         assert isinstance(buttons[1], IrrigateButton)
 
-    def test_no_buttons_without_zones(self, hass_mock):
+    def test_only_hub_buttons_without_zones(self, hass_mock):
         buttons = _create_buttons(hass_mock, {})
-        assert len(buttons) == 0
+        assert len(buttons) == HUB_BUTTONS
 
-    def test_no_buttons_empty_zones(self, hass_mock):
+    def test_only_hub_buttons_empty_zones(self, hass_mock):
         buttons = _create_buttons(hass_mock, {CONF_ZONES: []})
-        assert len(buttons) == 0
+        assert len(buttons) == HUB_BUTTONS
 
     def test_valve_zone_gets_stop_and_reset_buttons(self, hass_mock):
         config = {CONF_ZONES: [{CONF_ZONE_NAME: "Orto", "valve": "switch.valve_orto"}]}
         buttons = _create_buttons(hass_mock, config)
-        # Mark + Irrigate + Stop + Reset
-        assert len(buttons) == 4
+        # Mark + Irrigate + Stop + Reset per zone, plus the hub buttons
+        assert len(buttons) == 4 + HUB_BUTTONS
         assert any(isinstance(b, StopButton) for b in buttons)
         assert any(isinstance(b, ResetMaintenanceButton) for b in buttons)
+
+    def test_hub_reset_buttons_always_created(self, hass_mock):
+        config = {CONF_ZONES: [{CONF_ZONE_NAME: "Orto"}]}
+        buttons = _create_buttons(hass_mock, config)
+        assert any(isinstance(b, ResetYearlyRainButton) for b in buttons)
+        assert any(isinstance(b, ResetYearlyWaterButton) for b in buttons)
 
 
 class TestButtonProperties:
@@ -132,19 +145,27 @@ class TestStopButton:
 class TestButtonDeviceInfo:
     """Test device_info grouping."""
 
-    def test_buttons_have_device_info_from_create(self, hass_mock):
+    def test_zone_buttons_have_zone_device_hub_buttons_have_hub_device(self, hass_mock):
         config = {CONF_ZONES: [{CONF_ZONE_NAME: "Orto"}]}
         buttons = _create_buttons(hass_mock, config, entry_id="test_entry")
         for btn in buttons:
             assert hasattr(btn, "_attr_device_info")
-            assert (DOMAIN, "test_entry_orto") in btn._attr_device_info["identifiers"]
+            identifiers = btn._attr_device_info["identifiers"]
+            if isinstance(btn, (ResetYearlyRainButton, ResetYearlyWaterButton)):
+                assert (DOMAIN, "test_entry") in identifiers  # hub device
+            else:
+                assert (DOMAIN, "test_entry_orto") in identifiers  # zone device
 
     def test_buttons_without_entry_id_have_yaml_device(self, hass_mock):
         config = {CONF_ZONES: [{CONF_ZONE_NAME: "Orto"}]}
         buttons = _create_buttons(hass_mock, config)
         for btn in buttons:
             assert hasattr(btn, "_attr_device_info")
-            assert (DOMAIN, "yaml_orto") in btn._attr_device_info["identifiers"]
+            identifiers = btn._attr_device_info["identifiers"]
+            if isinstance(btn, (ResetYearlyRainButton, ResetYearlyWaterButton)):
+                assert (DOMAIN, "yaml") in identifiers  # hub device
+            else:
+                assert (DOMAIN, "yaml_orto") in identifiers  # zone device
 
 
 class TestIrrigateButton:
@@ -173,4 +194,50 @@ class TestIrrigateButton:
             DOMAIN,
             SERVICE_IRRIGATE_ZONE,
             {ATTR_ZONE_NAME: "Orto"},
+        )
+
+
+class TestResetYearlyRainButton:
+    """The hub button that clears the system-wide yearly rain total."""
+
+    def test_unique_id(self, hass_mock):
+        assert ResetYearlyRainButton(hass_mock)._attr_unique_id == "reset_yearly_rain"
+
+    def test_name(self, hass_mock):
+        assert ResetYearlyRainButton(hass_mock)._attr_name == "Reset yearly rain"
+
+    @pytest.mark.asyncio
+    async def test_press_calls_reset_yearly_rain_service(self, hass_mock):
+        hass_mock.services.async_call = AsyncMock()
+        btn = ResetYearlyRainButton(hass_mock)
+
+        await btn.async_press()
+
+        hass_mock.services.async_call.assert_called_once_with(
+            DOMAIN,
+            SERVICE_RESET_YEARLY_RAIN,
+            {},
+        )
+
+
+class TestResetYearlyWaterButton:
+    """The hub button that clears every zone's yearly irrigated-water total."""
+
+    def test_unique_id(self, hass_mock):
+        assert ResetYearlyWaterButton(hass_mock)._attr_unique_id == "reset_yearly_water"
+
+    def test_name(self, hass_mock):
+        assert ResetYearlyWaterButton(hass_mock)._attr_name == "Reset yearly water"
+
+    @pytest.mark.asyncio
+    async def test_press_calls_reset_yearly_water_service(self, hass_mock):
+        hass_mock.services.async_call = AsyncMock()
+        btn = ResetYearlyWaterButton(hass_mock)
+
+        await btn.async_press()
+
+        hass_mock.services.async_call.assert_called_once_with(
+            DOMAIN,
+            SERVICE_RESET_YEARLY_WATER,
+            {},
         )

@@ -105,3 +105,22 @@ class TestDeviceClassDeclarations:
         v = sensor.native_value
         # Must be a timezone-aware datetime, not an ISO string.
         assert isinstance(v, datetime) and v.tzinfo is not None
+
+
+class TestDisplayPrecision:
+    """The mm length sensors must declare suggested_display_precision so HA shows
+    decimals — and, crucially, scales the decimals up when converting mm→in for
+    imperial users (issue #139: values were rounded to integers, useless in in).
+    """
+
+    def test_et_sensor_precision(self, et_sensor):
+        assert et_sensor._attr_suggested_display_precision == 2
+
+    def test_dryness_index_precision(self, di_sensor):
+        assert di_sensor._attr_suggested_display_precision == 1
+
+    def test_zone_deficit_precision(self, di_sensor, zone_orto):
+        assert ZoneDeficitSensor(zone_orto)._attr_suggested_display_precision == 1
+
+    def test_zone_threshold_precision(self, di_sensor, zone_orto):
+        assert ZoneThresholdSensor(zone_orto)._attr_suggested_display_precision == 1

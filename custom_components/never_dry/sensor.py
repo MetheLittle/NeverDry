@@ -496,6 +496,9 @@ class ETSensor(SensorEntity):
     _attr_unique_id = "et_hourly_estimate"
     _attr_device_class = SensorDeviceClass.PRECIPITATION_INTENSITY
     _attr_native_unit_of_measurement = UnitOfVolumetricFlux.MILLIMETERS_PER_HOUR
+    # Native precision in mm/h; HA scales up the decimals automatically when the
+    # user's unit system converts to in/h (issue #139).
+    _attr_suggested_display_precision = 2
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:sun-thermometer"
 
@@ -547,6 +550,9 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
     _attr_unique_id = "never_dry"
     _attr_device_class = SensorDeviceClass.PRECIPITATION
     _attr_native_unit_of_measurement = UnitOfLength.MILLIMETERS
+    # Native precision in mm; HA scales up the decimals automatically when the
+    # user's unit system converts to inches (issue #139).
+    _attr_suggested_display_precision = 1
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:water-percent-alert"
 
@@ -948,6 +954,19 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         self._deficit = 0.0
         self._last_update = datetime.now()
 
+    def reset_yearly_rain(self) -> None:
+        """Clear the year-to-date rain total [mm] — system-wide.
+
+        Zeroes the source counter the "Rain Yearly [L]" zone sensors derive
+        from and re-anchors the calendar year, so a fresh restore attribute is
+        written on the next ``async_write_ha_state``. Needed because the total
+        persists as a restore attribute that survives a plain reinstall
+        (GH forum: yearly rain stuck after switching rain sensor type).
+        Historical recorder statistics are left untouched.
+        """
+        self._yearly_rain = 0.0
+        self._yearly_rain_year = datetime.now().year
+
     def set_deficit_mm(self, value: float) -> None:
         """Set deficit to an arbitrary value [mm] — intended for testing/debugging."""
         self._deficit = max(0.0, min(float(value), self._d_max))
@@ -1224,6 +1243,17 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         """Set zone deficit to an arbitrary value [mm] — intended for testing/debugging."""
         self._zone_deficit = max(0.0, min(float(value), self._d_max))
 
+    def reset_yearly_water(self) -> None:
+        """Clear this zone's year-to-date irrigated-water total [L].
+
+        Zeroes the counter behind the "Yearly Water" sensor and re-anchors the
+        calendar year, so a fresh restore attribute is written on the next
+        ``async_write_ha_state``. The lifetime ``total_water_delivered_l`` is
+        left untouched — only the yearly total, mirroring the yearly-rain reset.
+        """
+        self._yearly_water_delivered = 0.0
+        self._yearly_water_year = datetime.now().year
+
     def reset_deficit(self, source: str = "unknown", delivered_liters: float | None = None) -> None:
         """Reset this zone's deficit to zero (called after irrigation).
 
@@ -1368,6 +1398,9 @@ class ZoneDeficitSensor(SensorEntity):
     _attr_device_class = SensorDeviceClass.PRECIPITATION
     _attr_name = "Deficit"
     _attr_native_unit_of_measurement = UnitOfLength.MILLIMETERS
+    # Native precision in mm; HA scales up the decimals automatically when the
+    # user's unit system converts to inches (issue #139).
+    _attr_suggested_display_precision = 1
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:water-percent-alert"
 
@@ -1799,6 +1832,9 @@ class ZoneThresholdSensor(_ZoneTextSensor):
 
     _attr_device_class = SensorDeviceClass.PRECIPITATION
     _attr_native_unit_of_measurement = UnitOfLength.MILLIMETERS
+    # Native precision in mm; HA scales up the decimals automatically when the
+    # user's unit system converts to inches (issue #139).
+    _attr_suggested_display_precision = 1
 
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(

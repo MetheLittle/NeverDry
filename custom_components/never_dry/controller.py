@@ -347,6 +347,30 @@ class IrrigationController:
             zs.reset_deficit("service_reset")
             zs.async_write_ha_state()
 
+    async def _handle_reset_yearly_rain(self, call: ServiceCall) -> None:
+        """Clear the year-to-date rain total [mm] — system-wide.
+
+        The total lives on the Dryness Index as a restore attribute and the
+        per-zone "Rain Yearly [L]" sensors derive from it, so resetting it
+        here re-anchors every zone's yearly-rain display to zero.
+        """
+        if self._is_throttled("reset_yearly_rain"):
+            return
+        self._dryness.reset_yearly_rain()
+        self._dryness.async_write_ha_state()
+
+    async def _handle_reset_yearly_water(self, call: ServiceCall) -> None:
+        """Clear the year-to-date irrigated-water total [L] for every zone.
+
+        The counter is per-zone, so this fans out across all zones of this
+        controller; the lifetime total is preserved.
+        """
+        if self._is_throttled("reset_yearly_water"):
+            return
+        for zs in self._zones.values():
+            zs.reset_yearly_water()
+            zs.async_write_ha_state()
+
     async def _handle_set_deficit(self, call: ServiceCall) -> None:
         """Set deficit to a specific value [mm] — for testing and manual correction."""
         deficit_mm = float(call.data.get(ATTR_DEFICIT_MM, 0.0))
