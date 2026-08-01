@@ -1,7 +1,7 @@
 # Design — Domain Object Model
 
 **Status:** Draft
-**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object)
+**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object; 2026-08-01 RFC to dissolve `System` into `Environment` + capability-matched models)
 **Related:** GH #74 (actuator abstraction discussion), GH #94 (`valve.*` support), GH #95 (master valve/pump), [Water-Balance Reference Model](design_water_balance_reference_model.md) (where the deficit lives), [Domain Model Anomalies](design_domain_model_anomalies.md) (code-verified audit against this model)
 
 ## Purpose
@@ -16,7 +16,7 @@ as the codebase evolves. For the current module/data-flow architecture see
 
 | Object | Responsibility | Key attributes |
 |---|---|---|
-| **System** | Shared **feeds** and global model params | α (ET sensitivity), D_max, the temperature + rain sensors it broadcasts to zones; *declares* the master valve/pump. **The deficit is not held here — it lives per-zone** (see Water-Balance Reference Model) |
+| **System** | Shared **feeds** and global model params | α (ET sensitivity), D_max, the temperature + rain sensors it broadcasts to zones; *declares* the master valve/pump. **The deficit is not held here — it lives per-zone** (see Water-Balance Reference Model). ⚠️ **Under RFC to be dissolved** — see "RFC: dissolve `System`" below; α is model-specific (→ `ETModel`), not a global param |
 | **Zone** | Irrigation unit; owns its deficit and translates it into water demand | Kc / plant family, area, sun exposure; cycle & soak rule; **its own deficit** (`+ET·Kc·Δt − rain − irrigation`, new zone starts at 0); translates mm → liters |
 | **Scheduler** | The *when* — and the concurrency policy | Time windows, sequences, calendars; serial vs parallel zone runs, interleaving during soak |
 | **ZoneDriver** | The *how* — actuation of one zone's water demand | Entity adapter (`valve.*`/`switch.*`), delivery mode (native volume in liters vs time in seconds via flow rate), flow rate, zero-flow guard; returns a **DeliveryResult** |
@@ -485,30 +485,71 @@ machinery rather than inventing a new one: a failed probe drives the FSM `unreac
 and the `UNREACHABLE_PASSIVE` / `UNREACHABLE_AT_IRRIGATION` notifications, so the user learns
 about a dead valve *before* the next scheduled run, not from a failed one.
 
-### Naming candidate: `System` is really `Weather` / `Environment` (proposal)
+### RFC: dissolve `System` into `Environment` + capability-matched models
 
-**Status: Proposed (note, not yet decided).** The object today called **System** does one thing:
-it owns the shared **environmental feeds** (temperature + rain → `et_h`, `rain_delta`) and
-broadcasts them to the zones. "System" is a catch-all name that describes *where it sits*, not
-*what it does*. A name that matches its responsibility — **`Weather`** or **`Environment`** — would
-sharpen the ubiquitous language: the zones consume an environment, not "the system". (Caveat: it
-also *declares* the master valve/pump — a non-environmental concern; if the rename is adopted, that
-declaration may want to move, or stay as a documented exception.)
+**Status: RFC (Proposed) — 2026-08-01.** Supersedes the earlier "rename System → Weather/Environment"
+note. Direction is agreed; not yet implemented (the water-balance/actuator scaffolds are still inert).
+Promote to Accepted only once wired.
 
-**Extension enabled by the rename** — if the object is explicitly the environment/weather source, two
-forecast-driven properties become natural, both **configurable from the config flow** as properties of
-this entity:
-- **`rain_probability`** — actual rain probability (from the weather forecast), exposed as a feed
-  alongside temperature and rain.
-- **`rain_delay_above_threshold`** — if `rain_probability` is above a configurable threshold, delay
-  irrigation by a configurable amount. This is a *decision input* the environment provides; the
-  Scheduler/Zone consumes it (keeps the "environment supplies feeds, zone/scheduler decides" split
-  intact — the environment does not itself skip watering, it just raises the probability signal).
+**Problem.** The object today called **System** is a catch-all that bundles three unrelated
+responsibilities, and one of its "global params" is not global at all:
 
-Open questions before promoting to a decision: does the delay live as an Environment property or a
-Scheduler policy (cf. cycle&soak = Zone rule, serial/parallel = Scheduler policy)? Interaction with
-the existing rain-delta/water-balance rain memory (avoid double-counting forecast vs measured rain).
-Tracked in the backlog; keep here as a naming/evolution note until decided.
+| System attribute (today) | Really belongs to | Why |
+|---|---|---|
+| temperature + rain sensors (feeds) | **`Environment`** | Environmental inputs the zones consume |
+| **α** (ET sensitivity) | **`ETModel`** | Used **only** by the simple temperature ET tier — verified: `ETModel.et_hourly = max(0, α·(T−T_base)/24)`. Hargreaves uses its own 0.0023 + extraterrestrial radiation; Penman-Monteith is an energy balance; VWC has no ET. α is meaningless for every other model, so it cannot be a system-global param |
+| **D_max** (deficit clamp) | global water-balance config | Genuinely shared — **every** model clamps its `Deficit` to `[0, D_max]` (ET tiers *and* VWC). Stays a global setting, not a `System` object member |
+| master valve / pump (declaration) | **`MasterDriver`** | A hydraulics/actuation concern, not an environmental one |
+
+With those redistributed, **nothing is left on `System`** — so `System` is **dissolved**, not renamed.
+
+**`Environment` — the declared sensor inventory.** `Environment` becomes the user's answer to
+"which sensors do you have?", declared at install from the config flow. It owns the bindings to
+**all** model inputs, not just the temperature+rain of the simple tier:
+
+- temperature, rain
+- relative humidity, wind speed, net radiation (Penman-Monteith)
+- daily tmax / tmin (Hargreaves), plus **latitude** (site constant → the astronomical radiation term)
+- system soil-moisture (VWC) probe
+- **`rain_probability`** — forecast feed (see the forecast extension below)
+
+**Capability matching.** Each `WaterBalanceModel` tier declares the sensors it requires; a `Zone`
+offers **only** the models whose requirements are satisfied by what `Environment` declares:
+
+```
+Environment.declared_sensors  ⊇  Model.required_sensors   ⇒   Zone offers that model
+```
+
+The requirement per tier is already encoded implicitly in the typed step input; the RFC promotes it
+to an explicit `required_sensors` set on each model + a matching method on `Zone`:
+
+| Model | `required_sensors` (from its `*Step`) |
+|---|---|
+| `ETModel` | temperature |
+| `HargreavesModel` | tmax, tmin *(latitude/day-of-year derived)* |
+| `PenmanMonteithModel` | temperature, humidity, wind, net radiation |
+| `VWCSystemModel` / `VWCPerZoneModel` | soil-moisture probe |
+
+*(rain is a credit feed shared by all ET tiers, defaulting to 0 — not a gating requirement.)*
+
+So a user with only a temperature sensor gets `ETModel`; add humidity + wind + radiation and
+Penman-Monteith unlocks; add a soil probe and VWC mode becomes available — per zone, automatically,
+with no model chosen by hand that the hardware can't feed.
+
+**Forecast extension** (unchanged from the earlier note, now as `Environment` properties, config-flow
+configurable):
+- **`rain_probability`** — forecast rain probability, exposed as a feed alongside temperature and rain.
+- **`rain_delay_above_threshold`** — above a configurable probability, delay irrigation by a
+  configurable amount. A *decision input* the environment provides; the Scheduler/Zone consumes it
+  (the environment supplies signals, it does not itself skip watering).
+
+**Open questions before Accepted.** Where does `rain_delay` live — an `Environment` property or a
+`Scheduler` policy (cf. cycle&soak = Zone rule, serial/parallel = Scheduler policy)? Avoid
+double-counting forecast vs measured rain against the water-balance rain memory. Where does the
+now-global **D_max** attach in config (a top-level setting vs a per-zone default)? Tracked in the
+backlog. This RFC raises the **α-ownership** finding (α modeled on `System` but usable only by
+`ETModel`) — to be logged as an anomaly in the [Domain Model Anomalies](design_domain_model_anomalies.md)
+audit when promoted.
 
 ## Mapping to current code (2026-07-05)
 
@@ -517,7 +558,7 @@ Tracked in the backlog; keep here as a naming/evolution note until decided.
 | System | ✅ explicit: config entry globals, `ETSensor`, `DrynessIndexSensor` — now the **feed hub / broadcaster** (temperature + rain → `et_h`, `rain_delta` → zones). Its `_deficit` accumulator is being **retired as ET state** and survives only as the interim VWC-system value (Water-Balance Reference Model, D2/D5) |
 | Zone | ✅ explicit: `IrrigationZoneSensor`, per-zone config (Kc, area, sun exposure). `_zone_deficit` is **authoritative**; a new zone **starts at 0** (D4), not seeded from the global. Cycle & soak: not implemented |
 | Scheduler | ⚠️ implicit and minimal: deficit-triggered daily cycle inside `IrrigationController`; no cron/sequences/calendars (deliberately — that is Irrigation Unlimited's territory). Concurrency is de-facto serial, not an explicit policy |
-| ZoneDriver | ⚠️ exists but internal: `ValveOperator` (FSM, safety layers, latency tracker) + valve/switch adapter (GH #74/#94); native volume delivery in progress. Delivered liters returned as a bare float — no DeliveryResult qualifier yet. **Scaffold extracted**: `actuator.py` (`Actuator`/`ZoneActuator`/`MasterActuator`), inert until wired |
+| ZoneDriver | ⚠️ exists but internal: `ValveOperator` (FSM, safety layers, latency tracker) + valve/switch adapter (GH #74/#94); native volume delivery in progress. Delivered liters returned as a bare float — no DeliveryResult qualifier yet. **Scaffold extracted**: `actuator.py` (`Actuator`/`ZoneActuator`/`MasterActuator`), inert until wired. 📝 **Naming decision (2026-08-01):** the scaffold family will be renamed `Actuator`/`ZoneActuator`/`MasterActuator` → **`Driver`/`ZoneDriver`/`MasterDriver`** (file `actuator.py` → `driver.py`) to match this model's term; `ManualActuator` keeps its name — it is deliberately *not* a `Driver` (shares only the `DeliveryResult` contract) |
 | MasterDriver | ❌ not implemented (GH #95); its scaffold lives in `actuator.py` (`MasterActuator`) |
 | ManualActuator | ❌ not implemented; **scaffold extracted**: `ManualActuator` in `actuator.py` (valve-less, `request_irrigation`/`mark_irrigated` → `DeliveryResult(declared)`), inert. For hand-watered house plants — a *how* with no hardware |
 | WaterBalanceModel | ⚠️ implicit today: the ET/VWC fork inside `DrynessIndexSensor._on_sensor_change` + the per-zone loop, with the ET formula duplicated in `ETSensor`. **Scaffold extracted**: `water_balance_model.py` (`WaterBalanceModel` + `ETBalanceModel` tiers `ETModel`/`HargreavesModel`/`PenmanMonteithModel` + `VWCSystemModel`/`VWCPerZoneModel`), pure, inert until wired |
