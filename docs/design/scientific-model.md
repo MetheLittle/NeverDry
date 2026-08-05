@@ -161,6 +161,43 @@ t_irr = V / Q            [min]
 | Pop-up sprinklers | 0.60 – 0.75 |
 | Manual / hose | 0.50 – 0.70 |
 
+### 4.2 Site exposure (microclimate factor)
+
+The per-zone `Kc` above is the product of a planting term and a site term,
+following the landscape coefficient method of Costello et al. (2000) [38]:
+
+```
+K_L      = k_s · k_d · k_mc
+Kc_zone  = Kc(doy, plant_family | manual override) · k_mc
+```
+
+`k_s` (species) is what the plant-family seasonal profile represents; `k_mc`
+(microclimate) is the zone's site exposure — shade, wind, or heat radiated
+back from paving and walls. `k_d` (density) is not modelled: residential
+zones are configured as whole irrigated areas, so canopy density is already
+folded into the family profile.
+
+The factor multiplies the planting term rather than replacing it, which is
+the point of the parameter: a constant `Kc` freezes a shaded zone at one
+season's value, and the resulting error is largest in autumn (a lawn shaded
+from 14:00 drifts ~33% high by mid-October), precisely when over-watering
+shaded turf promotes disease.
+
+`k_mc` presets span 0.60 (deep shade) to 1.20 (reflected heat), with 1.00
+for the open, reference-like condition. The source literature gives
+0.5 – 0.9 for shaded and wind-sheltered sites and values above 1.0 for
+paved or wall-adjacent sites, where advective heating pushes a planting past
+reference ET. The specific preset values are **expert judgment, not
+validated measurements** (see §6.2).
+
+In VWC mode the zone deficit is `D_zone = D_ref · Kc_zone`, so `k_mc` rides
+along with `Kc` there too. The reference probe sits in one spot, not in each
+zone, so scaling it per zone is the existing premise of that mode rather than
+something the factor introduces. `Kc_zone` combines multiplicatively with a
+manual override, so a high override and an above-1.0 exposure do multiply out
+(2.0 × 1.20 = 2.4); this is deliberately not capped, since capping would
+silently contradict two explicit user choices.
+
 ## 5. Scheduling modes
 
 | Aspect | Mode A — Threshold | Mode B — Daily deficit-based |
@@ -200,6 +237,13 @@ for slow sensors (>15 min/reading) consider a moving average via HA's
 or substrate field capacity. Volume estimate assumes uniform distribution
 over area `A`; use a separate zone per distinct area.
 
+**Microclimate factor** — the exposure presets (§4.2) are expert-judgment
+values in the range the landscape coefficient method describes, not
+site-measured coefficients, and they are *static*: a shade fraction is
+itself seasonal, since a low autumn sun throws a longer, earlier shadow. A
+template sensor driven by `sun.sun` would make the factor self-correcting;
+that is deliberately left as a follow-up to the static presets.
+
 **Rain sensor** — wrong `rain_sensor_type` causes large errors: `event` on a
 cumulative sensor subtracts the full daily total each update; `daily_total`
 on an event sensor misses all but the first of a run of equal values. Rain
@@ -220,7 +264,7 @@ sensor as an action condition.
 
 ## 7. References
 
-37 citations. Each entry carries a
+38 citations. Each entry carries a
 DOI link where one exists, otherwise the official landing-page URL; see §0 for
 how these links were obtained and verified. Items without a registered DOI
 (FAO/ASCE reports, datasheets, web docs) link to their canonical page instead.
@@ -276,6 +320,9 @@ how these links were obtained and verified. Items without a registered DOI
 36. HA Developer Documentation — SensorEntity. https://developers.home-assistant.io/docs/core/entity/sensor
 37. HACS Integration publishing guide. https://hacs.xyz/docs/publish/integration
 
+### Landscape coefficients
+38. Costello L.R., Matheny N.P., Clark J.R., Jones K.S. (2000). *A Guide to Estimating Irrigation Water Needs of Landscape Plantings in California: The Landscape Coefficient Method and WUCOLS III.* University of California Cooperative Extension & California Department of Water Resources. — https://cimis.water.ca.gov/Content/PDF/wucols00.pdf — **link verification caveat:** title/authors/year/publisher confirmed against corroborating institutional pages (UC/CalWEP), not against the PDF body, which the retrieval tooling could not render as text. Treat as landing-page-level verification (§0 step 5), pending a reader check of Part 1 §2 for the `K_L = k_s · k_d · k_mc` definition and the `k_mc` table.
+
 ---
 
 ## Revision history
@@ -284,3 +331,4 @@ how these links were obtained and verified. Items without a registered DOI
 |---|---|
 | 2026-04 | Initial — model specification (v0.1.0). |
 | 2026-06 | Restructured as a standalone note; references verified against primary sources. |
+| 2026-08 | Added §4.2 site exposure (microclimate factor, #146), its limitation in §6.2, and ref 38. |

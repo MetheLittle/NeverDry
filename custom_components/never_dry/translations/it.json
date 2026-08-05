@@ -35,6 +35,8 @@
           "efficiency": "Efficienza personalizzata (sovrascrive il valore predefinito del tipo di impianto)",
           "plant_family": "Famiglia di piante",
           "kc": "Coefficiente colturale Kc personalizzato (sovrascrive la famiglia di piante)",
+          "exposure": "Esposizione del sito",
+          "microclimate_factor": "Fattore microclima personalizzato (solo Avanzato)",
           "flow_rate_lpm": "Portata di guardia (tutte le modalità; richiesta per estimated_flow)",
           "flow_meter_sensor": "Sensore del flussometro (solo per flow_meter)",
           "volume_entity": "Entità target del volume (solo per volume_preset)",
@@ -52,6 +54,8 @@
           "efficiency": "Lascia vuoto per utilizzare il valore predefinito del tipo di impianto. Imposta per sovrascriverlo",
           "plant_family": "Seleziona il tipo di piante in questa zona. Imposta un coefficiente colturale stagionale (Kc) che adatta il fabbisogno idrico durante l'anno",
           "kc": "Lascia vuoto per utilizzare il profil stagionale della famiglia di piante. Imposta per sovrascriverlo con un valore Kc fisso (0.1–2.0)",
+          "exposure": "Quanto sole e vento riceve questa zona rispetto a un'area aperta. Moltiplica il Kc, così la zona mantiene la sua curva stagionale invece di essere bloccata su un valore fisso",
+          "microclimate_factor": "Usato solo quando l'esposizione è «Avanzato (fattore personalizzato)». Intervallo 0.1–1.5. Sopra 1.0 per le zone che superano l'ET di riferimento (pavimentazione, muro esposto a sud)",
           "flow_rate_lpm": "Portata d'acqua della valvola in litri all'ora (gal/h in imperiale). Richiesta per la modalità estimated_flow; raccomandata per flow_meter e volume_preset, dove determina la durata prevista e la scalatura del timeout di sicurezza (diventerà obbligatoria in una release futura). Misurala con un secchio e un cronometro",
           "flow_meter_sensor": "Entità sensore che rileva i litri cumulativi erogati. Richiesto per la modalità flow_meter",
           "volume_entity": "Entità numerica sulla valvola intelligente che accetta un target di volume in litri. Richiesto per la modalità volume_preset",
@@ -81,6 +85,7 @@
       "flow_rate_required": "La portata è richiesta per la modalità di erogazione estimated_flow",
       "flow_meter_required": "Il sensore del flussometro è richiesto per la modalità di erogazione flow_meter",
       "volume_entity_required": "L'entità del volume è richiesta per la modalità di erogazione volume_preset",
+      "microclimate_factor_required": "È richiesto un fattore microclima personalizzato quando l'esposizione del sito è impostata su Avanzato",
       "zone_already_exists": "Esiste già una zona con questo nome"
     },
     "abort": {
@@ -124,6 +129,8 @@
           "efficiency": "Efficienza personalizzata",
           "plant_family": "Famiglia di piante",
           "kc": "Coefficiente colturale Kc personalizzato",
+          "exposure": "Esposizione del sito",
+          "microclimate_factor": "Fattore microclima personalizzato (solo Avanzato)",
           "flow_rate_lpm": "Portata della valvola",
           "flow_meter_sensor": "Sensore del flussometro",
           "volume_entity": "Entità target del volume",
@@ -131,6 +138,10 @@
           "irrigation_mode": "Modalità di irrigazione",
           "threshold": "Soglia di irrigazione",
           "irrigation_time": "Orario di irrigazione giornaliero"
+        },
+        "data_description": {
+          "exposure": "Quanto sole e vento riceve questa zona rispetto a un'area aperta. Moltiplica il Kc, così la zona mantiene la sua curva stagionale invece di essere bloccata su un valore fisso",
+          "microclimate_factor": "Usato solo quando l'esposizione è «Avanzato (fattore personalizzato)». Intervallo 0.1–1.5. Sopra 1.0 per le zone che superano l'ET di riferimento (pavimentazione, muro esposto a sud)"
         }
       },
       "confirm_zone": {
@@ -157,6 +168,8 @@
           "efficiency": "Efficienza personalizzata",
           "plant_family": "Famiglia di piante",
           "kc": "Coefficiente colturale Kc personalizzato",
+          "exposure": "Esposizione del sito",
+          "microclimate_factor": "Fattore microclima personalizzato (solo Avanzato)",
           "flow_rate_lpm": "Portata della valvola",
           "flow_meter_sensor": "Sensore del flussometro",
           "volume_entity": "Entità target del volume",
@@ -164,6 +177,10 @@
           "irrigation_mode": "Modalità di irrigazione",
           "threshold": "Soglia di irrigazione",
           "irrigation_time": "Orario di irrigazione giornaliero"
+        },
+        "data_description": {
+          "exposure": "Quanto sole e vento riceve questa zona rispetto a un'area aperta. Moltiplica il Kc, così la zona mantiene la sua curva stagionale invece di essere bloccata su un valore fisso",
+          "microclimate_factor": "Usato solo quando l'esposizione è «Avanzato (fattore personalizzato)». Intervallo 0.1–1.5. Sopra 1.0 per le zone che superano l'ET di riferimento (pavimentazione, muro esposto a sud)"
         }
       },
       "check_zones": {
@@ -176,6 +193,9 @@
           "zone_to_remove": "Zona da rimuovere"
         }
       }
+    },
+    "error": {
+      "microclimate_factor_required": "È richiesto un fattore microclima personalizzato quando l'esposizione del sito è impostata su Avanzato"
     },
     "abort": {
       "no_zones": "Nessuna zona configurata"
@@ -222,6 +242,17 @@
         "estimated_flow": "Semplice On/Off (calcolo del tempo in base alla portata)",
         "flow_meter": "Valvola con sensore flussometro",
         "volume_preset": "Valvola smart con dosaggio a volume"
+      }
+    },
+    "exposure": {
+      "options": {
+        "deep_shade": "Ombra profonda / tutto il giorno (×0.60)",
+        "morning_sun": "Sole al mattino, ombra al pomeriggio (×0.75)",
+        "afternoon_sun": "Ombra al mattino, sole al pomeriggio (×0.85)",
+        "full_sun": "Pieno sole, area aperta (×1.00 — predefinito)",
+        "windy": "Ventoso / esposto (×1.15)",
+        "reflected_heat": "Calore riflesso — pavimentazione, muro a sud (×1.20)",
+        "custom": "Avanzato (fattore personalizzato)"
       }
     }
   }

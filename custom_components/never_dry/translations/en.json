@@ -35,6 +35,8 @@
           "efficiency": "Custom efficiency (overrides system type default)",
           "plant_family": "Plant family",
           "kc": "Custom crop coefficient Kc (overrides plant family)",
+          "exposure": "Site exposure",
+          "microclimate_factor": "Custom microclimate factor (Advanced only)",
           "flow_rate_lpm": "Guard flow rate (all modes; required for estimated_flow)",
           "flow_meter_sensor": "Flow meter sensor (flow_meter only)",
           "volume_entity": "Volume target entity (volume_preset only)",
@@ -52,6 +54,8 @@
           "efficiency": "Leave empty to use the system type default. Set to override",
           "plant_family": "Select the type of plants in this zone. Sets a seasonal crop coefficient (Kc) that adjusts water demand throughout the year",
           "kc": "Leave empty to use the plant family seasonal profile. Set to override with a fixed Kc value (0.1–2.0)",
+          "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value",
+          "microclimate_factor": "Only used when exposure is \"Advanced (custom factor)\". Range 0.1–1.5. Above 1.0 for zones that exceed reference ET (paving, south-facing wall)",
           "flow_rate_lpm": "Water flow rate of the valve in liters per hour (gal/h in imperial). Required for estimated_flow mode; recommended for flow_meter and volume_preset, where it drives the expected duration and the safety-timeout scaling (will become required in a future release). Measure with a bucket and stopwatch",
           "flow_meter_sensor": "Sensor entity that reports cumulative liters delivered. Required for flow_meter mode",
           "volume_entity": "Number entity on the smart valve that accepts a volume target in liters. Required for volume_preset mode",
@@ -81,6 +85,7 @@
       "flow_rate_required": "Flow rate is required for estimated_flow delivery mode",
       "flow_meter_required": "Flow meter sensor is required for flow_meter delivery mode",
       "volume_entity_required": "Volume entity is required for volume_preset delivery mode",
+      "microclimate_factor_required": "A custom microclimate factor is required when site exposure is set to Advanced",
       "zone_already_exists": "A zone with this name already exists"
     },
     "abort": {
@@ -124,6 +129,8 @@
           "efficiency": "Custom efficiency",
           "plant_family": "Plant family",
           "kc": "Custom crop coefficient Kc",
+          "exposure": "Site exposure",
+          "microclimate_factor": "Custom microclimate factor (Advanced only)",
           "flow_rate_lpm": "Valve flow rate",
           "flow_meter_sensor": "Flow meter sensor",
           "volume_entity": "Volume target entity",
@@ -131,6 +138,10 @@
           "irrigation_mode": "Irrigation mode",
           "threshold": "Irrigation threshold",
           "irrigation_time": "Daily irrigation time"
+        },
+        "data_description": {
+          "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value",
+          "microclimate_factor": "Only used when exposure is \"Advanced (custom factor)\". Range 0.1–1.5. Above 1.0 for zones that exceed reference ET (paving, south-facing wall)"
         }
       },
       "confirm_zone": {
@@ -157,6 +168,8 @@
           "efficiency": "Custom efficiency",
           "plant_family": "Plant family",
           "kc": "Custom crop coefficient Kc",
+          "exposure": "Site exposure",
+          "microclimate_factor": "Custom microclimate factor (Advanced only)",
           "flow_rate_lpm": "Valve flow rate",
           "flow_meter_sensor": "Flow meter sensor",
           "volume_entity": "Volume target entity",
@@ -164,6 +177,10 @@
           "irrigation_mode": "Irrigation mode",
           "threshold": "Irrigation threshold",
           "irrigation_time": "Daily irrigation time"
+        },
+        "data_description": {
+          "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value",
+          "microclimate_factor": "Only used when exposure is \"Advanced (custom factor)\". Range 0.1–1.5. Above 1.0 for zones that exceed reference ET (paving, south-facing wall)"
         }
       },
       "check_zones": {
@@ -176,6 +193,9 @@
           "zone_to_remove": "Zone to remove"
         }
       }
+    },
+    "error": {
+      "microclimate_factor_required": "A custom microclimate factor is required when site exposure is set to Advanced"
     },
     "abort": {
       "no_zones": "No zones configured"
@@ -222,6 +242,17 @@
         "estimated_flow": "Simple on/off — timer-based (default)",
         "flow_meter": "Valve with flow meter sensor",
         "volume_preset": "Smart valve with volume dosing"
+      }
+    },
+    "exposure": {
+      "options": {
+        "deep_shade": "Deep / all-day shade (×0.60)",
+        "morning_sun": "Morning sun, afternoon shade (×0.75)",
+        "afternoon_sun": "Morning shade, afternoon sun (×0.85)",
+        "full_sun": "Full sun, open (×1.00 — default)",
+        "windy": "Windy / exposed (×1.15)",
+        "reflected_heat": "Reflected heat — paving, south-facing wall (×1.20)",
+        "custom": "Advanced (custom factor)"
       }
     }
   }

@@ -142,6 +142,26 @@ Each zone can be assigned a plant family with seasonal Kc values (northern hemis
 
 You can also set a **manual Kc override** per zone (0.1–2.0) if you know the exact value. Not sure which Kc fits your setup? Use **[NeverDry Planner](https://drake69.github.io/neverdry-planner/)** to calculate the irrigated area and the right Kc to copy directly into NeverDry.
 
+## Site Exposure
+
+Two zones can hold the same plants and still lose water at different rates — one is shaded by the house from 14:00, the other bakes next to a south-facing wall. **Site exposure** captures that with a per-zone factor that *multiplies* the Kc, so the zone keeps its seasonal curve instead of being frozen at one value by a fixed Kc override:
+
+```
+Kc_effective = Kc(plant family or override) × microclimate_factor
+```
+
+| Exposure | Factor |
+|----------|--------|
+| Deep / all-day shade | 0.60 |
+| Morning sun, afternoon shade | 0.75 |
+| Morning shade, afternoon sun | 0.85 |
+| Full sun, open (default) | 1.00 |
+| Windy / exposed | 1.15 |
+| Reflected heat (paving, south-facing wall) | 1.20 |
+| Advanced (custom factor) | 0.1–1.5, your value |
+
+The presets come from the landscape coefficient method (`K_L = k_s × k_d × k_mc`, Costello, Matheny & Clark 2000), where the plant family plays the species factor `k_s` and exposure the microclimate factor `k_mc`. Values above 1.0 are deliberate: paving and walls really do push a zone past reference ET. Leaving exposure at *Full sun, open* changes nothing, so existing zones keep behaving exactly as before.
+
 ---
 
 ## Installation
@@ -202,6 +222,8 @@ NeverDry is configured entirely through the UI — no YAML required.
 | Efficiency | No | (from type) | Override distribution efficiency [0.1–1.0] |
 | Plant family | No | — | Sets seasonal Kc profile |
 | Custom Kc | No | — | Override Kc [0.1–2.0] — use [NeverDry Planner](https://drake69.github.io/neverdry-planner/) to estimate it |
+| Site exposure | No | Full sun, open | Sun/wind exposure preset — multiplies the Kc [0.60–1.20] |
+| Custom microclimate factor | Advanced only | — | Explicit exposure factor [0.1–1.5], used when exposure is *Advanced* |
 | Guard flow rate | For timer mode | — | Valve flow rate [L/min]. Required for timer-based zones; recommended for flow-meter and volume-dosing zones too, where it drives the expected duration and the safety-timeout scaling |
 | Threshold | No | 20.0 | Mode A trigger [mm] |
 | Battery sensor | No | — | Valve battery sensor — mirrored in the zone device card |
@@ -219,7 +241,7 @@ The model is based on FAO-56 (Allen et al., 1998):
 D_zone(t) = clamp(D_zone(t-1) + ET_h × Kc × Δt − ΔP,  0,  D_max)
 
 ET_h = max(0, α × (T − T_base) / 24)     [mm/h]  evapotranspiration
-Kc   = f(day_of_year, plant_family)        [—]     crop coefficient
+Kc   = f(day_of_year, plant_family) × k_mc [—]     crop coefficient × site exposure
 ΔP   = rain_delta(sensor_type)             [mm]    precipitation increment
 V    = D_zone × Area / Efficiency          [L]     volume needed
 t    = V / FlowRate × 60                   [s]     irrigation duration

@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- Per-zone **site exposure**: a microclimate factor (`k_mc`) that multiplies the crop coefficient, so a shaded, windy or paving-adjacent zone keeps its seasonal Kc curve instead of being frozen at one value by a constant Kc override ([#146]). Presets from the landscape coefficient method (0.60 deep shade … 1.20 reflected heat), plus an *Advanced (custom factor)* entry (0.1–1.5). Default *Full sun, open* (×1.00) leaves existing zones unchanged.
+- Zone Kc sensor attributes `kc_base`, `exposure` and `microclimate_factor`, so an effective Kc can be traced back to the curve and the factor it came from.
 
 ## [0.11.0] - 2026-07-26
 
@@ -43,5 +45,6 @@ For releases prior to 0.11.0, see the [GitHub Releases](https://github.com/drake
 
 [Unreleased]: https://github.com/drake69/NeverDry/compare/v0.11.0...HEAD
 [0.11.0]: https://github.com/drake69/NeverDry/releases/tag/v0.11.0
+[#146]: https://github.com/drake69/NeverDry/issues/146
 [#123]: https://github.com/drake69/NeverDry/issues/123
 [#116]: https://github.com/drake69/NeverDry/issues/116
