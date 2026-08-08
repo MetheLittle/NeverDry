@@ -60,7 +60,7 @@
           "flow_meter_sensor": "Entità sensore che rileva i litri cumulativi erogati. Richiesto per la modalità flow_meter",
           "volume_entity": "Entità numerica sulla valvola intelligente che accetta un target di volume in litri. Richiesto per la modalità volume_preset",
           "delivery_timeout": "Tempo massimo di attesa per l'erogazione con flow_meter o volume_preset prima di forzare la chiusura della valvola (limite di sicurezza)",
-          "threshold": "Livello di deficit (mm) che attiva l'irrigazione automatica per questa zona",
+          "threshold": "Livello di deficit che attiva l'irrigazione automatica per questa zona",
           "irrigation_time": "Ora del giorno in cui NeverDry verifica il deficit e irriga se supera la soglia. Lascia vuoto per disabilitare la pianificazione automatica"
         }
       },

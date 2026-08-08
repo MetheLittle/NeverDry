@@ -143,6 +143,8 @@ FLOW_METER_POLL_INTERVAL_S = 2
 
 # ── Services ─────────────────────────────────────────────
 SERVICE_RESET = "reset"
+SERVICE_RESET_YEARLY_RAIN = "reset_yearly_rain"
+SERVICE_RESET_YEARLY_WATER = "reset_yearly_water"
 SERVICE_IRRIGATE_ZONE = "irrigate_zone"
 SERVICE_IRRIGATE_ALL = "irrigate_all"
 SERVICE_STOP = "stop"

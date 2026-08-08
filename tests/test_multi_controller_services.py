@@ -19,6 +19,8 @@ from never_dry.const import (
     CONF_ZONE_VALVE,
     DOMAIN,
     SERVICE_IRRIGATE_ZONE,
+    SERVICE_RESET_YEARLY_RAIN,
+    SERVICE_RESET_YEARLY_WATER,
 )
 from never_dry.controller import IrrigationController
 from never_dry.sensor import IrrigationZoneSensor
@@ -185,7 +187,7 @@ class TestRegistrationLifecycle:
         first_count = hass_mock.services.async_register.call_count
         svc.async_setup_services(hass_mock)
 
-        assert first_count == 8
+        assert first_count == 10
         assert hass_mock.services.async_register.call_count == first_count
 
     def test_registers_all_services(self, hass_mock):
@@ -196,7 +198,9 @@ class TestRegistrationLifecycle:
 
         registered = {c.args[1] for c in hass_mock.services.async_register.call_args_list}
         assert SERVICE_IRRIGATE_ZONE in registered
-        assert len(registered) == 8
+        assert SERVICE_RESET_YEARLY_RAIN in registered
+        assert SERVICE_RESET_YEARLY_WATER in registered
+        assert len(registered) == 10
 
     def test_unload_keeps_services_while_controllers_remain(self, hass_mock, two_controllers):
         hass_mock.data[DOMAIN][svc._SERVICES_REGISTERED] = True
@@ -212,7 +216,7 @@ class TestRegistrationLifecycle:
 
         svc.async_unload_services(hass_mock)
 
-        assert hass_mock.services.async_remove.call_count == 8
+        assert hass_mock.services.async_remove.call_count == 10
         assert svc._SERVICES_REGISTERED not in hass_mock.data[DOMAIN]
 
     @pytest.mark.asyncio
