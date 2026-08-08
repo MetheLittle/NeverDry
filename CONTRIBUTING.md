@@ -116,11 +116,46 @@ decision is still open for input.
 
 **What this means for you:** for a large or architectural change, open or comment
 on the relevant design note *before* sending a big PR — it avoids rework. For
-example, the actuator-abstraction direction (design note
-`05_actuator_abstraction_and_orchestration.md`, currently `Draft`) grew out of
-[@fpytloun](https://github.com/fpytloun)'s proposal in **#74** — community input
-like that is exactly how the bigger decisions get shaped, and it's much
-appreciated. Small, self-contained fixes can go straight to a PR.
+example, the actuator-abstraction direction
+([`docs/design/actuator-abstraction.md`](docs/design/actuator-abstraction.md),
+currently `Draft`) grew out of [@fpytloun](https://github.com/fpytloun)'s proposal
+in **#74** — community input like that is exactly how the bigger decisions get
+shaped, and it's much appreciated. Small, self-contained fixes can go straight to
+a PR.
+
+## Roles
+
+NeverDry is maintained by one person. These roles exist to remove friction, not to
+build a hierarchy, and none of them is a claim on your time.
+
+**Contributor** — anyone who has had a commit merged, reported a bug, tested a
+pre-release, or shaped a design note. This is not granted and there is nothing to
+apply for: if you have done any of that, you already are one.
+
+**Triage** — an invited role (GitHub's `triage` permission). It allows labelling,
+assigning, closing and reopening issues, and being formally requested as a
+reviewer. It carries **no write access**: you cannot push or merge anything. It is
+offered to people already doing this work informally — mostly so that asking you
+for a review stops requiring a hand-written ping.
+
+**Write** — push and merge rights. Offered to contributors with a track record of
+merged changes who would rather carry work through themselves than hand it over.
+
+### What an invitation means
+
+- It is an offer, not an assignment. No expected workload, no rota, no
+  response-time expectation.
+- Declining costs nothing and changes nothing about how your contributions are
+  received.
+- It is revocable from both sides, at any time, without it being a statement.
+- The invitation will always say what specifically prompted it. A role handed out
+  by volume rather than by contribution is worth nothing to the person receiving
+  it.
+
+### How it happens
+
+You get asked first, in a thread where you are already active. A GitHub invitation
+is only sent after you say yes.
 
 ## Reporting security issues
 
