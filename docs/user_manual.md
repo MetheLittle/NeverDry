@@ -79,6 +79,8 @@ Different plants need different amounts of water. NeverDry assigns a **crop coef
 
 The Kc varies seasonally — plants need less water in winter than in summer. NeverDry interpolates between 4 seasonal values automatically and adjusts for your hemisphere based on your Home Assistant location.
 
+Two zones can hold the same plants and still dry out at different rates — one loses the sun behind the house at 14:00, the other sits against a south-facing wall. That is what **site exposure** is for: a per-zone factor that multiplies the Kc, so the zone keeps its seasonal shape instead of being pinned to one number. See [Site exposure](#site-exposure) below.
+
 ### Two scheduling modes
 
 | Mode | When it triggers | Best for |
@@ -158,6 +160,8 @@ For each zone, the wizard asks:
 | **Efficiency override** | No | Custom efficiency (0.1–1.0). Overrides the system type default. |
 | **Plant family** | No | Type of plants in this zone — sets a seasonal crop coefficient (Kc) that adjusts water demand throughout the year. See table below. |
 | **Custom Kc** | No | Override Kc (0.1–2.0). If set, overrides the plant family seasonal profile. |
+| **Site exposure** | No | How much sun and wind this zone gets compared to an open site. Multiplies the Kc. Default *Full sun, open* (×1.00) changes nothing. See table below. |
+| **Custom microclimate factor** | For *Advanced* | Explicit exposure factor (0.1–1.5). Only used when site exposure is set to *Advanced (custom factor)*, and required in that case. |
 | **Guard flow rate (L/min)** | For `estimated_flow` | Measured valve flow rate. Required for `estimated_flow`; strongly recommended for `flow_meter` and `volume_preset` too — it drives the expected-duration estimate and lets the safety timeout scale with large deficits (it will become required in a future release). Measure with a bucket and stopwatch. |
 | **Threshold (mm)** | No | Deficit threshold for Mode A triggering (default: 20.0 mm) |
 
@@ -186,6 +190,43 @@ For each zone, the wizard asks:
 | Mixed garden (default) | 0.40 | 0.70 | 0.90 | 0.55 |
 
 The Kc values are interpolated linearly between seasons. The hemisphere is auto-detected from your Home Assistant location settings — in the southern hemisphere, the seasonal profile is automatically flipped.
+
+#### Site exposure
+
+The plant family says *what* grows in the zone. Site exposure says *where* the zone is: shaded, open, windy, or up against hot paving. It is applied as a multiplier on top of the Kc:
+
+```
+Kc_effective = Kc (plant family or custom override) × exposure factor
+```
+
+| Exposure | Factor | Pick it when |
+|----------|--------|--------------|
+| Deep / all-day shade | 0.60 | The zone never gets direct sun (north side, under dense canopy) |
+| Morning sun, afternoon shade | 0.75 | Sun until roughly midday, then shaded by a building or trees |
+| Morning shade, afternoon sun | 0.85 | Shaded early, then exposed through the hottest hours |
+| **Full sun, open (default)** | **1.00** | Open lawn or bed with no shading and no unusual wind |
+| Windy / exposed | 1.15 | Rooftop, ridge, or a channelled wind that dries the zone out fast |
+| Reflected heat (paving, south-facing wall) | 1.20 | Bordered by paving, gravel, or a wall that radiates heat back |
+| Advanced (custom factor) | your value, 0.1–1.5 | You have measured or calculated your own factor |
+
+**Why not just lower the Kc?** Because a fixed Kc freezes the zone at one season's value. For an east-facing lawn that loses the sun at 14:00, a manual `Kc = 0.70` is about right in August and drifts badly from there:
+
+| Date | Seasonal Kc (lawn) | With exposure ×0.75 | Frozen Kc 0.70 |
+|------|--------------------|---------------------|----------------|
+| Aug 5 | 0.93 | 0.70 | correct |
+| Sep 15 | 0.80 | 0.60 | +17% |
+| Oct 15 | 0.70 | 0.53 | +33% |
+| Nov 15 | 0.62 | 0.46 | +52% |
+
+The error peaks in autumn, exactly when over-watering shaded turf invites disease.
+
+The presets come from the landscape coefficient method (`K_L = k_s × k_d × k_mc`, Costello, Matheny & Clark 2000): the plant family provides the species factor `k_s`, exposure provides the microclimate factor `k_mc`. They are expert-judgment starting points, not measurements — adjust them for your garden and report back what works.
+
+**Notes:**
+- The factor applies to a **custom Kc as well**, since exposure describes the site rather than the planting. If you set `Kc = 0.80` and *Deep shade*, the zone runs at 0.48. The two multiply out, so a high custom Kc with an above-1.0 exposure can exceed the 0.1–2.0 range of the Kc field itself (2.0 × 1.20 = 2.4). That is not capped, on purpose: both numbers are your explicit choice.
+- Values **above 1.0** are intentional. A zone against hot paving genuinely exceeds reference ET.
+- The zone's **Kc sensor** shows the effective value, with `kc_base`, `exposure`, and `microclimate_factor` as attributes so you can see how it was composed.
+- Leaving exposure at *Full sun, open* is a no-op — existing zones behave exactly as before.
 
 ### Step 3: Add more zones or finish
 
@@ -237,8 +278,11 @@ Shows the volume of water needed for this specific zone in liters.
 | `duration_s` | Expected valve run time [seconds] — from the live flow-meter rate while irrigating (reads as remaining time), otherwise from the configured guard flow rate; 0 if neither is available |
 | `deficit_mm` | This zone's current deficit [mm] (per-zone, not shared) |
 | `plant_family` | Plant family key (e.g., "lawn", "vegetables") |
-| `kc` | Current crop coefficient (varies seasonally) |
+| `kc` | Current **effective** crop coefficient (seasonal, after site exposure) |
+| `kc_base` | Crop coefficient before site exposure (plant family curve or manual override) |
 | `kc_override` | Manual Kc override value, if set |
+| `exposure` | Site exposure key (e.g., "morning_sun"), or `null` if unset |
+| `microclimate_factor` | Resolved exposure multiplier applied to `kc_base` |
 | `valve` | Associated valve entity |
 | `system_type` | Irrigation system type |
 | `area_m2` | Zone area |

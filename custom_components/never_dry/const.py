@@ -38,6 +38,8 @@ CONF_ZONE_THRESHOLD = "threshold"
 CONF_ZONE_SYSTEM_TYPE = "system_type"
 CONF_ZONE_PLANT_FAMILY = "plant_family"
 CONF_ZONE_KC = "kc"
+CONF_ZONE_EXPOSURE = "exposure"
+CONF_ZONE_MICROCLIMATE_FACTOR = "microclimate_factor"
 CONF_ZONE_DELIVERY_MODE = "delivery_mode"
 CONF_ZONE_VOLUME_ENTITY = "volume_entity"
 CONF_ZONE_FLOW_METER_SENSOR = "flow_meter_sensor"
@@ -88,6 +90,41 @@ PLANT_FAMILIES = {
 }
 
 KC_ANCHOR_DAYS = (15, 105, 196, 288)
+
+# ── Site exposure (microclimate factor, kmc) ─────────────
+# Landscape coefficient method: KL = ks * kd * kmc (Costello et al. 2000).
+# The plant family is ks, this is kmc — multiplied onto the Kc so a shaded
+# zone keeps its seasonal curve instead of being frozen by a constant Kc
+# override (#146). Above 1.0 is intentional: paving and walls push a zone
+# past reference ET.
+EXPOSURE_DEEP_SHADE = "deep_shade"
+EXPOSURE_MORNING_SUN = "morning_sun"
+EXPOSURE_AFTERNOON_SUN = "afternoon_sun"
+EXPOSURE_FULL_SUN = "full_sun"
+EXPOSURE_WINDY = "windy"
+EXPOSURE_REFLECTED_HEAT = "reflected_heat"
+EXPOSURE_CUSTOM = "custom"
+
+# ``factor: None`` reads the value from CONF_ZONE_MICROCLIMATE_FACTOR
+# instead; the resolver and the flow guard both key off that marker, not the
+# "custom" name. ``label`` is developer-facing only, as in PLANT_FAMILIES:
+# the dropdown text comes from selector.exposure in the translations.
+EXPOSURES = {
+    EXPOSURE_DEEP_SHADE: {"label": "Deep / all-day shade", "factor": 0.60},
+    EXPOSURE_MORNING_SUN: {"label": "Morning sun, afternoon shade", "factor": 0.75},
+    EXPOSURE_AFTERNOON_SUN: {"label": "Morning shade, afternoon sun", "factor": 0.85},
+    EXPOSURE_FULL_SUN: {"label": "Full sun, open", "factor": 1.00},
+    EXPOSURE_WINDY: {"label": "Windy / exposed", "factor": 1.15},
+    EXPOSURE_REFLECTED_HEAT: {"label": "Reflected heat (paving, south-facing wall)", "factor": 1.20},
+    EXPOSURE_CUSTOM: {"label": "Advanced (custom factor)", "factor": None},
+}
+
+DEFAULT_EXPOSURE = EXPOSURE_FULL_SUN
+DEFAULT_MICROCLIMATE_FACTOR = 1.0
+# Floored above zero: at 0 the deficit never accrues, so every irrigation
+# trigger goes silent with nothing in the UI to explain why.
+MICROCLIMATE_FACTOR_MIN = 0.1
+MICROCLIMATE_FACTOR_MAX = 1.5
 
 # ── Valve delivery modes ────────────────────────────────
 DELIVERY_MODE_VOLUME_PRESET = "volume_preset"
