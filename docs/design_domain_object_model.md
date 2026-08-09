@@ -161,11 +161,19 @@ classDiagram
     }
 
     class Scheduler {
-        +time_windows
-        +concurrency_policy : serial or parallel
-        +queue
-        +next_eligible() Zone
-        +interleave_during_soak()
+        +concurrency : ConcurrencyPolicy
+        +min_service_interval_s
+        +allows_overlap() bool
+        +evaluate_scheduled(zone, is_running) Decision
+        +evaluate_reactive(zone, is_running, is_throttled) Decision
+        +next_eligible(zones, is_running) Zone
+        ~deferred~ time_windows, queue, interleave_during_soak
+    }
+
+    class Decision {
+        +should_irrigate
+        +trigger : Trigger
+        +reason : SkipReason
     }
 
     class Driver {
@@ -275,7 +283,8 @@ classDiagram
     ManualActuator ..> DeliveryResult : returns (declared)
     DeliveryResult ..|> Delivery : satisfies structurally
     Zone ..> Delivery : settles deficit with
-    Scheduler --> Zone : decides when, queues
+    Scheduler --> Zone : decides when
+    Scheduler ..> Decision : returns
     MasterDriver ..> ZoneDriver : ON while any is active
 ```
 
@@ -354,12 +363,24 @@ reported truth.
 The *when* and the concurrency policy. It never touches drivers: it only decides which
 zone runs in which window.
 
+The seam is **decision versus execution**: the scheduler answers "may this zone water now, and
+why not"; registering time listeners, spawning tasks and driving valves stay on the Home Assistant
+side. It takes the world's facts (`is_running`, `is_throttled`) as arguments rather than reading
+them, which is what makes the rules testable without a controller.
+
 | Member | Kind | Meaning |
 |---|---|---|
-| `time_windows` | attr | Time windows and calendars |
-| `concurrency` | attr | Serial or parallel zone runs |
-| `queue` | attr | Queue of eligible zones |
-| `next_eligible() → Zone` | method | Next zone to serve, per queue and windows |
+| `concurrency` | attr | `SERIAL` (today's behaviour) or `PARALLEL`. Naming it turns an emergent property — both handlers happen to bail when something is running — into a stated policy |
+| `min_service_interval_s` | attr | Rate limit between service calls with the same key |
+| `evaluate_scheduled(zone, is_running) → Decision` | method | The daily top-up. Deliberately does **not** consult the threshold: gating a schedule on the reactive threshold turns every scheduled run into a reactive one (AI-183). Only a zone already full is skipped |
+| `evaluate_reactive(zone, is_running, is_throttled) → Decision` | method | Mode A: water once the deficit crosses the zone's threshold |
+| `next_eligible(zones, is_running) → Zone` | method | Driest first — an ordering that needs no memory. Deliberately **not** a queue: a queue remembers what is waiting, which is the deferred design |
+| `Decision` | value object | Water (with a `Trigger`) or skip (with a named `SkipReason`). The reasons are named because two of them — `ALREADY_RUNNING`, `THROTTLED` — are what make a watering look mysteriously missing |
+
+**Deliberately absent:** time windows, calendars, the queue, parallel runs and interleaving during
+soak. Those are deferred until a concrete demand for parallel zones appears (GH #74). Writing them
+now would be building a mechanism for a question nobody has asked; what the module does contain is
+behaviour that already runs, merely written where it can be read.
 | `interleave_during_soak()` | method | During a soak pause it may interleave another eligible zone |
 
 ### Driver «abstract»
@@ -689,7 +710,7 @@ Read the two columns as "what the model says" against "what runs today".
 |---|---|
 | Environment | ⚠️ **scaffold written, inert**: `environment.py` (sensor inventory, `declared_sensors`/`satisfies`/`missing_for` capability matching, `RainDelayPolicy`, yearly rain). What runs today is still `DrynessIndexSensor` as **feed hub / broadcaster** (temperature + rain → `et_h`, `rain_delta` → zones), holding the globals the RFC redistributes. Its `_deficit` accumulator is **retired as ET state** and survives only as the interim VWC-system value (D2/D5) |
 | Zone | ⚠️ **scaffold written, inert**: `zone.py` (`Placement`, per-zone `d_max`, `Deficit` ownership, the single `credit_delivery`, `CycleSoakRule`, `WaterCounters`). What runs today is `IrrigationZoneSensor` — a data bag whose accounting lives in `IrrigationController`, which reads and writes 13 of its privates and repeats the crediting formula in 4 places (**anomaly A1**). `_zone_deficit` is authoritative and a new zone starts at 0 (D4). Cycle & soak, placement, per-zone `d_max`: designed, not implemented |
-| Scheduler | ⚠️ implicit and minimal: deficit-triggered daily cycle inside `IrrigationController`; no cron/sequences/calendars (deliberately — that is Irrigation Unlimited's territory). Concurrency is de-facto serial, not an explicit policy |
+| Scheduler | ⚠️ **scaffold written, inert**: `scheduler.py` (`evaluate_scheduled`/`evaluate_reactive` → `Decision`, `ConcurrencyPolicy`, `next_eligible`). What runs today is the same two rules written inline inside two HA callbacks in `IrrigationController`, where they cannot be read as a policy or tested without a controller. Still no cron/sequences/calendars — deliberately, that is Irrigation Unlimited's territory — and the queue stays deferred |
 | ZoneDriver | ⚠️ exists but internal: `ValveOperator` (FSM, safety layers, latency tracker) + valve/switch adapter (GH #74/#94); native volume delivery in progress. Delivered liters returned as a bare float — no DeliveryResult qualifier yet. **Scaffold extracted**: `driver.py` (`Driver`/`ZoneDriver`/`MasterDriver`), inert until wired. ✅ **Renamed 2026-08-09** to match this model's term — the module was unreferenced by any production code or test, so the rename cost nothing and no longer waits on the wiring. `ManualActuator` keeps its name deliberately: it is *not* a `Driver` (it shares only the `DeliveryResult` contract). Lowercase *actuator* survives in prose where it means the physical valve the driver drives |
 | MasterDriver | ❌ not implemented (GH #95); its scaffold lives in `driver.py` (`MasterDriver`) |
 | ManualActuator | ❌ not implemented; **scaffold extracted**: `ManualActuator` in `driver.py` (valve-less, `request_irrigation`/`mark_irrigated` → `DeliveryResult(declared)`), inert. For hand-watered house plants — a *how* with no hardware |
@@ -700,8 +721,8 @@ The refactoring direction is symmetric on both axes: make the **Driver** base ex
 implementing GH #95 (so `MasterDriver` inherits the safety layers rather than reimplementing
 them), and make the **WaterBalanceModel** explicit so the ET/VWC switch becomes polymorphic
 dispatch over a shared `Deficit` output instead of an `if self._vwc_sensor:` fork with a
-duplicated ET formula. All four scaffolds now exist as self-contained modules; the remaining
-phase is wiring the existing call sites onto them.
+duplicated ET formula. All five objects now exist as self-contained modules; the remaining phase
+is wiring the existing call sites onto them.
 
 ### Where model and code still disagree
 
