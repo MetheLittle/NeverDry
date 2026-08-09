@@ -223,6 +223,15 @@ class Zone:
         if self.deficit is None:
             self.deficit = Deficit.zero(ReferenceFrame.ET, d_max=self.d_max, source=self.name)
 
+    @property
+    def cycle_baseline_mm(self) -> float | None:
+        """The deficit a cycle started from, or ``None`` outside one."""
+        return self._cycle_baseline_mm
+
+    @cycle_baseline_mm.setter
+    def cycle_baseline_mm(self, value: float | None) -> None:
+        self._cycle_baseline_mm = value
+
     # ── Crop coefficient ────────────────────────────────────────────────────
 
     def effective_kc(self, base_kc: float) -> float:
