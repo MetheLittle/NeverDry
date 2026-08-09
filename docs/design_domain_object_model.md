@@ -16,8 +16,8 @@ as the codebase evolves. For the current module/data-flow architecture see
 
 | Object | Responsibility | Key attributes |
 |---|---|---|
-| **System** | Shared **feeds** and global model params | α (ET sensitivity), D_max, the temperature + rain sensors it broadcasts to zones; *declares* the master valve/pump. **The deficit is not held here — it lives per-zone** (see Water-Balance Reference Model). ⚠️ **Under RFC to be dissolved** — see "RFC: dissolve `System`" below; α is model-specific (→ `ETModel`), not a global param |
-| **Zone** | Irrigation unit; owns its deficit and translates it into water demand | Kc / plant family, area, sun exposure; cycle & soak rule; **its own deficit** (`+ET·Kc·Δt − rain − irrigation`, new zone starts at 0); translates mm → liters |
+| **Environment** | The **site**: what this installation has, and what it can therefore compute | The declared sensor inventory (temperature, rain, humidity, wind, net radiation, tmax/tmin, soil probe, rain probability) + latitude; **capability matching** — a zone may offer only the models this inventory can feed; yearly rain, one sky over the whole garden; the forecast rain-delay threshold. Written in `environment.py`. Replaces the former **System**, which was dissolved rather than renamed (α → `ETModel`, D_max → `Zone`, master valve → `MasterDriver`) |
+| **Zone** | Irrigation unit; owns its deficit and translates it into water demand | Kc / plant family, area, efficiency, site exposure; **placement** (outdoor/patio/greenhouse/indoor — gates whether rain reaches it); **its own D_max**, the reservoir of this soil; cycle & soak rule; **its own deficit** (`+ET·Kc·Δt − rain − irrigation`, new zone starts at 0); translates mm → liters. Written in `zone.py` |
 | **Scheduler** | The *when* — and the concurrency policy | Time windows, sequences, calendars; serial vs parallel zone runs, interleaving during soak |
 | **ZoneDriver** | The *how* — actuation of one zone's water demand | Entity adapter (`valve.*`/`switch.*`), delivery mode (native volume in liters vs time in seconds via flow rate), flow rate, zero-flow guard; returns a **DeliveryResult** |
 | **MasterDriver** | Coordination of shared hydraulics (pump / master valve) | ON when any ZoneDriver is active, OFF when none; configurable off-delay; no notion of liters |
@@ -102,24 +102,57 @@ definition; keep the two in sync.*
 classDiagram
     direction TB
 
-    class System {
-        +alpha : ET sensitivity
-        +d_max : mm
+    class Environment {
         +temperature_sensor
         +rain_sensor
-        +broadcast(et_h, rain)
+        +humidity_sensor
+        +wind_speed_sensor
+        +net_radiation_sensor
+        +temp_max_sensor
+        +temp_min_sensor
+        +soil_moisture_sensor
+        +rain_probability_sensor
+        +latitude
+        +rain_delay : RainDelayPolicy
+        +yearly_rain_mm : one sky
+        +declared_sensors() SensorKind set
+        +satisfies(required) bool
+        +missing_for(required) SensorKind set
     }
 
     class Zone {
-        +kc_or_plant_family
+        +name
         +area_m2
-        +sun_exposure
+        +efficiency
+        +plant_family / manual_kc
+        +exposure / microclimate_factor
+        +placement : Placement
+        +d_max : own reservoir
         +threshold_mm
-        +cycle_soak_rule
-        +deficit_mm : own state, starts at 0
-        +accumulate(et_h, kc, rain)
-        +water_demand() liters
-        +settle(result : DeliveryResult)
+        +cycle_soak : CycleSoakRule
+        +deficit : Deficit, starts at 0
+        +counters : WaterCounters
+        +effective_kc(base_kc)
+        +accumulate(dt_h, et_h, base_kc, rain_mm) Deficit
+        +water_demand_l() liters
+        +needs_water() bool
+        +begin_cycle()
+        +credit_delivery(d : Delivery) Deficit
+        +settle(d : Delivery, source, at) Deficit
+        +mark_irrigated(source, at) Deficit
+    }
+
+    class Placement {
+        <<enumeration>>
+        OUTDOOR / PATIO / GREENHOUSE / INDOOR
+        +receives_rain : only OUTDOOR
+        +driven_by_outdoor_et : OUTDOOR, PATIO
+    }
+
+    class Delivery {
+        <<protocol>>
+        +liters_delivered
+        +elapsed_s
     }
 
     class Scheduler {
@@ -224,19 +257,27 @@ classDiagram
     ETBalanceModel <|-- PenmanMonteithModel
     WaterBalanceModel <|-- VWCSystemModel
     VWCSystemModel <|-- VWCPerZoneModel
-    System "1" o-- "*" Zone : feeds ET+rain to
-    System "1" o-- "0..1" MasterDriver : declares
+    Environment "1" o-- "*" Zone : feeds ET+rain to
+    Environment "1" o-- "0..1" MasterDriver : declares
+    Environment ..> WaterBalanceModel : gates by capability match
     Zone "1" --> "1" WaterBalanceModel : advances deficit via
     WaterBalanceModel ..> Deficit : returns
     Zone ..> Deficit : holds, settles
+    Zone *-- Placement : sits at
     Zone "1" --> "1" ZoneDriver : requests liters
     ZoneDriver ..> DeliveryResult : returns
     Zone ..> ManualActuator : requests (manual how)
     ManualActuator ..> DeliveryResult : returns (declared)
-    Zone ..> DeliveryResult : settles deficit with
+    DeliveryResult ..|> Delivery : satisfies structurally
+    Zone ..> Delivery : settles deficit with
     Scheduler --> Zone : decides when, queues
     MasterDriver ..> ZoneDriver : ON while any is active
 ```
+
+`Zone` depends on `Delivery`, the structural protocol, rather than on `DeliveryResult` itself.
+That is what keeps `zone.py` free of Home Assistant while `actuator.py` — which owns the entity
+adapters — necessarily is not. `DeliveryResult` satisfies the protocol without either module
+importing the other.
 
 `ManualActuator` is a third materialization of the *how* — but deliberately **not** a
 `Driver`: there is no entity, no FSM, no safety layers to inherit. It shares only the delivery
@@ -255,34 +296,53 @@ Attribute-by-attribute and method-by-method reference for each class, with the
 responsibility that justifies every member. This expands the diagram above; the
 diagram stays the source of truth for relationships.
 
-### System
+### Environment — `environment.py`
 
-The global model and shared infrastructure. *Declares* the master valve/pump but never
-commands it.
-
-| Member | Kind | Meaning |
-|---|---|---|
-| `alpha` | attr | ET sensitivity of the model (mm/°C/day) |
-| `d_max` | attr | Cap on the accumulable deficit (mm) |
-| `temperature_sensor` | attr | Shared temperature sensor |
-| `rain_sensor` | attr | Shared rain sensor (event or cumulative type) |
-| `compute_deficit() → mm` | method | FAO-56 water balance: reference deficit at Kc = 1 |
-
-### Zone
-
-The irrigation unit: translates the model into water demand and settles the deficit with
-the driver's reported truth.
+The site: which sensors this installation declared, and therefore which models it can run.
+*Declares* the master valve/pump but never commands it. Holds bindings — entity ids as opaque
+strings — never readings.
 
 | Member | Kind | Meaning |
 |---|---|---|
-| `kc_or_plant_family` | attr | Crop coefficient (or the plant family that determines it) |
-| `area_m2` | attr | Irrigated surface |
-| `sun_exposure` | attr | Per-zone sun exposure factor |
-| `threshold_mm` | attr | Deficit threshold that triggers irrigation |
-| `cycle_soak_rule` | attr | Cycle & soak rule (dose/pause) — a Zone rule, not a scheduler one |
-| `deficit_mm` | attr | Current zone deficit |
-| `water_demand() → liters` | method | mm → liters via area and efficiency; liters are the contract towards the driver |
-| `settle(r: DeliveryResult)` | method | Scales the deficit by the actually-delivered liters — exactly once |
+| `temperature_sensor`, `rain_sensor` | attr | The two feeds every ET tier consumes |
+| `humidity_sensor`, `wind_speed_sensor`, `net_radiation_sensor` | attr | What unlocks Penman-Monteith |
+| `temp_max_sensor`, `temp_min_sensor` | attr | What unlocks Hargreaves |
+| `soil_moisture_sensor` | attr | What unlocks VWC mode |
+| `rain_probability_sensor` | attr | Forecast feed behind the rain delay |
+| `latitude` | attr | A property of the place: the astronomical radiation term, and the hemisphere flip of the seasonal Kc |
+| `rain_sensor_type`, `backfill_days` | attr | How to read the rain feed, and how far back to replay |
+| `rain_delay: RainDelayPolicy` | attr | Threshold + delay. The site supplies the *signal*; it never skips a watering itself |
+| `yearly_rain_mm` | attr | Rain this calendar year — one sky over the whole garden (reference model D3). Note the asymmetry with the deficit, which is emphatically not shared |
+| `declared_sensors → {SensorKind}` | property | Every kind actually bound to an entity |
+| `satisfies(required) → bool` | method | The whole capability rule: `declared ≥ required` |
+| `missing_for(required) → {SensorKind}` | method | *Which* sensor unlocks a model — what the UI needs to say |
+| `accrue_yearly_rain(mm, year)` | method | Credits positive increments only; a decreasing reading is never rain (GH #123) |
+
+### Zone — `zone.py`
+
+The irrigation unit: owns its deficit, turns it into litres, and settles it with the driver's
+reported truth.
+
+| Member | Kind | Meaning |
+|---|---|---|
+| `name` | attr | Identity; also the `source` tag on its `Deficit` |
+| `area_m2`, `efficiency` | attr | Irrigated surface, and how much of what is emitted reaches the root zone |
+| `plant_family`, `manual_kc` | attr | What grows here — the seasonal curve, or an explicit override |
+| `exposure`, `microclimate_factor` | attr | Sun and wind relative to an open site (GH #146) |
+| `placement: Placement` | attr | Where the zone sits. `receives_rain` is true only outdoors; `driven_by_outdoor_et` also covers a patio |
+| `d_max` | attr | **This soil's** reservoir. Only the clamping mechanism is shared across models |
+| `threshold_mm` | attr | Deficit that triggers irrigation |
+| `cycle_soak: CycleSoakRule` | attr | Dose/pause — a Zone rule, not a Scheduler policy |
+| `deficit: Deficit` | attr | Its own deficit, carrying its reference frame. A new zone starts at 0 (D4) |
+| `counters: WaterCounters` | attr | last / session / total / yearly delivered litres |
+| `effective_kc(base_kc)` | method | Applies site exposure. The seasonal curve is deliberately *not* recomputed here — copying its plant table in would create the second source of truth anomaly E1 is about |
+| `accumulate(dt_h, et_h, base_kc, rain_mm)` | method | `+ET·Kc·Δt − rain`, clamped. Rain is credited only when `placement.receives_rain` |
+| `water_demand_l` | property | mm → litres via area and efficiency; litres are the contract towards the driver |
+| `needs_water` | property | Deficit has reached the threshold |
+| `begin_cycle()` | method | Opens a cycle, snapshotting the deficit it starts from |
+| `credit_delivery(d: Delivery)` | method | **The one crediting formula.** Subtracts from the snapshot while a cycle is open, from the current value otherwise — which is what makes repeated real-time credits idempotent |
+| `settle(d, source, at)` | method | Credits the final figure, stamps it, drops the snapshot — exactly once |
+| `mark_irrigated(source, at)` | method | The hose case: nothing was measured, so the volume is inferred from the deficit being cleared |
 
 ### Scheduler
 
@@ -609,12 +669,16 @@ plays the role of RAW = p · TAW.
 still waits on wiring, and on the `Zone` class the model presumes but the code does not yet have
 (anomaly A1).
 
-## Mapping to current code (2026-07-05)
+## Mapping to current code (2026-08-09)
+
+Every object in this document now has a module. The table says, for each, how far the written
+class is from the code that still does the work — because **none of the scaffolds is wired**.
+Read the two columns as "what the model says" against "what runs today".
 
 | Object | Current state |
 |---|---|
-| System | ✅ explicit: config entry globals, `ETSensor`, `DrynessIndexSensor` — now the **feed hub / broadcaster** (temperature + rain → `et_h`, `rain_delta` → zones). Its `_deficit` accumulator is being **retired as ET state** and survives only as the interim VWC-system value (Water-Balance Reference Model, D2/D5) |
-| Zone | ✅ explicit: `IrrigationZoneSensor`, per-zone config (Kc, area, sun exposure). `_zone_deficit` is **authoritative**; a new zone **starts at 0** (D4), not seeded from the global. Cycle & soak: not implemented |
+| Environment | ⚠️ **scaffold written, inert**: `environment.py` (sensor inventory, `declared_sensors`/`satisfies`/`missing_for` capability matching, `RainDelayPolicy`, yearly rain). What runs today is still `DrynessIndexSensor` as **feed hub / broadcaster** (temperature + rain → `et_h`, `rain_delta` → zones), holding the globals the RFC redistributes. Its `_deficit` accumulator is **retired as ET state** and survives only as the interim VWC-system value (D2/D5) |
+| Zone | ⚠️ **scaffold written, inert**: `zone.py` (`Placement`, per-zone `d_max`, `Deficit` ownership, the single `credit_delivery`, `CycleSoakRule`, `WaterCounters`). What runs today is `IrrigationZoneSensor` — a data bag whose accounting lives in `IrrigationController`, which reads and writes 13 of its privates and repeats the crediting formula in 4 places (**anomaly A1**). `_zone_deficit` is authoritative and a new zone starts at 0 (D4). Cycle & soak, placement, per-zone `d_max`: designed, not implemented |
 | Scheduler | ⚠️ implicit and minimal: deficit-triggered daily cycle inside `IrrigationController`; no cron/sequences/calendars (deliberately — that is Irrigation Unlimited's territory). Concurrency is de-facto serial, not an explicit policy |
 | ZoneDriver | ⚠️ exists but internal: `ValveOperator` (FSM, safety layers, latency tracker) + valve/switch adapter (GH #74/#94); native volume delivery in progress. Delivered liters returned as a bare float — no DeliveryResult qualifier yet. **Scaffold extracted**: `actuator.py` (`Actuator`/`ZoneActuator`/`MasterActuator`), inert until wired. 📝 **Naming decision (2026-08-01):** the scaffold family will be renamed `Actuator`/`ZoneActuator`/`MasterActuator` → **`Driver`/`ZoneDriver`/`MasterDriver`** (file `actuator.py` → `driver.py`) to match this model's term; `ManualActuator` keeps its name — it is deliberately *not* a `Driver` (shares only the `DeliveryResult` contract) |
 | MasterDriver | ❌ not implemented (GH #95); its scaffold lives in `actuator.py` (`MasterActuator`) |
@@ -626,5 +690,17 @@ The refactoring direction is symmetric on both axes: make the **Driver** base ex
 implementing GH #95 (so `MasterActuator` inherits the safety layers rather than reimplementing
 them), and make the **WaterBalanceModel** explicit so the ET/VWC switch becomes polymorphic
 dispatch over a shared `Deficit` output instead of an `if self._vwc_sensor:` fork with a
-duplicated ET formula. Both scaffolds already exist as pure/self-contained modules; the
-remaining phase is wiring the existing call sites onto them.
+duplicated ET formula. All four scaffolds now exist as self-contained modules; the remaining
+phase is wiring the existing call sites onto them.
+
+### Where model and code still disagree
+
+Stated plainly, so the divergence is a decision rather than a surprise:
+
+| Divergence | Status |
+|---|---|
+| `Actuator`/`ZoneActuator`/`MasterActuator` in code vs **`Driver`/`ZoneDriver`/`MasterDriver`** in this document | Rename **decided**, not applied (`actuator.py` → `driver.py`). To be done before wiring, not after, or the wiring carries the wrong names |
+| `Zone` and `Environment` written but nothing imports them | Deliberate. Phase 1 is the class, phase 2 is the wiring; conflating them is how a refactor becomes unreviewable |
+| Seasonal Kc curve lives in `sensor.compute_kc`, not on `Zone` | Deliberate: the plant-family table has one home, and copying it onto the Zone would create the duplicate source of truth anomaly E1 is about. `Zone.effective_kc` owns only the part that is genuinely the zone's — its exposure |
+| `D_max` per-zone in the model, seeded from the site in code (`self._d_max = dryness_sensor._d_max`) | Decided per-zone; the field already exists on the zone, so the work is to expose it in config and stop seeding it. Deriving it properly needs a wilting point the model does not have — see the caveat in the RFC |
+| VWC mode overwrites the zone deficit unconditionally after irrigation | A defect, tracked separately. It is the same shape wiring a model into an anemic Zone would reproduce: two writers on one truth |
