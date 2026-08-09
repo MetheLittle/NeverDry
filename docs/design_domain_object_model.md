@@ -543,13 +543,42 @@ configurable):
   configurable amount. A *decision input* the environment provides; the Scheduler/Zone consumes it
   (the environment supplies signals, it does not itself skip watering).
 
-**Open questions before Accepted.** Where does `rain_delay` live — an `Environment` property or a
-`Scheduler` policy (cf. cycle&soak = Zone rule, serial/parallel = Scheduler policy)? Avoid
-double-counting forecast vs measured rain against the water-balance rain memory. Where does the
-now-global **D_max** attach in config (a top-level setting vs a per-zone default)? Tracked in the
-backlog. This RFC raises the **α-ownership** finding (α modeled on `System` but usable only by
-`ETModel`) — to be logged as an anomaly in the [Domain Model Anomalies](design_domain_model_anomalies.md)
-audit when promoted.
+**Where the rain rules live — resolved 2026-08-09.** `rain_delay` is a **Zone** rule, not a
+`Scheduler` policy. The test that settles it: a Scheduler that must *know* indoor zones are unaffected
+by rain has already conceded the rule belongs to the Zone — it is asking each zone whether it is
+exposed, in order to decide on the zone's behalf. It also matches the criterion this document already
+uses elsewhere: cycle&soak is a Zone rule because it concerns that zone's soil; serial/parallel is a
+Scheduler policy because it arbitrates a **shared resource**. Rain is not shared — it falls on a zone
+or it does not.
+
+The property to model is not a bespoke `rain_delay` flag but **whether the zone is open to the sky**,
+expressed as a categorical `Zone.environment`:
+
+| `environment` | Receives rain | Driven by outdoor ET |
+|---|---|---|
+| `outdoor` (default) | yes | yes |
+| `patio` | no | yes |
+| `greenhouse` | no | sheltered — own regime |
+| `indoor` | no | no (moisture-threshold logic instead) |
+
+`patio` is what makes the categorical necessary rather than a boolean: a covered terrace is fully
+outdoors for temperature and wind, yet receives no rain. Without it one is tempted to collapse
+"receives rain" and "is outdoors" into a single flag, which the middle rows show are independent.
+
+One attribute then gates three things that must not be allowed to diverge: the **measured** rain
+credit, the **forecast** rain delay, and whether the outdoor ET model applies at all. That also
+answers the double-counting question below — forecast and measured rain pass through the same
+per-zone gate, so they cannot disagree about whether a zone sees rain.
+
+Note the consequence for today's code: `_broadcast_to_zones` credits `rain` to every registered zone
+unconditionally, and no indoor/outdoor discriminator exists yet. That is latent rather than live —
+there are no non-outdoor zones today — but it becomes a defect the moment `environment` ships, so the
+gate and the discriminator must land together.
+
+**Open questions before Accepted.** Where does the now-global **D_max** attach in config (a top-level
+setting vs a per-zone default)? Tracked in the backlog. This RFC raises the **α-ownership** finding
+(α modeled on `System` but usable only by `ETModel`) — to be logged as an anomaly in the
+[Domain Model Anomalies](design_domain_model_anomalies.md) audit when promoted.
 
 ## Mapping to current code (2026-07-05)
 
