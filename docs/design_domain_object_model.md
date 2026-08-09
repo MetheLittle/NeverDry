@@ -498,7 +498,7 @@ responsibilities, and one of its "global params" is not global at all:
 |---|---|---|
 | temperature + rain sensors (feeds) | **`Environment`** | Environmental inputs the zones consume |
 | **α** (ET sensitivity) | **`ETModel`** | Used **only** by the simple temperature ET tier — verified: `ETModel.et_hourly = max(0, α·(T−T_base)/24)`. Hargreaves uses its own 0.0023 + extraterrestrial radiation; Penman-Monteith is an energy balance; VWC has no ET. α is meaningless for every other model, so it cannot be a system-global param |
-| **D_max** (deficit clamp) | global water-balance config | Genuinely shared — **every** model clamps its `Deficit` to `[0, D_max]` (ET tiers *and* VWC). Stays a global setting, not a `System` object member |
+| **D_max** (deficit clamp) | **`Zone`** (value), water-balance config (default) | The *mechanism* is shared — every model clamps its `Deficit` to `[0, D_max]`, ET tiers *and* VWC. The *value* is not: D_max is the zone's soil reservoir, set by soil type × root depth, so a sandy zone under shallow turf and a clay zone under deep shrubs do not hold the same water. Shared mechanism ≠ shared value — every zone has a Kc too, without Kc being global. See "D_max is per-zone" below |
 | master valve / pump (declaration) | **`MasterDriver`** | A hydraulics/actuation concern, not an environmental one |
 
 With those redistributed, **nothing is left on `System`** — so `System` is **dissolved**, not renamed.
@@ -552,9 +552,9 @@ Scheduler policy because it arbitrates a **shared resource**. Rain is not shared
 or it does not.
 
 The property to model is not a bespoke `rain_delay` flag but **whether the zone is open to the sky**,
-expressed as a categorical `Zone.environment`:
+expressed as a categorical `Zone.placement`:
 
-| `environment` | Receives rain | Driven by outdoor ET |
+| `placement` | Receives rain | Driven by outdoor ET |
 |---|---|---|
 | `outdoor` (default) | yes | yes |
 | `patio` | no | yes |
@@ -572,13 +572,42 @@ per-zone gate, so they cannot disagree about whether a zone sees rain.
 
 Note the consequence for today's code: `_broadcast_to_zones` credits `rain` to every registered zone
 unconditionally, and no indoor/outdoor discriminator exists yet. That is latent rather than live —
-there are no non-outdoor zones today — but it becomes a defect the moment `environment` ships, so the
+there are no non-outdoor zones today — but it becomes a defect the moment `placement` ships, so the
 gate and the discriminator must land together.
 
-**Open questions before Accepted.** Where does the now-global **D_max** attach in config (a top-level
-setting vs a per-zone default)? Tracked in the backlog. This RFC raises the **α-ownership** finding
+*Naming note.* `placement` rather than `environment`, deliberately: this RFC already uses
+`Environment` for the site-level sensor inventory, and `exposure` is taken by the microclimate factor
+(#146). Three overlapping words at two different levels is a collision worth resolving before wiring,
+not after. `placement` says literally what it holds — where the zone sits.
+
+**D_max is per-zone — resolved 2026-08-09.** The earlier reading ("genuinely shared, stays a global
+setting") conflated two things. What is shared is the **mechanism**: every model clamps its `Deficit`
+into `[0, D_max]`. The **value** is a property of the zone's soil — D_max is the reservoir that soil
+can hold, a function of soil type and root depth. A sandy zone under shallow turf and a clay zone
+under deep shrubs currently receive the same reservoir, which is simply wrong. Shared mechanism does
+not imply shared value: every zone has a Kc, without Kc being global.
+
+The scaffolds already assume this. `Deficit` carries `d_max` as its own field and exposes
+`clamped()`; `WaterBalanceModel` surfaces it as a property. And today's code already keeps a per-zone
+field — `IrrigationZoneSensor._d_max` — merely *seeded* from the system value
+(`self._d_max = dryness_sensor._d_max`, itself a reach into another object's private, cf. anomaly
+A1). So the work is to expose it in config and stop seeding it globally, not to relocate state.
+
+**Caveat — do not derive it silently.** In FAO-56 the reservoir is `TAW = (θ_FC − θ_WP) · Z_r`, and
+the model has **no wilting point**: `const.py` defines `DEFAULT_FIELD_CAPACITY = 0.30` and
+`DEFAULT_ROOT_DEPTH = 0.30` but nothing for θ_WP, while `DEFAULT_D_MAX = 100.0` is an independent
+constant, not derived from either. Deriving D_max properly means the soil-type presets of #126 must
+carry a wilting point as well — and the resulting values land materially lower than today's default
+(a loam at Z_r = 0.30 m gives roughly 45–50 mm, about half). That is a real change in irrigation
+behaviour and must be made deliberately, with a migration for existing installs, not slipped in.
+Note also the natural pairing it exposes: D_max ≈ TAW, while the zone's existing trigger threshold
+plays the role of RAW = p · TAW.
+
+**Open questions before Accepted.** None outstanding. This RFC raises the **α-ownership** finding
 (α modeled on `System` but usable only by `ETModel`) — to be logged as an anomaly in the
-[Domain Model Anomalies](design_domain_model_anomalies.md) audit when promoted.
+[Domain Model Anomalies](design_domain_model_anomalies.md) audit when promoted. Promotion to Accepted
+still waits on wiring, and on the `Zone` class the model presumes but the code does not yet have
+(anomaly A1).
 
 ## Mapping to current code (2026-07-05)
 

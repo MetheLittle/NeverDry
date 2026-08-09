@@ -68,6 +68,24 @@ The deficit-crediting formula `max(0, deficit_at_start − delivered·efficiency
 `zone.settle(result)` — collapsing the 4 copies into one. Closing this also mechanically
 closes C1 and half of E1.
 
+**Why this is the keystone, not just the largest entry (2026-08-09).** The `Zone` is **designed and
+not yet written**: it has a row in the five-object table, a box in the class diagram with its
+attributes and methods, and an owner recorded for every behaviour listed above — but no module. A
+search across every ref finds only `IrrigationZoneSensor` and eighteen `Zone*Sensor` numeric
+projections of it. Now look at where the two existing scaffolds point: `actuator.py` returns a
+`DeliveryResult` — to *whom*? To the Zone that settles it. `water_balance_model.py` produces a
+`Deficit` — for *whom*? For the Zone that owns it. Both seams face a class that has been specified
+but never typed out.
+
+So the scaffolds are not inert because wiring them is hard; they are inert because the object they
+attach to has not been written yet. That reframes A1: it is not an anomaly to clean up eventually,
+it is the unwritten half of the object model, and it gates the wiring of everything else. It is also why the
+duplicated crediting formula matters beyond tidiness — wire a `WaterBalanceModel` in while the
+controller still writes `zone._zone_deficit` from four sites and you get **two writers on the same
+truth**, with the model authoritative on paper and the controller authoritative in fact. That failure
+has already happened once: it is the shape of the VWC overwrite defect (probe reading overwrites the
+zone deficit after irrigation), reproduced one layer up.
+
 ### A2 — 🟠 `volume_preset` leaks the ZoneDriver abstraction
 **Target owner:** `ZoneDriver` (uniform seam; `deliver(liters)` for *every* mode).
 **As-is:** `estimated_flow` and `flow_meter` route through `operator.open()/close()`
