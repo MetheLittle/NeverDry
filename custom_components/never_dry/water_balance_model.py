@@ -20,7 +20,7 @@ per-zone deficit loop):
 Design intent — this module is deliberately **pure**: no Home Assistant import,
 no I/O, only arithmetic on floats. The "how much water" math has no reason to
 touch HA, which makes it trivially testable and reusable. This mirrors, on the
-*sensing* side, what ``actuator.py`` did on the *actuation* side: extract the
+*sensing* side, what ``driver.py`` did on the *actuation* side: extract the
 implicit domain object into a self-contained module now, wire the existing call
 sites onto it in a later phase.
 

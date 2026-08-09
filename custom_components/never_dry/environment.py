@@ -16,7 +16,7 @@ temperature + rain sensors   :class:`Environment` — environmental feeds
 alpha (ET sensitivity)       ``ETModel`` — used *only* by the simple ET tier
 D_max (deficit clamp)        ``Zone`` — the value is the zone's soil reservoir;
                              only the clamping *mechanism* is shared
-master valve / pump          ``MasterActuator`` — a hydraulics concern
+master valve / pump          ``MasterDriver`` — a hydraulics concern
 ===========================  ==================================================
 
 **Capability matching** is the reason this object earns its place. Each

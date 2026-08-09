@@ -1,17 +1,17 @@
-"""Actuator abstraction — the single home for driving one irrigation actuator.
+"""Driver abstraction — the single home for driving one irrigation actuator.
 
 This module materializes the domain model's ``Driver`` (see
 ``docs/design_domain_object_model.md``) as a concrete, Home-Assistant-aware
 base class — the *attuatore* — together with its two specializations:
 
-* :class:`ZoneActuator` (the model's ``ZoneDriver``) — drives one zone's
+* :class:`ZoneDriver` (the model's ``ZoneDriver``) — drives one zone's
   valve/switch, translating a **liters** request into actuation and returning a
   truthful :class:`DeliveryResult`.
-* :class:`MasterActuator` (the model's ``MasterDriver``) — drives shared
+* :class:`MasterDriver` (the model's ``MasterDriver``) — drives shared
   hydraulics (a master valve or pump), *following* aggregate zone activity with
   an off-delay linger. It has no notion of liters.
 
-The abstract base :class:`Actuator` owns everything the two share, as the domain
+The abstract base :class:`Driver` owns everything the two share, as the domain
 model prescribes: the entity adapter (``switch.*`` vs ``valve.*``), confirmed
 on/off commands over a pure :class:`~.valve_fsm.ValveFsm`, adaptive
 latency/timeout, the safety layers (absolute watchdog, hardware max-duration
@@ -182,7 +182,7 @@ class DeliveryMode(StrEnum):
 
 @dataclass(frozen=True)
 class DeliveryResult:
-    """The round-trip return of :meth:`ZoneActuator.deliver`.
+    """The round-trip return of :meth:`ZoneDriver.deliver`.
 
     Not a bare float: it carries how much water was delivered *and how truthful*
     that figure is, so the Zone can settle its deficit and diagnostics can show
@@ -205,7 +205,7 @@ class DeliveryResult:
 
 
 class OperationStatus(StrEnum):
-    """Outcome category for :meth:`Actuator.async_turn_on` / :meth:`async_turn_off`."""
+    """Outcome category for :meth:`Driver.async_turn_on` / :meth:`async_turn_off`."""
 
     OK = "ok"
     FAILED = "failed"
@@ -259,17 +259,17 @@ _CONFIRM_FOR_CMD: dict[ValveEvent, tuple[str, ValveEvent]] = {
 }
 
 
-# ── The abstract actuator (the model's ``Driver``) ─────────────────────────
+# ── The abstract driver (the model's ``Driver``) ───────────────────────────
 
 
-class Actuator(abc.ABC):
+class Driver(abc.ABC):
     """HA-aware driver for a single actuator, sitting on a pure :class:`ValveFsm`.
 
     Owns the entity adapter, confirmed on/off commands with retry on transient
     (comms) failures, the adaptive latency timeout, the absolute watchdog, the
     optional hardware max-duration timer, ``CLOSE_LEAK`` recovery + stuck-open
     escalation, and an active liveness probe. Subclasses add *what* to do with a
-    live actuator: :class:`ZoneActuator` delivers liters; :class:`MasterActuator`
+    live actuator: :class:`ZoneDriver` delivers liters; :class:`MasterDriver`
     follows aggregate activity.
     """
 
@@ -673,13 +673,13 @@ class Actuator(abc.ABC):
         """
         if kind in _TRANSIENT_FAILURES and self._retries_left > 0:
             _LOGGER.warning(
-                "Actuator '%s' transient failure %s — retrying (%d attempt(s) left)",
+                "Driver '%s' transient failure %s — retrying (%d attempt(s) left)",
                 self._name,
                 kind.name,
                 self._retries_left,
             )
             return
-        _LOGGER.error("Actuator '%s' failure: %s", self._name, kind.name)
+        _LOGGER.error("Driver '%s' failure: %s", self._name, kind.name)
         if self._notifier is None:
             return
         if kind == FailureKind.CLOSE_LEAK:
@@ -695,7 +695,7 @@ class Actuator(abc.ABC):
     async def _attempt_leak_recovery(self) -> bool:
         """Last-resort recovery from ``CLOSE_LEAK``: re-issue close, re-check flow."""
         _LOGGER.warning(
-            "Actuator '%s' CLOSE_LEAK detected — attempting recovery (direct close + recheck)",
+            "Driver '%s' CLOSE_LEAK detected — attempting recovery (direct close + recheck)",
             self._name,
         )
         await self._call_actuator(on=False)
@@ -712,15 +712,15 @@ class Actuator(abc.ABC):
             return False
         recovered = flow <= self._flow_zero_threshold
         if recovered:
-            _LOGGER.info("Actuator '%s' leak recovery succeeded (flow=%.3f)", self._name, flow)
+            _LOGGER.info("Driver '%s' leak recovery succeeded (flow=%.3f)", self._name, flow)
         else:
-            _LOGGER.error("Actuator '%s' leak recovery failed (flow=%.3f)", self._name, flow)
+            _LOGGER.error("Driver '%s' leak recovery failed (flow=%.3f)", self._name, flow)
         return recovered
 
     async def _escalate_stuck_open(self) -> None:
         """Trigger integration-wide emergency stop + CRITICAL notification."""
         _LOGGER.error(
-            "Actuator '%s' stuck-open confirmed after recovery; calling never_dry.stop and escalating",
+            "Driver '%s' stuck-open confirmed after recovery; calling never_dry.stop and escalating",
             self._name,
         )
         try:
@@ -739,7 +739,7 @@ class Actuator(abc.ABC):
     async def _notify_maintenance(self) -> None:
         """Notify that the actuator just entered MAINTENANCE."""
         _LOGGER.error(
-            "Actuator '%s' entered MAINTENANCE (consecutive failures = %d)",
+            "Driver '%s' entered MAINTENANCE (consecutive failures = %d)",
             self._name,
             self._fsm.failure_count,
         )
@@ -765,14 +765,14 @@ class Actuator(abc.ABC):
                 blocking=False,
             )
         except Exception as exc:
-            _LOGGER.error("Actuator '%s' %s.%s call raised: %s", self._name, domain, service, exc)
+            _LOGGER.error("Driver '%s' %s.%s call raised: %s", self._name, domain, service, exc)
 
     def _read_normalized_state(self) -> str:
         """Return the actuator's normalized state via the adapter."""
         state = self._hass.states.get(self._entity_id)
         return self._adapter.interpret_state(state.state if state is not None else None)
 
-    def _actuator_is_off(self) -> bool:
+    def _driver_is_off(self) -> bool:
         """``True`` when the actuator entity currently reads closed/off."""
         return self._read_normalized_state() == "off"
 
@@ -825,7 +825,7 @@ class Actuator(abc.ABC):
                     blocking=False,
                 )
                 _LOGGER.debug(
-                    "Actuator '%s' hardware max_duration set to %.1f via entity %s",
+                    "Driver '%s' hardware max_duration set to %.1f via entity %s",
                     self._name,
                     value,
                     self._hw_max_duration_entity,
@@ -833,7 +833,7 @@ class Actuator(abc.ABC):
                 return
             except Exception as exc:
                 _LOGGER.warning(
-                    "Actuator '%s' failed to set hardware max_duration via entity %s: %s; trying MQTT",
+                    "Driver '%s' failed to set hardware max_duration via entity %s: %s; trying MQTT",
                     self._name,
                     self._hw_max_duration_entity,
                     exc,
@@ -849,14 +849,14 @@ class Actuator(abc.ABC):
                     blocking=False,
                 )
                 _LOGGER.debug(
-                    "Actuator '%s' hardware max_duration set to %.1f via MQTT topic %s",
+                    "Driver '%s' hardware max_duration set to %.1f via MQTT topic %s",
                     self._name,
                     value,
                     self._hw_max_duration_topic,
                 )
             except Exception as exc:
                 _LOGGER.warning(
-                    "Actuator '%s' failed to set hardware max_duration via MQTT topic %s: %s",
+                    "Driver '%s' failed to set hardware max_duration via MQTT topic %s: %s",
                     self._name,
                     self._hw_max_duration_topic,
                     exc,
@@ -870,7 +870,7 @@ class Actuator(abc.ABC):
         except asyncio.CancelledError:
             return
         _LOGGER.error(
-            "Actuator '%s' watchdog triggered after %.0f s open — forcing close",
+            "Driver '%s' watchdog triggered after %.0f s open — forcing close",
             self._name,
             max_open_s,
         )
@@ -955,7 +955,7 @@ class Actuator(abc.ABC):
         window.record(latency_ms)
         self._hass.async_create_task(self._latency.async_save())
         _LOGGER.debug(
-            "Actuator '%s' confirmation latency %.1f ms → adaptive timeout %.2f s",
+            "Driver '%s' confirmation latency %.1f ms → adaptive timeout %.2f s",
             self._name,
             latency_ms,
             timeout_getter(),
@@ -979,7 +979,7 @@ class Actuator(abc.ABC):
 # ── Zone actuator (the model's ``ZoneDriver``) ─────────────────────────────
 
 
-class ZoneActuator(Actuator):
+class ZoneDriver(Driver):
     """Drive one zone's actuator, translating a **liters** request into water.
 
     ``deliver(liters)`` is the contract with the Zone: the zone always asks for
@@ -1007,7 +1007,7 @@ class ZoneActuator(Actuator):
         auto_open_grace_s: float = AUTO_OPEN_GRACE_S,
         **base_kwargs,
     ) -> None:
-        """Configure a zone actuator; ``base_kwargs`` flow to :class:`Actuator`."""
+        """Configure a zone actuator; ``base_kwargs`` flow to :class:`Driver`."""
         super().__init__(hass, entity_id, flow_sensor_entity_id=flow_meter_sensor, **base_kwargs)
         self._delivery_mode = DeliveryMode(delivery_mode)
         self._flow_rate_lpm = flow_rate_lpm
@@ -1114,7 +1114,7 @@ class ZoneActuator(Actuator):
                 break
             await asyncio.sleep(FLOW_METER_POLL_INTERVAL_S)
             elapsed += FLOW_METER_POLL_INTERVAL_S
-            if self._actuator_is_off():
+            if self._driver_is_off():
                 break  # hardware auto-close — stop polling a dead meter
             current = flow_utils.read_volume_liters(self._hass, meter)
             if current is None:
@@ -1152,7 +1152,7 @@ class ZoneActuator(Actuator):
                 break
             await asyncio.sleep(FLOW_METER_POLL_INTERVAL_S)
             elapsed += FLOW_METER_POLL_INTERVAL_S
-            if self._actuator_is_off():
+            if self._driver_is_off():
                 break
             rate = flow_utils.read_flow_meter(self._hass, meter)
             if rate is None or rate < 0:
@@ -1245,7 +1245,7 @@ class ZoneActuator(Actuator):
                 return DeliveryResult(min(liters, estimate), DeliveryQuality.PARTIAL, elapsed, liters, detail="aborted")
             await asyncio.sleep(FLOW_METER_POLL_INTERVAL_S)
             elapsed += FLOW_METER_POLL_INTERVAL_S
-            if self._actuator_is_off():
+            if self._driver_is_off():
                 return DeliveryResult(liters, DeliveryQuality.MEASURED, elapsed, liters)
 
         _LOGGER.warning("Zone '%s' volume_preset timeout (%.0fs). Forcing close.", self._name, timeout)
@@ -1274,7 +1274,7 @@ class ZoneActuator(Actuator):
             step = min(FLOW_METER_POLL_INTERVAL_S, duration_s - elapsed)
             await asyncio.sleep(step)
             elapsed += step
-            if self._actuator_is_off():
+            if self._driver_is_off():
                 break
         return elapsed
 
@@ -1282,19 +1282,19 @@ class ZoneActuator(Actuator):
 # ── Master actuator (the model's ``MasterDriver``) ─────────────────────────
 
 
-class MasterActuator(Actuator):
+class MasterDriver(Driver):
     """Drive shared hydraulics (a master valve or pump) by following zone activity.
 
     It takes no irrigation decisions and has no notion of liters: it is ON while
     any zone actuator is active and OFF once none are, after a configurable
     off-delay linger that avoids pump cycling during sequential zone runs (GH #95).
-    Modeling it as an :class:`Actuator` means the safety layers — never leave the
+    Modeling it as an :class:`Driver` means the safety layers — never leave the
     pump running on error/stop/restart — are inherited from the base, not
     duplicated.
 
     Note: "pump" is a *role*, not a HA device type — HA has no ``pump.*`` domain
     or ``pump`` device_class. A pump is driven as a ``switch.*`` entity (a relay),
-    which the :class:`ValveCommandAdapter` handles transparently; ``MasterActuator``
+    which the :class:`ValveCommandAdapter` handles transparently; ``MasterDriver``
     adds only the pump-specific behaviour (``off_delay_s`` linger). This is why the
     domain model folds pump and master valve into the single ``MasterDriver``.
     """
@@ -1309,7 +1309,7 @@ class MasterActuator(Actuator):
         off_delay_s: float = DEFAULT_MASTER_OFF_DELAY_S,
         **base_kwargs,
     ) -> None:
-        """Configure a master actuator; ``base_kwargs`` flow to :class:`Actuator`."""
+        """Configure a master actuator; ``base_kwargs`` flow to :class:`Driver`."""
         super().__init__(hass, entity_id, **base_kwargs)
         self._off_delay_s = off_delay_s
         self._linger_task: asyncio.Task | None = None
@@ -1364,7 +1364,7 @@ class ManualActuator:
     The third materialization of the domain's "how": there is no hardware to
     drive. Instead of opening a valve it raises an **alert** when a zone's deficit
     says water is due, and the delivery completes when the user presses **Mark
-    irrigated**. It deliberately does *not* extend :class:`Actuator` — that base
+    irrigated**. It deliberately does *not* extend :class:`Driver` — that base
     is all valve machinery (FSM, switch commands, watchdog, liveness), none of
     which applies to a human with a watering can. What it shares is the delivery
     *contract*: it returns a :class:`DeliveryResult`, so the Zone settles its

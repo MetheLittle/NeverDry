@@ -8,7 +8,7 @@ behaviour listed in anomaly A1 — but until now no module. What exists instead 
 with the accounting living in ``IrrigationController``.
 
 Why that matters more than tidiness. Look at where the other two scaffolds point:
-``actuator.py`` returns a ``DeliveryResult`` — to *whom*? To the zone that settles
+``driver.py`` returns a ``DeliveryResult`` — to *whom*? To the zone that settles
 it. ``water_balance_model.py`` produces a ``Deficit`` — for *whom*? For the zone
 that owns it. Both seams face this class. They are inert not because wiring is
 hard but because the object they attach to had not been written.
@@ -33,8 +33,8 @@ after wiring.
 
 Design intent — this module is **pure**: no Home Assistant import, no I/O, only
 arithmetic and rules. It reads a delivery through the structural
-:class:`Delivery` protocol rather than importing ``actuator.DeliveryResult``,
-because ``actuator.py`` is HA-coupled and this module must not become so;
+:class:`Delivery` protocol rather than importing ``driver.DeliveryResult``,
+because ``driver.py`` is HA-coupled and this module must not become so;
 ``DeliveryResult`` satisfies the protocol without either module knowing about the
 other. That is also the first declared interface in the package, which anomaly C1
 notes is otherwise entirely absent.
@@ -111,8 +111,8 @@ class IrrigationMode(StrEnum):
 class Delivery(Protocol):
     """The structural shape :meth:`Zone.credit_delivery` needs from a delivery.
 
-    A protocol rather than an import: ``actuator.DeliveryResult`` satisfies it
-    without this pure module taking on ``actuator.py``'s Home Assistant
+    A protocol rather than an import: ``driver.DeliveryResult`` satisfies it
+    without this pure module taking on ``driver.py``'s Home Assistant
     dependency. Anything reporting how much water it actually delivered can
     settle a zone — including, later, a manual "I watered by hand" record.
     """

@@ -63,7 +63,7 @@ quantity, so a setup can switch models (or fall back ET ⇄ VWC) without the Zon
 one ran. This also unifies the ET formula that today lives in two places (`ETSensor` and
 `DrynessIndexSensor`) into a single `ETModel.et_hourly`.
 
-Ownership follows the reference model unchanged: the **System** owns the shared feeds/probe, the
+Ownership follows the reference model unchanged: the **Environment** owns the shared feeds/probe, the
 **Zone** owns its `Deficit` and its `Kc`. The model is the *mechanism* the Zone uses to advance
 that deficit; `Kc` is passed into a per-zone `ETModel` instance (the system reference uses
 `Kc = 1.0`), because per-zone irrigation resets are independent and a shared reference cannot be
@@ -72,10 +72,13 @@ scaled proportionally after the fact.
 ## Translation chain
 
 ```
-System     provides the ET + rain feeds         α, D_max, temperature + rain sensors
+Environment provides the feeds + the inventory  temperature, rain, RH, wind, Rn, tmax/tmin,
+   │                                              probe, rain probability, latitude
+   │            gates which models a zone may run  declared_sensors ⊇ model.required_sensors
    │
-Zone       accumulates its own deficit (mm)      +ET·Kc·Δt − rain − irrigation; new zone starts at 0
-   │        then translates mm → liters (area)   applies cycle & soak
+Zone        accumulates its own deficit (mm)      +ET·Kc·Δt − rain − irrigation; new zone starts at 0
+   │         rain credited only if placement       is open to the sky
+   │         then translates mm → liters (area)    applies cycle & soak, own D_max
    │
 ZoneDriver translates liters → actuation        native volume if supported,
    │                                            else seconds via flow rate
@@ -96,7 +99,9 @@ backend allows (see the design decision below).
 
 *Rendered diagram (`assets/domain_model_uml.svg`) — blue is the liters contract going
 down, green is the truth flowing back. The Mermaid source below is the normative
-definition; keep the two in sync.*
+definition; keep the two in sync.* ⚠️ **The SVG predates the 2026-08-09 revision** and
+still shows `System` rather than `Environment`, without `Placement` or the `Delivery`
+protocol. Re-render it before this document is next published.*
 
 ```mermaid
 classDiagram
@@ -275,7 +280,7 @@ classDiagram
 ```
 
 `Zone` depends on `Delivery`, the structural protocol, rather than on `DeliveryResult` itself.
-That is what keeps `zone.py` free of Home Assistant while `actuator.py` — which owns the entity
+That is what keeps `zone.py` free of Home Assistant while `driver.py` — which owns the entity
 adapters — necessarily is not. `DeliveryResult` satisfies the protocol without either module
 importing the other.
 
@@ -415,9 +420,9 @@ capability and will land with the driver abstraction.
 
 ## Design decisions
 
-### The deficit lives in the Zone; the System holds feeds, not state
+### The deficit lives in the Zone; the site holds feeds, not state
 
-The System is not a global deficit. It owns the two shared **feeds** — the
+The `Environment` is not a global deficit. It owns the shared **feeds** — the
 temperature sensor (→ ET) and the rain sensor — and broadcasts them; each Zone
 accumulates **its own** deficit (`+ET·Kc·Δt − rain − irrigation`). Irrigating a
 zone resets only that zone. A new zone starts at 0 rather than inheriting a
@@ -428,7 +433,7 @@ frames, and the retire/keep table are in the
 [Water-Balance Reference Model](design_water_balance_reference_model.md)
 (decisions D1–D5).
 
-### Master valve/pump: declared in System, executed by a Driver
+### Master valve/pump: declared at site level, executed by a Driver
 
 The master valve is not scheduling logic — it takes no decisions. It reacts to the aggregate
 execution state (an OR over zone drivers), with an off-delay to avoid pump cycling during
@@ -487,7 +492,7 @@ the user presses **Mark irrigated** once they have watered. `ManualActuator` mod
 third materialization of the *how* — a materialization that proves the abstraction, because it
 has **no hardware at all**.
 
-It deliberately does not extend `Driver`/`Actuator`: there is no entity, no FSM, no watchdog,
+It deliberately does not extend `Driver`: there is no entity, no FSM, no watchdog,
 no liveness. It shares only the delivery **contract** (`→ DeliveryResult`), so the Zone settles
 its deficit identically whether the water came from a valve or a watering can. Two existing
 pieces are reused rather than reinvented: the alert is a **notification**, and **Mark
@@ -499,7 +504,7 @@ is simply the extreme case of "a backend that measures late".
 
 **Actuation and model are orthogonal.** A house plant picks the manual *how* **and** the right
 *how much*: indoors the demand is not weather-driven, so it pairs with a VWC / indoor
-water-balance model, **not** `ETModel`. The two axes (`Actuator` family × `WaterBalanceModel`
+water-balance model, **not** `ETModel`. The two axes (`Driver` family × `WaterBalanceModel`
 family) compose freely — a house plant is just one corner of that grid.
 
 **To explore (open questions, not decided):**
@@ -589,6 +594,11 @@ to an explicit `required_sensors` set on each model + a matching method on `Zone
 | `HargreavesModel` | tmax, tmin *(latitude/day-of-year derived)* |
 | `PenmanMonteithModel` | temperature, humidity, wind, net radiation |
 | `VWCSystemModel` / `VWCPerZoneModel` | soil-moisture probe |
+
+*Naming note.* `VWCSystemModel` still carries the name of the dissolved object. It is left alone
+deliberately: whether a site-level probe is a coherent category at all is the open question of the
+soil-moisture model, and renaming the class before that is settled would only have to be undone. The
+same question decides whether the two VWC classes collapse into one.
 
 *(rain is a credit feed shared by all ET tiers, defaulting to 0 — not a gating requirement.)*
 
@@ -680,14 +690,14 @@ Read the two columns as "what the model says" against "what runs today".
 | Environment | ⚠️ **scaffold written, inert**: `environment.py` (sensor inventory, `declared_sensors`/`satisfies`/`missing_for` capability matching, `RainDelayPolicy`, yearly rain). What runs today is still `DrynessIndexSensor` as **feed hub / broadcaster** (temperature + rain → `et_h`, `rain_delta` → zones), holding the globals the RFC redistributes. Its `_deficit` accumulator is **retired as ET state** and survives only as the interim VWC-system value (D2/D5) |
 | Zone | ⚠️ **scaffold written, inert**: `zone.py` (`Placement`, per-zone `d_max`, `Deficit` ownership, the single `credit_delivery`, `CycleSoakRule`, `WaterCounters`). What runs today is `IrrigationZoneSensor` — a data bag whose accounting lives in `IrrigationController`, which reads and writes 13 of its privates and repeats the crediting formula in 4 places (**anomaly A1**). `_zone_deficit` is authoritative and a new zone starts at 0 (D4). Cycle & soak, placement, per-zone `d_max`: designed, not implemented |
 | Scheduler | ⚠️ implicit and minimal: deficit-triggered daily cycle inside `IrrigationController`; no cron/sequences/calendars (deliberately — that is Irrigation Unlimited's territory). Concurrency is de-facto serial, not an explicit policy |
-| ZoneDriver | ⚠️ exists but internal: `ValveOperator` (FSM, safety layers, latency tracker) + valve/switch adapter (GH #74/#94); native volume delivery in progress. Delivered liters returned as a bare float — no DeliveryResult qualifier yet. **Scaffold extracted**: `actuator.py` (`Actuator`/`ZoneActuator`/`MasterActuator`), inert until wired. 📝 **Naming decision (2026-08-01):** the scaffold family will be renamed `Actuator`/`ZoneActuator`/`MasterActuator` → **`Driver`/`ZoneDriver`/`MasterDriver`** (file `actuator.py` → `driver.py`) to match this model's term; `ManualActuator` keeps its name — it is deliberately *not* a `Driver` (shares only the `DeliveryResult` contract) |
-| MasterDriver | ❌ not implemented (GH #95); its scaffold lives in `actuator.py` (`MasterActuator`) |
-| ManualActuator | ❌ not implemented; **scaffold extracted**: `ManualActuator` in `actuator.py` (valve-less, `request_irrigation`/`mark_irrigated` → `DeliveryResult(declared)`), inert. For hand-watered house plants — a *how* with no hardware |
+| ZoneDriver | ⚠️ exists but internal: `ValveOperator` (FSM, safety layers, latency tracker) + valve/switch adapter (GH #74/#94); native volume delivery in progress. Delivered liters returned as a bare float — no DeliveryResult qualifier yet. **Scaffold extracted**: `driver.py` (`Driver`/`ZoneDriver`/`MasterDriver`), inert until wired. ✅ **Renamed 2026-08-09** to match this model's term — the module was unreferenced by any production code or test, so the rename cost nothing and no longer waits on the wiring. `ManualActuator` keeps its name deliberately: it is *not* a `Driver` (it shares only the `DeliveryResult` contract). Lowercase *actuator* survives in prose where it means the physical valve the driver drives |
+| MasterDriver | ❌ not implemented (GH #95); its scaffold lives in `driver.py` (`MasterDriver`) |
+| ManualActuator | ❌ not implemented; **scaffold extracted**: `ManualActuator` in `driver.py` (valve-less, `request_irrigation`/`mark_irrigated` → `DeliveryResult(declared)`), inert. For hand-watered house plants — a *how* with no hardware |
 | WaterBalanceModel | ⚠️ implicit today: the ET/VWC fork inside `DrynessIndexSensor._on_sensor_change` + the per-zone loop, with the ET formula duplicated in `ETSensor`. **Scaffold extracted**: `water_balance_model.py` (`WaterBalanceModel` + `ETBalanceModel` tiers `ETModel`/`HargreavesModel`/`PenmanMonteithModel` + `VWCSystemModel`/`VWCPerZoneModel`), pure, inert until wired |
 | Deficit | ❌ today a bare `float` (`_zone_deficit`, `DrynessIndexSensor._deficit`) with the frame left implicit. **Scaffold extracted**: `Deficit` value object in `water_balance_model.py` |
 
 The refactoring direction is symmetric on both axes: make the **Driver** base explicit when
-implementing GH #95 (so `MasterActuator` inherits the safety layers rather than reimplementing
+implementing GH #95 (so `MasterDriver` inherits the safety layers rather than reimplementing
 them), and make the **WaterBalanceModel** explicit so the ET/VWC switch becomes polymorphic
 dispatch over a shared `Deficit` output instead of an `if self._vwc_sensor:` fork with a
 duplicated ET formula. All four scaffolds now exist as self-contained modules; the remaining
@@ -699,7 +709,7 @@ Stated plainly, so the divergence is a decision rather than a surprise:
 
 | Divergence | Status |
 |---|---|
-| `Actuator`/`ZoneActuator`/`MasterActuator` in code vs **`Driver`/`ZoneDriver`/`MasterDriver`** in this document | Rename **decided**, not applied (`actuator.py` → `driver.py`). To be done before wiring, not after, or the wiring carries the wrong names |
+| ~~`Actuator` family in code vs `Driver` family in this document~~ | ✅ **Resolved 2026-08-09.** `actuator.py` → `driver.py`, `Actuator`/`ZoneActuator`/`MasterActuator` → `Driver`/`ZoneDriver`/`MasterDriver`. Free to do: no production module and no test referenced the scaffold, so the rename touched nothing that runs |
 | `Zone` and `Environment` written but nothing imports them | Deliberate. Phase 1 is the class, phase 2 is the wiring; conflating them is how a refactor becomes unreviewable |
 | Seasonal Kc curve lives in `sensor.compute_kc`, not on `Zone` | Deliberate: the plant-family table has one home, and copying it onto the Zone would create the duplicate source of truth anomaly E1 is about. `Zone.effective_kc` owns only the part that is genuinely the zone's — its exposure |
 | `D_max` per-zone in the model, seeded from the site in code (`self._d_max = dryness_sensor._d_max`) | Decided per-zone; the field already exists on the zone, so the work is to expose it in config and stop seeding it. Deriving it properly needs a wilting point the model does not have — see the caveat in the RFC |

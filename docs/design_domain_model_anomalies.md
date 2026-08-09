@@ -72,7 +72,7 @@ closes C1 and half of E1.
 not yet written**: it has a row in the five-object table, a box in the class diagram with its
 attributes and methods, and an owner recorded for every behaviour listed above — but no module. A
 search across every ref finds only `IrrigationZoneSensor` and eighteen `Zone*Sensor` numeric
-projections of it. Now look at where the two existing scaffolds point: `actuator.py` returns a
+projections of it. Now look at where the two existing scaffolds point: `driver.py` returns a
 `DeliveryResult` — to *whom*? To the Zone that settles it. `water_balance_model.py` produces a
 `Deficit` — for *whom*? For the Zone that owns it. Both seams face a class that has been specified
 but never typed out.
