@@ -911,6 +911,11 @@ class Driver(abc.ABC):
             await asyncio.sleep(seconds)
             await self._dispatch(_TIMEOUT_EVENT_FOR_TIMER[name])
         except asyncio.CancelledError:
+            # Expected, and the normal way a timer ends: `_cancel_timer` cancels
+            # this task whenever the event it guards arrives first — a valve that
+            # confirms before its timeout, a session that stops early. Swallowing
+            # it here keeps cancellation from surfacing as a spurious error; a
+            # real timeout still dispatches its event on the line above.
             pass
 
     # ── HA state listeners ───────────────────────────────────────────────

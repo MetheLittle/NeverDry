@@ -12,6 +12,8 @@ The adapter is worth pinning precisely: it is the single place that knows a
 additive rather than a migration.
 """
 
+import inspect
+
 import pytest
 from never_dry.driver import (
     DeliveryMode,
@@ -181,8 +183,15 @@ class TestDriverFamily:
         assert issubclass(MasterDriver, Driver)
 
     def test_the_base_is_abstract(self):
-        with pytest.raises(TypeError):
-            Driver()
+        """`role` is the hook that forces a specialization to declare itself.
+
+        Asserted on ``__abstractmethods__`` rather than by calling ``Driver()``:
+        the constructor takes required arguments, so an empty call raises
+        TypeError for the wrong reason and the test would pass even if the base
+        stopped being abstract.
+        """
+        assert inspect.isabstract(Driver)
+        assert "role" in Driver.__abstractmethods__
 
     def test_delivery_modes_are_distinct(self):
         assert len({m.value for m in DeliveryMode}) == len(list(DeliveryMode))
