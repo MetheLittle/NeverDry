@@ -56,6 +56,7 @@ from .const import (
     CONF_ZONE_DELIVERY_MODE,
     CONF_ZONE_DELIVERY_TIMEOUT,
     CONF_ZONE_EFFICIENCY,
+    CONF_ZONE_EXPOSURE,
     CONF_ZONE_FLOW_METER_SENSOR,
     CONF_ZONE_FLOW_RATE,
     CONF_ZONE_HW_MAX_DURATION_PAYLOAD,
@@ -63,6 +64,7 @@ from .const import (
     CONF_ZONE_IRRIGATION_MODE,
     CONF_ZONE_IRRIGATION_TIME,
     CONF_ZONE_KC,
+    CONF_ZONE_MICROCLIMATE_FACTOR,
     CONF_ZONE_NAME,
     CONF_ZONE_PLANT_FAMILY,
     CONF_ZONE_SYSTEM_TYPE,
@@ -79,6 +81,7 @@ from .const import (
     DEFAULT_FIELD_CAPACITY,
     DEFAULT_INTER_ZONE_DELAY,
     DEFAULT_KC,
+    DEFAULT_MICROCLIMATE_FACTOR,
     DEFAULT_RAIN_SENSOR_TYPE,
     DEFAULT_ROOT_DEPTH,
     DEFAULT_T_BASE,
@@ -89,7 +92,10 @@ from .const import (
     ET_BUFFER_MIN_READINGS,
     ET_BUFFER_SIZE,
     ET_TEMP_VALID_RANGE,
+    EXPOSURES,
     KC_ANCHOR_DAYS,
+    MICROCLIMATE_FACTOR_MAX,
+    MICROCLIMATE_FACTOR_MIN,
     PLANT_FAMILIES,
     RAIN_TYPE_EVENT,
     SYSTEM_TYPES,
@@ -176,23 +182,71 @@ def _to_celsius(state) -> float | None:
 # ══════════════════════════════════════════════════════════
 
 
+def _as_finite_float(value) -> float | None:
+    """Parse ``value`` to a finite float, or ``None`` if it is not one."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def resolve_microclimate_factor(
+    exposure: str | None,
+    custom_factor: float | None = None,
+) -> float:
+    """Resolve a zone's microclimate factor (kmc) from its exposure setting.
+
+    Presets carry their own factor; a ``None`` table factor (custom) reads
+    ``custom_factor``, clamped to the MIN/MAX bounds.
+
+    Total by design: anything unset, unknown or non-numeric gives a neutral
+    1.0 — never 0, which would freeze the deficit, and never an exception,
+    which would abort setup for every zone in the entry. Callers log the
+    fallback in their own context.
+    """
+    if not isinstance(exposure, str) or exposure not in EXPOSURES:
+        return DEFAULT_MICROCLIMATE_FACTOR
+    preset = EXPOSURES[exposure]["factor"]
+    if preset is not None:
+        return preset
+
+    value = _as_finite_float(custom_factor)
+    if value is None:
+        return DEFAULT_MICROCLIMATE_FACTOR
+    return min(max(value, MICROCLIMATE_FACTOR_MIN), MICROCLIMATE_FACTOR_MAX)
+
+
 def compute_kc(
     day_of_year: int,
     plant_family: str | None,
     manual_kc: float | None,
     latitude: float = 45.0,
+    microclimate_factor: float = DEFAULT_MICROCLIMATE_FACTOR,
 ) -> float:
-    """Compute the crop coefficient for a given day of year.
+    """Compute the effective crop coefficient for a given day of year.
 
-    Priority: manual_kc > plant_family seasonal profile > DEFAULT_KC (1.0).
+    ``Kc = base * microclimate_factor``, base being
+    manual_kc > plant_family seasonal profile > DEFAULT_KC (1.0).
 
-    The seasonal profile uses 4 anchor points (winter, spring, summer,
-    autumn) with linear interpolation.  For southern hemisphere
-    (latitude < 0) the day is shifted by 182 days.
+    The factor applies to both bases on purpose: it describes the site, not
+    the planting, so a shaded zone keeps its seasonal shape (#146).
     """
-    if manual_kc is not None:
-        return manual_kc
+    base = _seasonal_kc(day_of_year, plant_family, latitude) if manual_kc is None else manual_kc
+    return round(base * microclimate_factor, 4)
 
+
+def _seasonal_kc(
+    day_of_year: int,
+    plant_family: str | None,
+    latitude: float = 45.0,
+) -> float:
+    """Interpolate a plant family's seasonal Kc profile for a day of year.
+
+    The profile uses 4 anchor points (winter, spring, summer, autumn) with
+    linear interpolation.  For southern hemisphere (latitude < 0) the day
+    is shifted by 182 days. Unknown or missing family: DEFAULT_KC (1.0).
+    """
     if plant_family is None or plant_family not in PLANT_FAMILIES:
         return DEFAULT_KC
 
@@ -686,15 +740,23 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         dt_h = (now - self._last_update).total_seconds() / 3600.0
         self._last_update = now
 
+        # Yearly rain is a SYSTEM quantity (one sky over the whole garden),
+        # independent of the deficit model — so it must be credited in BOTH
+        # modes. It used to live only in the ET branch below, so VWC mode never
+        # accrued it and every "Rain Yearly" sensor read 0 (issue #144). The
+        # rain baseline lives on this hub, so _compute_rain_delta() runs once
+        # per tick here and its result is reused by the ET branch.
+        rain_delta = self._compute_rain_delta()
+        if rain_delta > 0:
+            self._accrue_yearly_rain(rain_delta)
+
         if self._vwc_sensor:
             self._update_from_vwc()
-            # In VWC mode, broadcast zeros — zones use VWC deficit * Kc
+            # In VWC mode, broadcast zeros — zones use VWC deficit * Kc. Rain is
+            # already credited above; the VWC probe reflects soil moisture
+            # (rain included) directly, so it is not subtracted from deficit.
             self._broadcast_to_zones(0.0, 0.0, 0.0)
         else:
-            rain_delta = self._compute_rain_delta()
-            if rain_delta > 0:
-                self._accrue_yearly_rain(rain_delta)
-
             # Push temp into the buffer (converted to °C if sensor reports °F);
             # invalid/unavailable readings are rejected, median stays stable.
             raw_state = self._hass.states.get(self._temp_sensor)
@@ -1052,9 +1114,43 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._yearly_water_year: int = datetime.now().year
         self._session_water_delivered: float = 0.0
 
-        # Kc: manual override > plant family seasonal profile > 1.0
+        # Kc: manual override > plant family seasonal profile > 1.0,
+        # scaled by the site-exposure microclimate factor (kmc).
         self._plant_family = zone_config.get(CONF_ZONE_PLANT_FAMILY)
         self._manual_kc = zone_config.get(CONF_ZONE_KC)
+        self._exposure = zone_config.get(CONF_ZONE_EXPOSURE)
+        configured_factor = zone_config.get(CONF_ZONE_MICROCLIMATE_FACTOR)
+        self._microclimate_factor = resolve_microclimate_factor(self._exposure, configured_factor)
+        zone_label = zone_config.get(CONF_ZONE_NAME, "?")
+        if self._exposure is not None and self._exposure not in EXPOSURES:
+            _LOGGER.warning(
+                "Zone '%s': unknown exposure %r — using a neutral microclimate factor of %.2f",
+                zone_label,
+                self._exposure,
+                self._microclimate_factor,
+            )
+        elif self._exposure is not None and EXPOSURES[self._exposure]["factor"] is None:
+            # Against the parsed value: a stored "0.65" resolves to 0.65 and
+            # must not warn about itself.
+            if self._microclimate_factor != _as_finite_float(configured_factor):
+                _LOGGER.warning(
+                    "Zone '%s': custom microclimate factor %r is missing or outside [%.2f, %.2f], using %.2f instead",
+                    zone_label,
+                    configured_factor,
+                    MICROCLIMATE_FACTOR_MIN,
+                    MICROCLIMATE_FACTOR_MAX,
+                    self._microclimate_factor,
+                )
+        elif configured_factor is not None:
+            # The number field is shown for every exposure, so leave a trace
+            # when a preset silently wins over it.
+            _LOGGER.debug(
+                "Zone '%s': exposure %r is a preset (%.2f), ignoring microclimate factor %r",
+                zone_label,
+                self._exposure,
+                self._microclimate_factor,
+                configured_factor,
+            )
 
         # Per-zone deficit
         self._zone_deficit = 0.0
@@ -1127,7 +1223,15 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             return 45.0
 
     def _get_current_kc(self) -> float:
-        """Compute the current Kc for this zone."""
+        """Effective Kc for this zone (base * exposure).
+
+        Derived from ``_get_base_kc()`` so the two values published side by
+        side in the attributes can never come from different days.
+        """
+        return round(self._get_base_kc() * self._microclimate_factor, 4)
+
+    def _get_base_kc(self) -> float:
+        """Kc before the site-exposure factor (plant family curve or override)."""
         doy = datetime.now().timetuple().tm_yday
         return compute_kc(doy, self._plant_family, self._manual_kc, self._get_latitude())
 
@@ -1350,7 +1454,10 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             "system_type": self._system_type,
             "plant_family": self._plant_family,
             "kc": round(kc, 3),
+            "kc_base": round(self._get_base_kc(), 3),
             "kc_override": self._manual_kc,
+            "exposure": self._exposure,
+            "microclimate_factor": self._microclimate_factor,
             "area_m2": self._area,
             "efficiency": self._efficiency,
             "flow_rate_lpm": self._flow_rate,
@@ -1891,7 +1998,7 @@ class ZoneEfficiencySensor(_ZoneTextSensor):
 
 
 class ZoneKcSensor(_ZoneTextSensor):
-    """Current crop coefficient Kc."""
+    """Current crop coefficient Kc (effective: base curve * site exposure)."""
 
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
@@ -1910,6 +2017,20 @@ class ZoneKcSensor(_ZoneTextSensor):
     @property
     def native_value(self) -> float:
         return round(self._zone_sensor._get_current_kc(), 3)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Break the effective Kc into its two factors.
+
+        A shaded zone reads 0.53 in October; this shows it as the 0.70 lawn
+        curve times a 0.75 exposure factor.
+        """
+        zone = self._zone_sensor
+        return {
+            "kc_base": round(zone._get_base_kc(), 3),
+            "exposure": zone._exposure,
+            "microclimate_factor": zone._microclimate_factor,
+        }
 
 
 # ══════════════════════════════════════════════════════════

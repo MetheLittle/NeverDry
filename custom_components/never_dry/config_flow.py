@@ -30,11 +30,13 @@ from .const import (
     CONF_ZONE_DELIVERY_MODE,
     CONF_ZONE_DELIVERY_TIMEOUT,
     CONF_ZONE_EFFICIENCY,
+    CONF_ZONE_EXPOSURE,
     CONF_ZONE_FLOW_METER_SENSOR,
     CONF_ZONE_FLOW_RATE,
     CONF_ZONE_IRRIGATION_MODE,
     CONF_ZONE_IRRIGATION_TIME,
     CONF_ZONE_KC,
+    CONF_ZONE_MICROCLIMATE_FACTOR,
     CONF_ZONE_NAME,
     CONF_ZONE_PLANT_FAMILY,
     CONF_ZONE_SYSTEM_TYPE,
@@ -47,6 +49,7 @@ from .const import (
     DEFAULT_D_MAX,
     DEFAULT_DELIVERY_MODE,
     DEFAULT_DELIVERY_TIMEOUT_S,
+    DEFAULT_EXPOSURE,
     DEFAULT_IRRIGATION_MODE,
     DEFAULT_IRRIGATION_TIME,
     DEFAULT_RAIN_SENSOR_TYPE,
@@ -56,11 +59,14 @@ from .const import (
     DELIVERY_MODE_FLOW_METER,
     DELIVERY_MODE_VOLUME_PRESET,
     DOMAIN,
+    EXPOSURES,
     IRRIGATION_MODE_MANUAL,
     IRRIGATION_MODE_REACTIVE,
     IRRIGATION_MODE_SCHEDULED,
     MAX_ZONE_NAME_LENGTH,
     MAX_ZONES,
+    MICROCLIMATE_FACTOR_MAX,
+    MICROCLIMATE_FACTOR_MIN,
     PLANT_FAMILIES,
     RAIN_TYPE_DAILY_TOTAL,
     RAIN_TYPE_EVENT,
@@ -275,6 +281,21 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
             vol.Optional(CONF_ZONE_KC): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.1, max=2.0, step=0.05, mode="box")
             ),
+            vol.Optional(CONF_ZONE_EXPOSURE, default=DEFAULT_EXPOSURE): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=list(EXPOSURES.keys()),
+                    translation_key="exposure",
+                    mode="dropdown",
+                )
+            ),
+            vol.Optional(CONF_ZONE_MICROCLIMATE_FACTOR): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=MICROCLIMATE_FACTOR_MIN,
+                    max=MICROCLIMATE_FACTOR_MAX,
+                    step=0.05,
+                    mode="box",
+                )
+            ),
             vol.Optional(CONF_ZONE_FLOW_RATE): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=2.0 if is_imperial else 1.0,
@@ -360,6 +381,22 @@ def _confirm_zone_schema() -> vol.Schema:
     return vol.Schema({vol.Required("confirm", default=False): bool})
 
 
+def _exposure_errors(user_input: dict) -> dict[str, str]:
+    """Reject a factor-driven exposure ('Advanced') without a factor.
+
+    A missing factor resolves to a neutral 1.0, so the zone would silently
+    behave as if no exposure had been picked. Keyed on the EXPOSURES ``None``
+    marker like ``resolve_microclimate_factor``; an exposure missing from the
+    table is left to the resolver's fallback.
+    """
+    exposure = user_input.get(CONF_ZONE_EXPOSURE)
+    if exposure not in EXPOSURES or EXPOSURES[exposure]["factor"] is not None:
+        return {}
+    if user_input.get(CONF_ZONE_MICROCLIMATE_FACTOR) is None:
+        return {CONF_ZONE_MICROCLIMATE_FACTOR: "microclimate_factor_required"}
+    return {}
+
+
 def _coerce_delivery_mode(user_input: dict) -> dict:
     """Downgrade delivery_mode to estimated_flow when the required sensor is missing."""
     dm = user_input.get(CONF_ZONE_DELIVERY_MODE)
@@ -402,6 +439,7 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             name = user_input.get(CONF_ZONE_NAME, "")
             mode = user_input.get(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE)
+            exposure_errors = _exposure_errors(user_input)
             if len(name) > MAX_ZONE_NAME_LENGTH:
                 errors[CONF_ZONE_NAME] = "zone_name_too_long"
             elif len(self._zones) >= MAX_ZONES:
@@ -412,6 +450,8 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors[CONF_ZONE_FLOW_METER_SENSOR] = "flow_meter_required"
             elif mode == DELIVERY_MODE_VOLUME_PRESET and not user_input.get(CONF_ZONE_VOLUME_ENTITY):
                 errors[CONF_ZONE_VOLUME_ENTITY] = "volume_entity_required"
+            elif exposure_errors:
+                errors.update(exposure_errors)
             else:
                 zone_metric = _zone_input_to_metric(user_input, imperial)
                 self._pending_warnings = _unusual_zone_values(zone_metric, imperial)
@@ -550,6 +590,13 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                     data_schema=_zone_schema_initial(imperial),
                     errors={"base": "zone_already_exists"},
                 )
+            exposure_errors = _exposure_errors(user_input)
+            if exposure_errors:
+                return self.async_show_form(
+                    step_id="add_zone",
+                    data_schema=_zone_schema_initial(imperial),
+                    errors=exposure_errors,
+                )
             self._pending_warnings = _unusual_zone_values(user_input, imperial)
             if self._pending_warnings:
                 self._pending_zone = user_input
@@ -611,15 +658,22 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         )
 
         imperial = _is_imperial(self.hass)
+        errors: dict[str, str] = {}
         if user_input is not None:
             user_input = _zone_input_to_metric(user_input, imperial)
-            user_input = _coerce_delivery_mode(user_input)
-            self._pending_warnings = _unusual_zone_values(user_input, imperial)
-            if self._pending_warnings:
-                self._pending_zone = user_input
-                self._pending_action = "edit"
-                return await self.async_step_confirm_zone()
-            return self._save_edited_zone(user_input)
+            errors = _exposure_errors(user_input)
+            if not errors:
+                user_input = _coerce_delivery_mode(user_input)
+                self._pending_warnings = _unusual_zone_values(user_input, imperial)
+                if self._pending_warnings:
+                    self._pending_zone = user_input
+                    self._pending_action = "edit"
+                    return await self.async_step_confirm_zone()
+                return self._save_edited_zone(user_input)
+            # Seed the redrawn form from what was submitted, not merged over
+            # the stored zone: a cleared optional is absent from user_input, so
+            # a merge would resurrect the factor this error asks for.
+            cur = dict(user_input)
 
         area_unit = "ft²" if imperial else "m²"
         flow_unit = "gal/h" if imperial else "L/h"
@@ -656,6 +710,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
             SYSTEM_TYPE_MANUAL,
         ]
         pf_opts = list(PLANT_FAMILIES.keys())
+        ex_opts = list(EXPOSURES.keys())
         ent_sw = selector.EntitySelectorConfig(domain="switch")
         ent_sn = selector.EntitySelectorConfig(domain="sensor")
         ent_nr = selector.EntitySelectorConfig(domain="number")
@@ -730,6 +785,27 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                     selector.NumberSelectorConfig(
                         min=0.1,
                         max=2.0,
+                        step=0.05,
+                        mode="box",
+                    )
+                ),
+                vol.Optional(
+                    CONF_ZONE_EXPOSURE,
+                    default=_d(CONF_ZONE_EXPOSURE, DEFAULT_EXPOSURE),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=ex_opts,
+                        translation_key="exposure",
+                        mode="dropdown",
+                    )
+                ),
+                vol.Optional(
+                    CONF_ZONE_MICROCLIMATE_FACTOR,
+                    default=_d(CONF_ZONE_MICROCLIMATE_FACTOR),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=MICROCLIMATE_FACTOR_MIN,
+                        max=MICROCLIMATE_FACTOR_MAX,
                         step=0.05,
                         mode="box",
                     )
@@ -811,6 +887,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="edit_zone_detail",
             data_schema=schema,
+            errors=errors,
             description_placeholders={"zone_name": self._edit_zone_name},
         )
 

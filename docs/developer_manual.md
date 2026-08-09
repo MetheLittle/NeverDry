@@ -120,7 +120,7 @@ D_ref(t) = clamp( D_ref(t-1) + ET_h · Δt - ΔP,  0,  D_max )
 ### 2.4 Per-zone deficit accumulation (with Kc)
 
 ```
-D_zone(t) = clamp( D_zone(t-1) + ET_h · Kc(doy, family) · Δt - ΔP,  0,  D_max )
+D_zone(t) = clamp( D_zone(t-1) + ET_h · Kc_eff(doy, family, exposure) · Δt - ΔP,  0,  D_max )
 ```
 
 | Item | Value |
@@ -128,7 +128,7 @@ D_zone(t) = clamp( D_zone(t-1) + ET_h · Kc(doy, family) · Δt - ΔP,  0,  D_ma
 | **Class** | `IrrigationZoneSensor` |
 | **Method** | `_on_et_update()` |
 | **Kc source** | `compute_kc()` module-level function |
-| **Parameters** | `plant_family`, `kc` (manual override), `hass.config.latitude` |
+| **Parameters** | `plant_family`, `kc` (manual override), `exposure` / `microclimate_factor`, `hass.config.latitude` |
 | **Rain** | Receives `ΔP` (rain delta) from `DrynessIndexSensor` broadcast |
 
 Each zone accumulates independently. Rain delta reduces all zone deficits equally. Only the irrigated zone's deficit resets after irrigation.
@@ -136,16 +136,38 @@ Each zone accumulates independently. Rain delta reduces all zone deficits equall
 ### 2.5 Crop coefficient computation
 
 ```
-Kc = compute_kc(day_of_year, plant_family, manual_kc, latitude)
+Kc = compute_kc(day_of_year, plant_family, manual_kc, latitude, microclimate_factor)
+   = base(day_of_year, plant_family, manual_kc) · microclimate_factor
 ```
 
 | Item | Value |
 |------|-------|
 | **Function** | `compute_kc()` (module-level in `sensor.py`) |
-| **Priority** | `manual_kc > plant_family seasonal profile > DEFAULT_KC (1.0)` |
-| **Interpolation** | Linear between 4 seasonal anchors (days 15, 105, 196, 288) |
+| **Base priority** | `manual_kc > plant_family seasonal profile > DEFAULT_KC (1.0)` |
+| **Interpolation** | Linear between 4 seasonal anchors (days 15, 105, 196, 288), in `_seasonal_kc()` |
 | **Hemisphere** | Southern (latitude < 0): day shifted by 182 days |
 | **Plant families** | Defined in `const.py` `PLANT_FAMILIES` dict (10 families) |
+
+#### Site exposure (microclimate factor, k_mc)
+
+Landscape coefficient method (Costello, Matheny & Clark 2000): `K_L = k_s · k_d · k_mc`.
+The plant family supplies `k_s`; the zone's site exposure supplies `k_mc`.
+
+| Item | Value |
+|------|-------|
+| **Function** | `resolve_microclimate_factor(exposure, custom_factor)` (pure, in `sensor.py`) |
+| **Config keys** | `exposure` (preset key), `microclimate_factor` (number, `exposure == "custom"` only) |
+| **Presets** | `const.py` `EXPOSURES` dict — 0.60 (deep shade) … 1.20 (reflected heat), plus `custom` |
+| **Applied to** | The base Kc **including** a manual override — exposure describes the site, not the planting |
+| **Bounds** | `[MICROCLIMATE_FACTOR_MIN, MICROCLIMATE_FACTOR_MAX]` = `[0.1, 1.5]`, clamped |
+| **Fallback** | Unset / unknown / non-numeric → `DEFAULT_MICROCLIMATE_FACTOR` (1.0), never 0 |
+| **Resolved** | Once in `IrrigationZoneSensor.__init__` (config is static per reload) |
+
+The floor above zero is load-bearing: at `k_mc = 0` the deficit never accrues, so
+reactive irrigation, the monitoring notification and `_check_deficit_anomaly()`
+would all go quiet with nothing in the UI to explain it. The config flow rejects
+`custom` without a factor (`microclimate_factor_required`) for the same reason —
+silently resolving to 1.0 would look like the exposure had never been set.
 
 ### 2.6 Deficit from VWC (direct measurement)
 
@@ -249,7 +271,8 @@ All configuration keys (`CONF_*`), service names (`SERVICE_*`), system types, pl
 
 | Element | Type | Purpose |
 |---------|------|---------|
-| `compute_kc()` | Function | Pure function: Kc from day, family, override, latitude |
+| `compute_kc()` | Function | Pure function: effective Kc from day, family, override, latitude, microclimate factor |
+| `resolve_microclimate_factor()` | Function | Pure function: site-exposure preset (or custom value) → k_mc |
 | `ETSensor` | Class (1 instance) | Instantaneous ET rate [mm/h] |
 | `DrynessIndexSensor` | Class (1 instance) | Reference deficit [mm] at Kc=1.0, RestoreEntity |
 | `IrrigationZoneSensor` | Class (N instances) | Per-zone deficit, volume [L], duration [s], RestoreEntity |
@@ -375,7 +398,8 @@ python3 -m pytest tests/ -v
 | `test_never_dry_sensor.py` | Reference deficit accumulation, reset, VWC mode, invalid inputs |
 | `test_volume_duration.py` | Per-zone volume/duration, zone attributes, multi-zone independence |
 | `test_controller.py` | Valve control, sequential irrigation, emergency stop, monitoring, system types |
-| `test_kc.py` | `compute_kc()` (anchors, interpolation, hemisphere, override), per-zone deficit tracking |
+| `test_kc.py` | `compute_kc()` (anchors, interpolation, hemisphere, override, microclimate factor), `resolve_microclimate_factor()`, per-zone deficit tracking |
+| `test_zone_exposure.py` | Exposure preset table, `custom`-without-factor guard in every zone form |
 
 Async controller tests require `pytest-asyncio` (skipped if not installed).
 
