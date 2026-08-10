@@ -15,6 +15,7 @@ import logging
 import math
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from homeassistant.components.sensor import (
@@ -104,8 +105,23 @@ from .const import (
 from .controller import IrrigationController
 from .services import async_setup_services
 from .unit_convert import LPM_TO_GPH, LPM_TO_LPH
+from .zone import Zone as DomainZone
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _LitersDelivered:
+    """A bare delivered figure, shaped to satisfy ``zone.Delivery``.
+
+    The entity layer still receives plain floats from the controller. Rather
+    than widen the Zone's contract to accept them, this wraps one at the seam —
+    so the day the controller returns a real ``DeliveryResult`` the wrapper
+    simply disappears.
+    """
+
+    liters_delivered: float
+    elapsed_s: float = 0.0
 
 
 # ══════════════════════════════════════════════════════════
@@ -1071,7 +1087,6 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._dryness = dryness_sensor
         self._zone_name = zone_config[CONF_ZONE_NAME]
         self._valve = zone_config.get(CONF_ZONE_VALVE)
-        self._area = zone_config.get(CONF_ZONE_AREA, 0.0)
         self._system_type = zone_config.get(CONF_ZONE_SYSTEM_TYPE)
         self._flow_rate = zone_config.get(CONF_ZONE_FLOW_RATE, 0.0)
         if self._flow_rate > UNUSUAL_FLOW_MAX_LPM:
@@ -1097,22 +1112,7 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._irrigating = False
         self._no_guard_flow_warned = False
         self._session_listeners: list[Callable] = []
-        self._last_irrigated: datetime | None = None
-        self._last_volume_delivered: float = 0.0
-        self._last_irrigation_source: str | None = None
-        self._last_session_duration_s: int = 0
         self._operator = None  # set by _setup_controller after operator creation
-        # Snapshot of zone_deficit captured by the controller at the start
-        # of an irrigation cycle. Used by flow-metered delivery modes for
-        # real-time deficit updates: every update is computed as
-        # ``max(0, snapshot - delivered_mm)`` so intermediate writes are
-        # idempotent and the end-of-cycle settle never double-counts.
-        # ``None`` outside an active cycle.
-        self._deficit_at_irrigation_start: float | None = None
-        self._total_water_delivered: float = 0.0
-        self._yearly_water_delivered: float = 0.0
-        self._yearly_water_year: int = datetime.now().year
-        self._session_water_delivered: float = 0.0
 
         # Kc: manual override > plant family seasonal profile > 1.0,
         # scaled by the site-exposure microclimate factor (kmc).
@@ -1152,17 +1152,35 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
                 configured_factor,
             )
 
-        # Per-zone deficit
-        self._zone_deficit = 0.0
         self._d_max = dryness_sensor._d_max
 
         # Efficiency: explicit value > system_type default > global default
         if CONF_ZONE_EFFICIENCY in zone_config:
-            self._efficiency = zone_config[CONF_ZONE_EFFICIENCY]
+            efficiency = zone_config[CONF_ZONE_EFFICIENCY]
         elif self._system_type and self._system_type in SYSTEM_TYPES:
-            self._efficiency = SYSTEM_TYPES[self._system_type]["default_efficiency"]
+            efficiency = SYSTEM_TYPES[self._system_type]["default_efficiency"]
         else:
-            self._efficiency = DEFAULT_EFFICIENCY
+            efficiency = DEFAULT_EFFICIENCY
+
+        # The domain object behind this entity (A1). It owns the deficit, the
+        # water counters and the crediting arithmetic; the entity keeps only
+        # what Home Assistant needs — unique_id, device info, published state.
+        # The private attributes below survive as properties onto this object so
+        # that every existing reader, including the test suite, is unaffected.
+        self._zone = DomainZone(
+            name=self._zone_name,
+            area_m2=zone_config.get(CONF_ZONE_AREA, 0.0),
+            efficiency=efficiency,
+            plant_family=self._plant_family,
+            manual_kc=self._manual_kc,
+            exposure=self._exposure,
+            microclimate_factor=self._microclimate_factor,
+            d_max=self._d_max,
+            threshold_mm=self._threshold,
+        )
+        # The counters default to "no year recorded"; today's entity starts on
+        # the current one, and the published attribute must not become null.
+        self._zone.counters.yearly_water_year = datetime.now().year
 
         slug = self._zone_name.lower().replace(" ", "_")
         self._attr_name = "Volume"
@@ -1172,6 +1190,130 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
 
         # Register as listener on the dryness sensor
         dryness_sensor.register_zone_listener(self._on_et_update)
+
+    # ── Delegation to the domain Zone (anomaly A1) ──────────────────────────
+    #
+    # These were plain attributes; they are now views onto ``self._zone``, which
+    # is the single storage. Read *and* write are preserved verbatim — in
+    # particular the deficit setter does **not** clamp, because the attribute it
+    # replaces did not: callers clamp explicitly and the tests rely on assigning
+    # arbitrary values. Behaviour is identical by construction; what changes is
+    # that there is now one owner of this state instead of thirteen loose fields.
+
+    @property
+    def _area(self) -> float:
+        return self._zone.area_m2
+
+    @_area.setter
+    def _area(self, value: float) -> None:
+        self._zone.area_m2 = value
+
+    @property
+    def _efficiency(self) -> float:
+        return self._zone.efficiency
+
+    @_efficiency.setter
+    def _efficiency(self, value: float) -> None:
+        self._zone.efficiency = value
+
+    @property
+    def _zone_deficit(self) -> float:
+        return self._zone.deficit.value_mm
+
+    @_zone_deficit.setter
+    def _zone_deficit(self, value: float) -> None:
+        self._zone.deficit = self._zone.deficit.with_value(value)
+
+    @property
+    def _deficit_at_irrigation_start(self) -> float | None:
+        return self._zone.cycle_baseline_mm
+
+    @_deficit_at_irrigation_start.setter
+    def _deficit_at_irrigation_start(self, value: float | None) -> None:
+        self._zone.cycle_baseline_mm = value
+
+    @property
+    def _last_irrigated(self) -> datetime | None:
+        return self._zone.last_irrigated
+
+    @_last_irrigated.setter
+    def _last_irrigated(self, value: datetime | None) -> None:
+        self._zone.last_irrigated = value
+
+    @property
+    def _last_irrigation_source(self) -> str | None:
+        return self._zone.last_source
+
+    @_last_irrigation_source.setter
+    def _last_irrigation_source(self, value: str | None) -> None:
+        self._zone.last_source = value
+
+    @property
+    def _last_session_duration_s(self) -> int:
+        return self._zone.last_duration_s
+
+    @_last_session_duration_s.setter
+    def _last_session_duration_s(self, value: int) -> None:
+        self._zone.last_duration_s = value
+
+    @property
+    def _last_volume_delivered(self) -> float:
+        return self._zone.counters.last_volume_l
+
+    @_last_volume_delivered.setter
+    def _last_volume_delivered(self, value: float) -> None:
+        self._zone.counters.last_volume_l = value
+
+    @property
+    def _session_water_delivered(self) -> float:
+        return self._zone.counters.session_water_l
+
+    @_session_water_delivered.setter
+    def _session_water_delivered(self, value: float) -> None:
+        self._zone.counters.session_water_l = value
+
+    @property
+    def _total_water_delivered(self) -> float:
+        return self._zone.counters.total_water_l
+
+    @_total_water_delivered.setter
+    def _total_water_delivered(self, value: float) -> None:
+        self._zone.counters.total_water_l = value
+
+    @property
+    def _yearly_water_delivered(self) -> float:
+        return self._zone.counters.yearly_water_l
+
+    @_yearly_water_delivered.setter
+    def _yearly_water_delivered(self, value: float) -> None:
+        self._zone.counters.yearly_water_l = value
+
+    @property
+    def _yearly_water_year(self) -> int:
+        return self._zone.counters.yearly_water_year
+
+    @_yearly_water_year.setter
+    def _yearly_water_year(self, value: int) -> None:
+        self._zone.counters.yearly_water_year = value
+
+    # ── The irrigation cycle, delegated ─────────────────────────────────────
+
+    def begin_cycle(self) -> None:
+        """Open an irrigation cycle, snapshotting the deficit it starts from."""
+        self._zone.begin_cycle()
+
+    def credit_delivery(self, liters: float) -> float:
+        """Credit delivered liters against the deficit; return the new deficit.
+
+        The single home of ``max(0, baseline - delivered*efficiency/area)``,
+        which used to be written out at four call sites.
+        """
+        return self._zone.credit_delivery(_LitersDelivered(liters)).value_mm
+
+    def settle_cycle(self, liters: float, *, source: str, at: datetime, duration_s: int = 0) -> float:
+        """Close a cycle: credit the final figure, stamp it, drop the snapshot."""
+        deficit = self._zone.settle(_LitersDelivered(liters, duration_s), source=source, at=at)
+        return deficit.value_mm
 
     async def async_added_to_hass(self) -> None:
         """Restore zone deficit from previous state.

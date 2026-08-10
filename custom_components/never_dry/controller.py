@@ -639,7 +639,7 @@ class IrrigationController:
                 # mid-cycle (a network glitch in the flow sensor used to
                 # lose every mm we had already delivered).
                 deficit_at_start = zone._zone_deficit
-                zone._deficit_at_irrigation_start = deficit_at_start
+                zone.begin_cycle()
                 ts_start = datetime.now()
                 delivered = await self._deliver_water(zone)
                 ts_end = datetime.now()
@@ -715,8 +715,9 @@ class IrrigationController:
             else:
                 # Partial irrigation — authoritative recompute from snapshot
                 all_complete = False
-                delivered_mm = delivered * zone._efficiency / zone._area if zone._area > 0 else 0.0
-                zone._zone_deficit = max(0.0, deficit_at_start - delivered_mm)
+                # The zone credits it against its own cycle snapshot, which is
+                # the same value as ``deficit_at_start`` (see _irrigate_zones).
+                zone.credit_delivery(delivered)
                 zone._last_volume_delivered = round(delivered, 1)
                 zone._session_water_delivered = round(delivered, 1)
                 zone._total_water_delivered += delivered
@@ -1165,8 +1166,7 @@ class IrrigationController:
         snapshot = zone._deficit_at_irrigation_start
         if snapshot is None or zone._area <= 0:
             return
-        delivered_mm = delivered_liters * zone._efficiency / zone._area
-        zone._zone_deficit = max(0.0, snapshot - delivered_mm)
+        zone.credit_delivery(delivered_liters)
         # Session water must rise live during a flow-metered cycle, not only at
         # completion — otherwise the card shows Volume/Duration counting down
         # while Session water stays 0 (field report, flow_meter zone).
@@ -1433,8 +1433,9 @@ class IrrigationController:
             )
 
         if delivered_liters > 0 and zone._area > 0:
-            delivered_mm = delivered_liters * zone._efficiency / zone._area
-            zone._zone_deficit = max(0.0, zone._zone_deficit - delivered_mm)
+            # No cycle was opened on this path, so the zone credits against its
+            # current deficit — which is what this site did explicitly before.
+            zone.credit_delivery(delivered_liters)
             zone._last_irrigation_source = "manual"
             zone._last_irrigated = ts_end
             zone._last_volume_delivered = round(delivered_liters, 1)
