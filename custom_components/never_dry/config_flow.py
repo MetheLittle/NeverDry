@@ -269,7 +269,11 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                 )
             ),
             vol.Optional(CONF_ZONE_EFFICIENCY): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=0.1, max=1.0, step=0.05, mode="slider")
+                # box, not slider: a slider always submits a value, so an override
+                # set by accident could never be cleared again (GH #165). step 0.01
+                # so every system-type default is reachable exactly — 0.92 for drip
+                # and 0.68 for pop-up sprinklers are not multiples of 0.05.
+                selector.NumberSelectorConfig(min=0.1, max=1.0, step=0.01, mode="box")
             ),
             vol.Optional(CONF_ZONE_PLANT_FAMILY): selector.SelectSelector(
                 selector.SelectSelectorConfig(
@@ -279,7 +283,7 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                 )
             ),
             vol.Optional(CONF_ZONE_KC): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=0.1, max=2.0, step=0.05, mode="box")
+                selector.NumberSelectorConfig(min=0.1, max=2.0, step=0.01, mode="box")
             ),
             vol.Optional(CONF_ZONE_EXPOSURE, default=DEFAULT_EXPOSURE): selector.SelectSelector(
                 selector.SelectSelectorConfig(
@@ -292,7 +296,7 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                 selector.NumberSelectorConfig(
                     min=MICROCLIMATE_FACTOR_MIN,
                     max=MICROCLIMATE_FACTOR_MAX,
-                    step=0.05,
+                    step=0.01,
                     mode="box",
                 )
             ),
@@ -757,15 +761,19 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                         mode="dropdown",
                     )
                 ),
+                # Overrides below use suggested_value, never default=. With
+                # default=, voluptuous re-injects the stored value whenever the
+                # field comes back empty, so an override can never be removed:
+                # clearing it silently restores what was there (GH #165).
                 vol.Optional(
                     CONF_ZONE_EFFICIENCY,
-                    default=_d(CONF_ZONE_EFFICIENCY),
+                    description={"suggested_value": _d(CONF_ZONE_EFFICIENCY, None)},
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0.1,
                         max=1.0,
-                        step=0.05,
-                        mode="slider",
+                        step=0.01,
+                        mode="box",
                     )
                 ),
                 vol.Optional(
@@ -780,18 +788,18 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_ZONE_KC,
-                    default=_d(CONF_ZONE_KC),
+                    description={"suggested_value": _d(CONF_ZONE_KC, None)},
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0.1,
                         max=2.0,
-                        step=0.05,
+                        step=0.01,
                         mode="box",
                     )
                 ),
                 vol.Optional(
                     CONF_ZONE_EXPOSURE,
-                    default=_d(CONF_ZONE_EXPOSURE, DEFAULT_EXPOSURE),
+                    description={"suggested_value": _d(CONF_ZONE_EXPOSURE, DEFAULT_EXPOSURE)},
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=ex_opts,
@@ -801,12 +809,12 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_ZONE_MICROCLIMATE_FACTOR,
-                    default=_d(CONF_ZONE_MICROCLIMATE_FACTOR),
+                    description={"suggested_value": _d(CONF_ZONE_MICROCLIMATE_FACTOR, None)},
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=MICROCLIMATE_FACTOR_MIN,
                         max=MICROCLIMATE_FACTOR_MAX,
-                        step=0.05,
+                        step=0.01,
                         mode="box",
                     )
                 ),
@@ -832,10 +840,12 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(ent_nr),
                 vol.Optional(
                     CONF_ZONE_DELIVERY_TIMEOUT,
-                    default=_d(
-                        CONF_ZONE_DELIVERY_TIMEOUT,
-                        DEFAULT_DELIVERY_TIMEOUT_S,
-                    ),
+                    description={
+                        "suggested_value": _d(
+                            CONF_ZONE_DELIVERY_TIMEOUT,
+                            DEFAULT_DELIVERY_TIMEOUT_S,
+                        )
+                    },
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=60,
@@ -876,10 +886,12 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_ZONE_IRRIGATION_TIME,
-                    default=_d(
-                        CONF_ZONE_IRRIGATION_TIME,
-                        DEFAULT_IRRIGATION_TIME,
-                    ),
+                    description={
+                        "suggested_value": _d(
+                            CONF_ZONE_IRRIGATION_TIME,
+                            DEFAULT_IRRIGATION_TIME,
+                        )
+                    },
                 ): selector.TimeSelector(),
             }
         )
