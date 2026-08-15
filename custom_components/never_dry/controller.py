@@ -17,6 +17,7 @@ import contextlib
 import logging
 import time
 from datetime import datetime
+from typing import ClassVar
 
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import (
@@ -41,6 +42,7 @@ from .const import (
     FLOW_METER_POLL_INTERVAL_S,
     MIN_SERVICE_INTERVAL_S,
 )
+from .scheduler import Decision, Scheduler, SkipReason
 from .valve_fsm import ValveState
 from .valve_notifier import NotificationKind, Severity, ValveNotifier
 from .valve_operator import OperationStatus, ValveOperator
@@ -81,6 +83,10 @@ class IrrigationController:
         self._inter_zone_delay = inter_zone_delay
         self._valve_operators: dict[str, ValveOperator] = valve_operators or {}
         self._notifier = notifier
+        # Decides *when* a zone waters; this class only acts on the answer.
+        # Serial is what the code has always done — two handlers each
+        # checking 'is something running' — but nowhere did it say so.
+        self._scheduler = Scheduler()
         # Tunable from tests; default matches the production grace window.
         self.auto_open_grace_s: float = AUTO_OPEN_GRACE_S
         self._running = False
@@ -232,16 +238,45 @@ class IrrigationController:
 
     # ── Scheduled irrigation ────────────────────────────────
 
-    def _make_scheduled_handler(self, zone_name: str):
-        """Create a time-triggered handler for a specific zone.
+    #: Why a zone that was considered is not watering, in words the log can use.
+    _SKIP_MESSAGES: ClassVar[dict[SkipReason, str]] = {
+        SkipReason.NOTHING_TO_REFILL: "nothing to refill",
+        SkipReason.BELOW_THRESHOLD: "deficit below the zone threshold",
+        SkipReason.ALREADY_RUNNING: "another irrigation is in progress",
+        SkipReason.THROTTLED: "called again too soon",
+    }
 
-        Scheduled mode irrigates **at the scheduled hour regardless of the
-        threshold** — that is the whole point of a schedule. The dose is
-        whatever deficit has accumulated (``_irrigate_zones`` sizes the volume
-        from the zone deficit), so the zone is topped back up even when the
-        deficit is below the reactive threshold. The only skip is a zone with
-        nothing to refill (deficit <= 0). The threshold stays a *reactive*-mode
-        concept. See AI-183.
+    def _act_on(self, decision: Decision, zone_name: str, zone) -> None:
+        """Carry out the scheduler's answer, or say why there is nothing to do.
+
+        The seam this whole object exists for: **the scheduler decides, the
+        controller acts.** Everything above this line is a rule that can be read
+        and tested on its own; everything below is Home Assistant mechanics.
+        """
+        if not decision.should_irrigate:
+            _LOGGER.info(
+                "Zone '%s' not watering: %s (deficit=%.1fmm, threshold=%.1fmm)",
+                zone_name,
+                self._SKIP_MESSAGES.get(decision.reason, decision.reason),
+                zone._zone_deficit,
+                zone._threshold,
+            )
+            return
+        _LOGGER.info(
+            "Irrigation triggered by %s: zone='%s', deficit=%.1fmm",
+            decision.trigger,
+            zone_name,
+            zone._zone_deficit,
+        )
+        self._current_source = str(decision.trigger)
+        self._irrigation_task = self._hass.async_create_task(self._irrigate_zones([zone_name]))
+
+    def _make_scheduled_handler(self, zone_name: str):
+        """Create a time-triggered handler for a specific zone (Mode B).
+
+        The rule — water at the hour whatever the deficit, skip only a zone with
+        nothing to refill — lives in :meth:`Scheduler.evaluate_scheduled`, not
+        here. See AI-183 for why the threshold is deliberately not consulted.
         """
 
         @callback
@@ -249,32 +284,10 @@ class IrrigationController:
             zone = self._zones.get(zone_name)
             if zone is None:
                 return
-            _LOGGER.info(
-                "Scheduled check fired: zone='%s', deficit=%.1fmm",
+            self._act_on(
+                self._scheduler.evaluate_scheduled(zone._zone, is_running=self._running),
                 zone_name,
-                zone._zone_deficit,
-            )
-            if zone._zone_deficit <= 0:
-                _LOGGER.info(
-                    "Scheduled check: zone='%s' deficit=%.1fmm — nothing to refill, skipping",
-                    zone_name,
-                    zone._zone_deficit,
-                )
-                return
-            if self._running:
-                _LOGGER.warning(
-                    "Scheduled irrigation for '%s' skipped — another irrigation is in progress",
-                    zone_name,
-                )
-                return
-            _LOGGER.info(
-                "Scheduled irrigation triggered: zone='%s', deficit=%.1fmm (topping up regardless of threshold)",
-                zone_name,
-                zone._zone_deficit,
-            )
-            self._current_source = "scheduled"
-            self._irrigation_task = self._hass.async_create_task(
-                self._irrigate_zones([zone_name]),
+                zone,
             )
 
         return _handler
@@ -286,53 +299,56 @@ class IrrigationController:
             zone = self._zones.get(zone_name)
             if zone is None:
                 return
-            if zone._zone_deficit < zone._threshold:
-                return
-            if self._running:
-                _LOGGER.info(
-                    "Reactive check: zone='%s' deficit=%.1fmm >= threshold=%.1fmm"
-                    " — skipping, irrigation already running",
-                    zone_name,
-                    zone._zone_deficit,
-                    zone._threshold,
-                )
-                return
-            if self._is_throttled("reactive", zone_name):
-                return
-            _LOGGER.info(
-                "Reactive irrigation triggered: zone='%s', deficit=%.1fmm >= threshold=%.1fmm",
-                zone_name,
-                zone._zone_deficit,
-                zone._threshold,
+            decision = self._scheduler.evaluate_reactive(
+                zone._zone,
+                is_running=self._running,
+                # Asked, not stamped: the throttle is only spent on a call that
+                # actually goes ahead, which is what the old ordering achieved
+                # by checking it last.
+                is_throttled=self._would_throttle("reactive", zone_name),
             )
-            self._current_source = "reactive"
-            self._irrigation_task = self._hass.async_create_task(
-                self._irrigate_zones([zone_name]),
-            )
+            if decision.should_irrigate:
+                self._record_service_call("reactive", zone_name)
+            self._act_on(decision, zone_name, zone)
 
         return _handler
 
     # ── Rate limiting ──────────────────────────────────────
 
+    @staticmethod
+    def _throttle_key(service_name: str, zone_name: str | None) -> str:
+        """Throttling is per service+zone, so two zones do not block each other."""
+        return f"{service_name}:{zone_name}" if zone_name else service_name
+
+    def _would_throttle(self, service_name: str, zone_name: str | None = None) -> bool:
+        """Whether a call would be rejected right now — asks, records nothing.
+
+        Split from :meth:`_is_throttled` because a predicate that also writes
+        makes the *order* of the checks load-bearing: asking "is this throttled"
+        before "is something already running" would stamp a call that never
+        happened, and throttle the next real one. The scheduler needs the fact,
+        not the side effect.
+        """
+        key = self._throttle_key(service_name, zone_name)
+        return (time.monotonic() - self._last_service_call.get(key, 0.0)) < MIN_SERVICE_INTERVAL_S
+
+    def _record_service_call(self, service_name: str, zone_name: str | None = None) -> None:
+        """Stamp a call that is actually going ahead."""
+        self._last_service_call[self._throttle_key(service_name, zone_name)] = time.monotonic()
+
     def _is_throttled(self, service_name: str, zone_name: str | None = None) -> bool:
         """Return True if a service call should be rejected (rate limit).
 
-        Throttling is per service+zone so that calling irrigate on
-        different zones in quick succession is allowed.
+        Ask-and-stamp in one, which is what every service handler wants.
         """
-        key = f"{service_name}:{zone_name}" if zone_name else service_name
-        now = time.monotonic()
-        last = self._last_service_call.get(key, 0.0)
-        elapsed = now - last
-        if elapsed < MIN_SERVICE_INTERVAL_S:
+        if self._would_throttle(service_name, zone_name):
             _LOGGER.warning(
-                "Service %s throttled — %0.1fs since last call (min %ds)",
-                key,
-                elapsed,
+                "Service %s throttled — less than %ds since last call",
+                self._throttle_key(service_name, zone_name),
                 MIN_SERVICE_INTERVAL_S,
             )
             return True
-        self._last_service_call[key] = now
+        self._record_service_call(service_name, zone_name)
         return False
 
     # ── Service handlers ─────────────────────────────────
