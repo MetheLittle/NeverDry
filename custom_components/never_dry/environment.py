@@ -35,9 +35,14 @@ them, never the readings; resolving a binding to a value is the integration's
 job. Same choice as ``water_balance_model.py``, for the same reason: the rules
 are trivially testable when nothing has to be mocked.
 
-**Phase 1 — inert scaffold.** Nothing imports this module yet. Wiring
-``DrynessIndexSensor`` onto it is a deliberate later phase, and is gated on the
-`Zone` class (``zone.py``) landing too: the two are the halves of the same seam.
+**Wiring status — the site is this object.** ``DrynessIndexSensor`` holds an
+:class:`Environment` and its bindings, backfill window, latitude and yearly rain
+are views onto it; the roll-over of the yearly total lives here alone, where it
+can be tested without a Home Assistant runtime.
+
+What has *not* moved is :meth:`satisfies` — capability matching has no caller
+yet, because nothing offers the user a choice of water-balance model. It becomes
+reachable when the tiers do.
 
 References: ``docs/design_domain_object_model.md`` (RFC: dissolve ``System``),
 ``docs/design_water_balance_reference_model.md`` (D3, yearly rain as a shared

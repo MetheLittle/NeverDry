@@ -105,6 +105,7 @@ from .const import (
     UNUSUAL_FLOW_MAX_LPM,
 )
 from .controller import IrrigationController
+from .environment import DEFAULT_LATITUDE, Environment, RainSensorType
 from .services import async_setup_services
 from .unit_convert import LPM_TO_GPH, LPM_TO_LPH
 from .water_balance_model import ETModel, ReferenceFrame, vwc_deficit_mm, vwc_to_fraction
@@ -663,16 +664,26 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
 
     def __init__(self, hass: HomeAssistant, config: ConfigType, device_info: DeviceInfo | None = None) -> None:
         self._hass = hass
-        self._temp_sensor = config[CONF_TEMP_SENSOR]
-        self._rain_sensor = config[CONF_RAIN_SENSOR]
+        # What this installation *has*, and the shared sky over it. The bindings
+        # and the yearly rain used to be eleven loose attributes here; they are
+        # one object now, and the private names below survive as views onto it so
+        # every existing reader is unaffected.
+        self._env = Environment(
+            temperature_sensor=config[CONF_TEMP_SENSOR],
+            rain_sensor=config[CONF_RAIN_SENSOR],
+            soil_moisture_sensor=config.get(CONF_VWC_SENSOR),
+            rain_sensor_type=RainSensorType(config.get(CONF_RAIN_SENSOR_TYPE, DEFAULT_RAIN_SENSOR_TYPE)),
+            backfill_days=config.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
+            latitude=getattr(getattr(hass, "config", None), "latitude", DEFAULT_LATITUDE),
+            # The published attribute must never be null, so the site starts on
+            # the current year rather than on "no year recorded".
+            yearly_rain_year=datetime.now().year,
+        )
         self._alpha = config.get(CONF_ALPHA, DEFAULT_ALPHA)
         self._t_base = config.get(CONF_T_BASE, DEFAULT_T_BASE)
         self._d_max = config.get(CONF_D_MAX, DEFAULT_D_MAX)
-        self._vwc_sensor = config.get(CONF_VWC_SENSOR)
         self._field_cap = config.get(CONF_FIELD_CAPACITY, DEFAULT_FIELD_CAPACITY)
         self._root_depth = config.get(CONF_ROOT_DEPTH, DEFAULT_ROOT_DEPTH)
-        self._rain_type = config.get(CONF_RAIN_SENSOR_TYPE, DEFAULT_RAIN_SENSOR_TYPE)
-        self._backfill_days = config.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS)
         self._deficit = 0.0
         # None = baseline unknown (fresh boot): the first reading fixes the
         # baseline WITHOUT crediting. Starting at 0.0 re-credited the whole
@@ -686,8 +697,6 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         # over the whole garden), so every zone mirrors the same "Rain Yearly"
         # value instead of keeping its own drifting per-zone counter. Resets on
         # 1 Jan. See docs/design_water_balance_reference_model.md (D3).
-        self._yearly_rain: float = 0.0
-        self._yearly_rain_year: int = datetime.now().year
         self._temp_buffer = SensorBuffer(ET_BUFFER_SIZE, valid_range=ET_TEMP_VALID_RANGE)
         # One warning per condition, not one per poll: a probe reporting
         # percentages does so at every reading, and an unreadable one likewise.
@@ -695,6 +704,54 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         self._vwc_invalid_warned = False
         if device_info:
             self._attr_device_info = device_info
+
+    # ── Delegation to the site (Environment) ────────────────────────────────
+    #
+    # Views onto ``self._env``, which is the single storage. Read-only where the
+    # code only reads: a binding that changed after setup would leave the
+    # listeners subscribed to the old entity, so it is not a thing to allow by
+    # accident — the entry reloads instead.
+
+    @property
+    def environment(self) -> Environment:
+        """The site this hub reads from. The zones need its latitude and frame."""
+        return self._env
+
+    @property
+    def _temp_sensor(self) -> str:
+        return self._env.temperature_sensor
+
+    @property
+    def _rain_sensor(self) -> str:
+        return self._env.rain_sensor
+
+    @property
+    def _vwc_sensor(self) -> str | None:
+        return self._env.soil_moisture_sensor
+
+    @property
+    def _rain_type(self) -> RainSensorType:
+        return self._env.rain_sensor_type
+
+    @property
+    def _backfill_days(self) -> int:
+        return self._env.backfill_days
+
+    @property
+    def _yearly_rain(self) -> float:
+        return self._env.yearly_rain_mm
+
+    @_yearly_rain.setter
+    def _yearly_rain(self, value: float) -> None:
+        self._env.yearly_rain_mm = value
+
+    @property
+    def _yearly_rain_year(self) -> int:
+        return self._env.yearly_rain_year
+
+    @_yearly_rain_year.setter
+    def _yearly_rain_year(self, value: int) -> None:
+        self._env.yearly_rain_year = value
 
     def register_zone_listener(self, listener: Callable) -> None:
         """Register a zone sensor callback for ET/rain broadcasts."""
@@ -711,12 +768,13 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         return self._yearly_rain
 
     def _accrue_yearly_rain(self, rain_mm: float) -> None:
-        """Add credited rain to the yearly total, resetting on a new year."""
-        year = datetime.now().year
-        if year != self._yearly_rain_year:
-            self._yearly_rain = 0.0
-            self._yearly_rain_year = year
-        self._yearly_rain += rain_mm
+        """Add credited rain to the yearly total — the site keeps the books.
+
+        The roll-over on a new year used to be written out here as well as in
+        ``Environment``; one copy is enough, and it is the one that can be tested
+        without a Home Assistant runtime.
+        """
+        self._env = self._env.accrue_yearly_rain(rain_mm, year=datetime.now().year)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -770,8 +828,9 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 self._yearly_rain_year = int(last.attributes.get("yearly_rain_year", self._yearly_rain_year))
                 self._yearly_rain = float(last.attributes.get("yearly_rain_mm", 0.0))
                 if datetime.now().year != self._yearly_rain_year:
-                    self._yearly_rain = 0.0
-                    self._yearly_rain_year = datetime.now().year
+                    # A restart across midnight on 1 January. Clearing and
+                    # re-anchoring is the site's own rule, not a third copy of it.
+                    self._env = self._env.reset_yearly_rain(year=datetime.now().year)
 
         if not restored:
             if self._vwc_sensor:
@@ -1118,8 +1177,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         (GH forum: yearly rain stuck after switching rain sensor type).
         Historical recorder statistics are left untouched.
         """
-        self._yearly_rain = 0.0
-        self._yearly_rain_year = datetime.now().year
+        self._env = self._env.reset_yearly_rain(year=datetime.now().year)
 
     def set_deficit_mm(self, value: float) -> None:
         """Set deficit to an arbitrary value [mm] — intended for testing/debugging."""
@@ -1449,11 +1507,13 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             self._zone_deficit = 0.0
 
     def _get_latitude(self) -> float:
-        """Get latitude from HA config, default to 45.0 (northern)."""
-        try:
-            return self._hass.config.latitude
-        except AttributeError:
-            return 45.0
+        """The site's latitude, which decides the hemisphere of the Kc curve.
+
+        Read from the site rather than from ``hass.config`` directly: it is a
+        property of the place, and the place is what ``Environment`` is. Fixed at
+        setup, so moving house takes a reload — which moving house does anyway.
+        """
+        return self._dryness.environment.latitude
 
     def _get_current_kc(self) -> float:
         """Effective Kc for this zone (base * exposure).
