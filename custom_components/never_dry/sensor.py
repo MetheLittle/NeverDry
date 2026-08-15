@@ -87,6 +87,7 @@ from .const import (
     DEFAULT_ROOT_DEPTH,
     DEFAULT_T_BASE,
     DEFAULT_THRESHOLD,
+    DELIVERY_DURATION_MARGIN,
     DELIVERY_MODE_ESTIMATED_FLOW,
     DELIVERY_MODE_FLOW_METER,
     DOMAIN,
@@ -99,6 +100,7 @@ from .const import (
     MICROCLIMATE_FACTOR_MIN,
     PLANT_FAMILIES,
     RAIN_TYPE_EVENT,
+    SAFETY_LAYER_SPREAD,
     SYSTEM_TYPES,
     UNUSUAL_FLOW_MAX_LPM,
 )
@@ -522,7 +524,8 @@ def _setup_controller(
             notifier=notifier,
             # Callable, not snapshot: re-evaluated at every valve open so the
             # watchdog and hardware timer scale with the current deficit.
-            max_open_duration_s=lambda zs=zs: zs.delivery_timeout,
+            max_open_duration_s=lambda zs=zs: zs.watchdog_timeout,
+            hw_max_duration_s=lambda zs=zs: zs.hw_max_duration_s,
             hw_max_duration_entity=hw_entity,
             hw_max_duration_multiplier=hw_mult,
             hw_max_duration_topic=zs.hw_max_duration_topic,
@@ -1178,6 +1181,7 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._hw_max_duration_payload: str = zone_config.get(CONF_ZONE_HW_MAX_DURATION_PAYLOAD, "{value}")
         self._irrigating = False
         self._no_guard_flow_warned = False
+        self._timeout_caps_job_warned = False
         self._session_listeners: list[Callable] = []
         self._operator = None  # set by _setup_controller after operator creation
 
@@ -1510,13 +1514,76 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
     def delivery_timeout(self) -> int:
         """Safety timeout in seconds for flow_meter and volume_preset modes.
 
-        Returns the greater of the configured floor and the guard-flow
-        duration estimate, so large deficits never hit the timeout before
-        completion. Deliberately based on the guard flow only — never the
-        live meter rate — so the watchdog cannot tighten on a momentary
-        high reading.
+        Two different questions used to share this number. *How long should
+        the job take* is a prediction about the work — volume over flow rate.
+        *How long do we tolerate before something is wrong* is a bound on
+        failure. Combining them with ``max()`` made the configured value a
+        floor, so the estimate could only ever loosen the bound: a zone with
+        five minutes of work to do was guarded with the one-hour default, and
+        a meter that stopped counting kept the valve open for the whole hour
+        (GH #173). The user manual has always described this field as an upper
+        bound; this restores that.
+
+        So: when the expected duration is known, the timeout is that duration
+        plus :data:`DELIVERY_DURATION_MARGIN`, and the configured value caps it
+        from above — the user can always tighten, never loosen. With no guard
+        flow configured there is no prediction to bound anything with, and the
+        configured value is all we have.
+
+        Deliberately based on the guard flow only — never the live meter rate.
+        It would be absurd to calibrate the protection *against* a meter using
+        that same meter, and a momentary high reading must not be able to
+        tighten the watchdog. For the same reason the caller reads this once,
+        before opening: the deficit shrinks as water arrives, so a bound
+        re-read mid-session would follow the session it is meant to bound.
         """
-        return max(self._delivery_timeout, round(self._guard_duration_s * 1.1))
+        expected_s = self._guard_duration_s
+        if expected_s <= 0:
+            return self._delivery_timeout
+        bound_s = round(expected_s * DELIVERY_DURATION_MARGIN)
+        if bound_s > self._delivery_timeout and not self._timeout_caps_job_warned:
+            # The cap bites: the zone needs more time than the user allows, so
+            # it will stop short. Silence here would under-water the zone every
+            # cycle with nothing to show for it — the failure this whole bound
+            # exists to avoid, only in the other direction.
+            self._timeout_caps_job_warned = True
+            _LOGGER.warning(
+                "Zone '%s' needs about %ds to deliver %.1fL at %.2f L/min, but its safety"
+                " timeout is %ds — irrigation will stop short. Raise the safety timeout, or"
+                " check that the configured flow rate matches the real one",
+                self._zone_name,
+                expected_s,
+                self.volume_liters,
+                self._flow_rate,
+                self._delivery_timeout,
+            )
+        return min(self._delivery_timeout, bound_s)
+
+    @property
+    def watchdog_timeout(self) -> int:
+        """Second safety layer: fires when the delivery loop itself is stuck or gone.
+
+        A spread above :attr:`delivery_timeout` so it catches that layer's
+        failure instead of racing it — the watchdog is armed at valve open while
+        the loop only starts counting once the open is confirmed, so equal
+        values would make the watchdog trip *first* and report a fault where
+        the loop was about to close in good order.
+
+        Capped by the configured timeout like every other layer: the user's
+        value means "never run longer than this", so no layer may sit above it.
+        Without a guard flow rate there is no room under the cap and all three
+        collapse onto it — the same flat ladder as before, which is what the
+        configuration deserves when it gives us nothing to derive one from.
+        """
+        return min(self._delivery_timeout, round(self.delivery_timeout * SAFETY_LAYER_SPREAD))
+
+    @property
+    def hw_max_duration_s(self) -> int:
+        """Outermost layer, written to the device so it survives Home Assistant.
+
+        A spread above :attr:`watchdog_timeout`, under the same cap.
+        """
+        return min(self._delivery_timeout, round(self.watchdog_timeout * SAFETY_LAYER_SPREAD))
 
     @property
     def hw_max_duration_topic(self) -> str | None:

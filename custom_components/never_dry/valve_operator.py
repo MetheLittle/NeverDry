@@ -121,6 +121,7 @@ class ValveOperator:
         flow_zero_threshold: float = 0.05,
         notifier: ValveNotifier | None = None,
         max_open_duration_s: float | Callable[[], float] = 3600.0,
+        hw_max_duration_s: float | Callable[[], float] | None = None,
         hw_max_duration_entity: str | None = None,
         hw_max_duration_multiplier: float = 1.0,
         hw_max_duration_topic: str | None = None,
@@ -148,6 +149,10 @@ class ValveOperator:
         # open, so the watchdog and the hardware timer track the current
         # deficit instead of a setup-time snapshot.
         self._max_open_duration_s = max_open_duration_s
+        # Outermost safety layer, supplied by the caller: it must outlast the
+        # watchdog above. ``None`` means "same as the watchdog" — the flat
+        # ladder, which is all a zone without a flow-rate estimate can offer.
+        self._hw_max_duration_s = hw_max_duration_s
         self._hw_max_duration_entity = hw_max_duration_entity
         self._hw_max_duration_multiplier = hw_max_duration_multiplier
         self._hw_max_duration_topic = hw_max_duration_topic
@@ -192,6 +197,13 @@ class ValveOperator:
     def latency_diagnostics(self) -> dict:
         """Return latency statistics for this valve (open and close windows)."""
         return self._latency.as_dict()
+
+    def _current_hw_max_duration(self) -> float:
+        """Resolve the on-device timer value, falling back to the watchdog's."""
+        provider = self._hw_max_duration_s
+        if provider is None:
+            return self._current_max_open_duration()
+        return float(provider() if callable(provider) else provider)
 
     def _current_max_open_duration(self) -> float:
         """Resolve the max-open duration, evaluating the provider if callable."""
@@ -590,7 +602,11 @@ class ValveOperator:
         if not has_entity and not has_topic:
             return
         self._hw_duration_set = True
-        value = round(self._current_max_open_duration() * self._hw_max_duration_multiplier, 1)
+        # Outermost layer. The value is supplied by the caller, which owns the
+        # whole ladder (delivery bound < watchdog < hardware, all under the
+        # user's configured ceiling); the multiplier is only the entity's unit
+        # conversion. An actuator must not invent its own safety margins.
+        value = round(self._current_hw_max_duration() * self._hw_max_duration_multiplier, 1)
 
         if has_entity:
             try:

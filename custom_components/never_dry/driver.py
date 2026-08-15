@@ -288,6 +288,7 @@ class Driver(abc.ABC):
         flow_zero_threshold: float = 0.05,
         notifier: ValveNotifier | None = None,
         max_open_duration_s: float | Callable[[], float] = 3600.0,
+        hw_max_duration_s: float | Callable[[], float] | None = None,
         hw_max_duration_entity: str | None = None,
         hw_max_duration_multiplier: float = 1.0,
         hw_max_duration_topic: str | None = None,
@@ -315,6 +316,10 @@ class Driver(abc.ABC):
         # Static float or zero-arg callable re-evaluated at every open, so the
         # watchdog and hardware timer track the current deficit, not a snapshot.
         self._max_open_duration_s = max_open_duration_s
+        # Outermost safety layer, supplied by the caller: it must outlast the
+        # watchdog above. ``None`` means "same as the watchdog" — the flat
+        # ladder, which is all a zone without a flow-rate estimate can offer.
+        self._hw_max_duration_s = hw_max_duration_s
         self._hw_max_duration_entity = hw_max_duration_entity
         self._hw_max_duration_multiplier = hw_max_duration_multiplier
         self._hw_max_duration_topic = hw_max_duration_topic
@@ -383,6 +388,13 @@ class Driver(abc.ABC):
     def latency_diagnostics(self) -> dict:
         """Return latency statistics for this actuator (open and close windows)."""
         return self._latency.as_dict()
+
+    def _current_hw_max_duration(self) -> float:
+        """Resolve the on-device timer value, falling back to the watchdog's."""
+        provider = self._hw_max_duration_s
+        if provider is None:
+            return self._current_max_open_duration()
+        return float(provider() if callable(provider) else provider)
 
     def _current_max_open_duration(self) -> float:
         """Resolve the max-open duration, evaluating the provider if callable."""
@@ -814,7 +826,11 @@ class Driver(abc.ABC):
         if not has_entity and not has_topic:
             return
         self._hw_duration_set = True
-        value = round(self._current_max_open_duration() * self._hw_max_duration_multiplier, 1)
+        # Outermost layer. The value is supplied by the caller, which owns the
+        # whole ladder (delivery bound < watchdog < hardware, all under the
+        # user's configured ceiling); the multiplier is only the entity's unit
+        # conversion. An actuator must not invent its own safety margins.
+        value = round(self._current_hw_max_duration() * self._hw_max_duration_multiplier, 1)
 
         if has_entity:
             try:
@@ -1012,7 +1028,18 @@ class ZoneDriver(Driver):
         auto_open_grace_s: float = AUTO_OPEN_GRACE_S,
         **base_kwargs,
     ) -> None:
-        """Configure a zone actuator; ``base_kwargs`` flow to :class:`Driver`."""
+        """Configure a zone actuator; ``base_kwargs`` flow to :class:`Driver`.
+
+        ``delivery_timeout_s`` is a **ceiling on the job**, not an absolute
+        constant: the caller derives it from the expected duration (volume over
+        the declared flow rate) times a margin, capped by the user's configured
+        safety timeout — see ``IrrigationZoneSensor.delivery_timeout``. Passing
+        a bare constant here is what let a stalled meter keep a valve open for
+        an hour on a five-minute job (GH #173), because the only exit from the
+        loops below is the meter reaching target or this timeout expiring. Take
+        it once, before opening: the deficit shrinks as water arrives, so a
+        bound recomputed mid-session follows the session it should bound.
+        """
         super().__init__(hass, entity_id, flow_sensor_entity_id=flow_meter_sensor, **base_kwargs)
         self._delivery_mode = DeliveryMode(delivery_mode)
         self._flow_rate_lpm = flow_rate_lpm
