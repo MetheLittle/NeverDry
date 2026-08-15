@@ -1,8 +1,9 @@
 """Judging a quiet valve against its siblings.
 
 The rule has to survive the fleet sizes and the failure shapes that actually
-occur, not just the happy one. Each test below is a case that would otherwise
-be found in someone's garden.
+occur, not just the happy one. Each case below is one that would otherwise be
+found in someone's garden — and the table at the bottom is the comparison that
+decided the estimator, kept as a test so the decision stays checkable.
 """
 
 from __future__ import annotations
@@ -12,31 +13,35 @@ from never_dry.environment import (
     Reachability,
     judge_fleet,
     judge_silence,
+    mad,
     silence_floor,
 )
 
 MINUTE = 60.0
 HOUR = 3600.0
+FLOOR = 30 * MINUTE  # a bench value: it makes both halves of the bar bite
 
 
 # ── The case it exists for ────────────────────────────────────────────────
 
 
 class TestOneValveGoneQuiet:
+    """A battery dies mid-season: the valve stops answering and nothing says so."""
+
     def test_the_dead_one_is_singled_out(self):
-        verdict = judge_silence(3 * HOUR, [4 * MINUTE, 4 * MINUTE, 5 * MINUTE], floor_s=30 * MINUTE)
+        verdict = judge_silence(3 * HOUR, [4 * MINUTE, 4 * MINUTE, 5 * MINUTE], floor_s=FLOOR)
         assert verdict.status is Reachability.SILENT
 
     def test_the_verdict_carries_the_numbers_it_used(self):
         """So the warning can explain itself instead of just asserting."""
-        verdict = judge_silence(3 * HOUR, [4 * MINUTE, 4 * MINUTE, 5 * MINUTE], floor_s=30 * MINUTE)
+        verdict = judge_silence(3 * HOUR, [4 * MINUTE, 4 * MINUTE, 5 * MINUTE], floor_s=FLOOR)
         assert verdict.reference_s == 4 * MINUTE
-        assert verdict.threshold_s == 30 * MINUTE  # the floor bites, not the factor
+        assert verdict.threshold_s == FLOOR  # tight fleet: the floor decides
         assert verdict.silence_s == 3 * HOUR
 
     def test_the_healthy_siblings_are_not(self):
         fleet = {"pino": 3 * HOUR, "ortensia": 4 * MINUTE, "melograno": 4 * MINUTE, "melino": 5 * MINUTE}
-        verdicts = judge_fleet(fleet, floor_s=30 * MINUTE)
+        verdicts = judge_fleet(fleet, floor_s=FLOOR)
         assert verdicts["pino"].is_silent
         assert not any(verdicts[z].is_silent for z in ("ortensia", "melograno", "melino"))
 
@@ -46,26 +51,46 @@ class TestOneValveGoneQuiet:
 
 class TestTheSubjectIsLeftOutOfItsOwnReference:
     def test_two_valves_one_dead(self):
-        """Including itself, the dead valve drags the median up and acquits itself.
-
-        median([5 min, 4 h]) is about two hours, and four hours does not exceed
-        twice that. Leaving it out, the reference is five minutes and the
-        finding is obvious.
-        """
-        verdicts = judge_fleet({"dead": 4 * HOUR, "alive": 5 * MINUTE}, floor_s=30 * MINUTE, min_peers=1)
+        """Included in its own reference, the dead valve acquits itself."""
+        verdicts = judge_fleet({"dead": 4 * HOUR, "alive": 5 * MINUTE}, floor_s=FLOOR, min_peers=1)
         assert verdicts["dead"].is_silent
         assert verdicts["dead"].reference_s == 5 * MINUTE
 
     def test_a_single_valve_cannot_be_judged(self):
-        verdicts = judge_fleet({"only": 6 * HOUR}, floor_s=30 * MINUTE)
-        assert verdicts["only"].status is Reachability.UNKNOWN
+        assert judge_fleet({"only": 6 * HOUR}, floor_s=FLOOR)["only"].status is Reachability.UNKNOWN
 
     def test_too_few_peers_is_unknown_not_fine(self):
         """The distinction the whole enum exists for."""
-        verdict = judge_silence(6 * HOUR, [5 * MINUTE], floor_s=30 * MINUTE, min_peers=2)
+        verdict = judge_silence(6 * HOUR, [5 * MINUTE], floor_s=FLOOR, min_peers=2)
         assert verdict.status is Reachability.UNKNOWN
         assert not verdict.is_silent
         assert verdict.reference_s is None
+
+
+# ── The MAD: the bar widens when the fleet is genuinely irregular ─────────
+
+
+class TestDispersionWidensTheBar:
+    def test_an_irregular_fleet_does_not_accuse_its_slow_member(self):
+        """Peers scattered from 10 to 120 min: 150 min is not out of character."""
+        verdict = judge_silence(150 * MINUTE, [10 * MINUTE, 60 * MINUTE, 120 * MINUTE], floor_s=FLOOR)
+        assert verdict.status is Reachability.LIVE
+        assert verdict.threshold_s > 2 * HOUR  # widened well past the median
+
+    def test_the_same_silence_is_a_fault_in_a_regular_fleet(self):
+        """Identical candidate, disciplined peers: now it stands out."""
+        verdict = judge_silence(150 * MINUTE, [10 * MINUTE, 11 * MINUTE, 10 * MINUTE], floor_s=FLOOR)
+        assert verdict.status is Reachability.SILENT
+
+    def test_mad_is_zero_for_identical_peers(self):
+        assert mad([5.0, 5.0, 5.0]) == 0.0
+
+    def test_mad_ignores_a_single_wild_value(self):
+        """Where the standard deviation would be dragged out of shape."""
+        assert mad([10.0, 10.0, 12.0, 5000.0]) < 10.0
+
+    def test_mad_of_nothing_is_zero(self):
+        assert mad([]) == 0.0
 
 
 # ── The floor stops noise from becoming alarms ────────────────────────────
@@ -73,19 +98,16 @@ class TestTheSubjectIsLeftOutOfItsOwnReference:
 
 class TestTheFloor:
     def test_a_tiny_reference_does_not_make_jitter_a_fault(self):
-        """Right after a restart everything is seconds old; twice that is nothing."""
-        verdict = judge_silence(90.0, [30.0, 30.0, 30.0], floor_s=30 * MINUTE)
-        assert verdict.status is Reachability.LIVE
+        """Right after a restart everything is seconds old, and the MAD is zero."""
+        assert judge_silence(90.0, [30.0, 30.0, 30.0], floor_s=FLOOR).status is Reachability.LIVE
 
-    def test_the_factor_bites_when_the_fleet_is_slow(self):
-        """With a genuinely slow mesh the factor, not the floor, decides."""
-        verdict = judge_silence(5 * HOUR, [1 * HOUR, 1 * HOUR, 70 * MINUTE], floor_s=30 * MINUTE)
+    def test_a_slow_fleet_raises_the_bar_above_the_floor(self):
+        verdict = judge_silence(5 * HOUR, [1 * HOUR, 1 * HOUR, 70 * MINUTE], floor_s=FLOOR)
         assert verdict.status is Reachability.SILENT
-        assert verdict.threshold_s == 2 * HOUR
+        assert verdict.threshold_s > FLOOR
 
     def test_exactly_at_the_threshold_is_not_a_fault(self):
-        verdict = judge_silence(30 * MINUTE, [1.0, 1.0, 1.0], floor_s=30 * MINUTE)
-        assert verdict.status is Reachability.LIVE
+        assert judge_silence(FLOOR, [1.0, 1.0, 1.0], floor_s=FLOOR).status is Reachability.LIVE
 
 
 # ── Fleet-wide situations ─────────────────────────────────────────────────
@@ -95,31 +117,37 @@ class TestWholeFleetSituations:
     def test_everything_fresh_after_a_restart_accuses_nobody(self):
         """The startup false positive, answered by the shape of the rule itself."""
         fleet = dict.fromkeys(("a", "b", "c", "d"), 20.0)
-        assert not any(v.is_silent for v in judge_fleet(fleet, floor_s=30 * MINUTE).values())
+        assert not any(v.is_silent for v in judge_fleet(fleet, floor_s=FLOOR).values())
 
     def test_the_whole_mesh_down_accuses_nobody(self):
-        """Correct: it is not a fault of a valve, and the coordinator says so itself."""
+        """Correct: not a fault of a valve, and the coordinator reports it itself."""
         fleet = dict.fromkeys(("a", "b", "c", "d"), 9 * HOUR)
-        assert not any(v.is_silent for v in judge_fleet(fleet, floor_s=30 * MINUTE).values())
+        assert not any(v.is_silent for v in judge_fleet(fleet, floor_s=FLOOR).values())
 
     def test_two_dead_out_of_four_are_both_found(self):
-        """The median holds while the dead are a minority."""
         fleet = {"a": 6 * HOUR, "b": 6 * HOUR, "c": 3 * MINUTE, "d": 4 * MINUTE}
-        verdicts = judge_fleet(fleet, floor_s=30 * MINUTE, min_peers=2)
+        verdicts = judge_fleet(fleet, floor_s=FLOOR)
         assert verdicts["a"].is_silent and verdicts["b"].is_silent
         assert not verdicts["c"].is_silent and not verdicts["d"].is_silent
+
+    def test_a_wild_sibling_does_not_blind_the_rule(self):
+        """One valve back after a week away must not hide a dead one.
+
+        This is the case Tukey's fence misses: the wild value inflates the IQR
+        and the fence opens wide enough to swallow the fault.
+        """
+        fleet = {"dead": 3 * HOUR, "ok": 3 * MINUTE, "ok2": 4 * MINUTE, "rejoined": 83 * HOUR}
+        assert judge_fleet(fleet, floor_s=FLOOR)["dead"].is_silent
 
     def test_a_majority_dead_hides_them(self):
         """An honest limit, written down rather than discovered later.
 
-        Once the quiet ones are the majority they become the reference, and the
-        rule reports the healthy minority as normal and the rest as normal too.
-        A relative measure cannot do better; the absolute floor is what would
-        have to catch this, if it were set low enough to.
+        Once the quiet ones are the majority they *are* the reference. A relative
+        measure cannot do better; only an absolute floor low enough to be noisy
+        would catch this.
         """
         fleet = {"a": 6 * HOUR, "b": 6 * HOUR, "c": 6 * HOUR, "d": 4 * MINUTE}
-        verdicts = judge_fleet(fleet, floor_s=30 * MINUTE)
-        assert not any(v.is_silent for v in verdicts.values())
+        assert not any(v.is_silent for v in judge_fleet(fleet, floor_s=FLOOR).values())
 
 
 # ── Deriving the floor from cadence ───────────────────────────────────────
@@ -143,21 +171,22 @@ class TestSilenceFloor:
         assert silence_floor([0.0, 0.0]) is None
 
 
-# ── The numbers from the field ────────────────────────────────────────────
+# ── The comparison that chose the estimator ───────────────────────────────
 
 
 @pytest.mark.parametrize(
-    ("silence_min", "expected"),
+    ("case", "fleet", "subject", "expected"),
     [
-        (23.4, Reachability.LIVE),  # what the Pino showed: not yet evidence
-        (180.0, Reachability.SILENT),  # three hours: it is
+        ("one dead of four", {"a": 3 * HOUR, "b": 2.5 * MINUTE, "c": 2.5 * MINUTE, "d": 2.5 * MINUTE}, "a", True),
+        ("one dead 40 min", {"a": 40 * MINUTE, "b": 2.5 * MINUTE, "c": 2.5 * MINUTE, "d": 2.5 * MINUTE}, "a", True),
+        ("two dead of four", {"a": 3 * HOUR, "b": 3 * HOUR, "c": 2.5 * MINUTE, "d": 2.5 * MINUTE}, "a", True),
+        ("three valves, one dead", {"a": 3 * HOUR, "b": 2.5 * MINUTE, "c": 2.5 * MINUTE}, "a", True),
+        ("wild sibling", {"a": 3 * HOUR, "b": 3 * MINUTE, "c": 4 * MINUTE, "d": 83 * HOUR}, "a", True),
+        ("all fresh", {"a": 30.0, "b": 30.0, "c": 30.0, "d": 30.0}, "a", False),
+        ("mesh down", {"a": 5 * HOUR, "b": 5 * HOUR, "c": 5 * HOUR, "d": 5 * HOUR}, "a", False),
     ],
 )
-def test_the_pino_reading(silence_min, expected):
-    """Taken from the live instance: three siblings at 2.5 minutes.
-
-    23 minutes of quiet is not proof, and the rule must not call it proof —
-    that reading came from a manual test, not from a dead valve.
-    """
-    peers = [2.5 * MINUTE, 2.5 * MINUTE, 2.5 * MINUTE]
-    assert judge_silence(silence_min * MINUTE, peers, floor_s=30 * MINUTE).status is expected
+def test_the_decision_table(case, fleet, subject, expected):
+    """Every row Tukey's fence was measured against. It missed the last three
+    positives; this estimator takes them, and agrees on the two negatives."""
+    assert judge_fleet(fleet, floor_s=FLOOR)[subject].is_silent is expected, case

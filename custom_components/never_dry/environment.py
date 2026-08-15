@@ -60,8 +60,10 @@ DEFAULT_RAIN_DELAY_THRESHOLD: float = 0.60
 DEFAULT_RAIN_DELAY_HOURS: float = 12.0
 
 # ── Silence judgement: how quiet is too quiet ───────────────────────────────
-#: How far past the peer reference a valve must be before it is called silent.
-DEFAULT_SILENCE_FACTOR: float = 2.0
+#: Multiples of the peers' MAD allowed above their median before a valve is
+#: called silent. Three mirrors the 3-sigma rule ``valve_latency`` already uses
+#: for command latency — same idea, robust estimator.
+DEFAULT_SILENCE_K: float = 3.0
 #: Fewer peers than this and there is nothing to compare against. Two is the
 #: real minimum: with one peer the "median" is that peer, which is still a
 #: usable reference, but with none there is no reference at all.
@@ -235,20 +237,25 @@ class Environment:
 
 # ── Is this valve unusually quiet? ──────────────────────────────────────────
 #
-# A valve that drops off the radio mesh keeps reporting a perfectly ordinary
-# "off": nothing in its own state says it is gone, and the availability timeout
-# a Zigbee coordinator applies to a battery device is measured in *days*,
-# because a sleeping valve is supposed to be quiet. So the question cannot be
-# answered by looking at one valve.
+# The case this exists for is a battery that dies mid-season. The valve stops
+# answering, the zone stops being watered, and nothing says so: the switch keeps
+# reporting a perfectly ordinary "off", the battery sensor keeps showing its
+# last reading, and the availability timeout a Zigbee coordinator applies to a
+# battery device is measured in *days*, because a sleeping valve is supposed to
+# be quiet. The plants find out first.
 #
-# It can be answered by looking at the others. "Has this one been quiet for N
-# minutes" needs an N nobody can choose well; "is this one unusually quiet
-# compared to its siblings" needs no N at all, and self-calibrates: when the
-# whole mesh goes quiet at night the reference moves with it, and right after a
-# restart everything is fresh together so nobody is accused.
+# So the question cannot be answered by looking at one valve. It can be answered
+# by looking at the others: "has this one been quiet for N minutes" needs an N
+# nobody can choose well, while "is this one unusually quiet compared to its
+# siblings" needs no N at all and self-calibrates. When the whole mesh goes
+# quiet at night the reference moves with it, and right after a restart
+# everything is fresh together, so nobody is accused.
 #
 # This lives at site level rather than on the zone because no valve can judge
 # itself — the comparison *is* the measurement.
+#
+# See ``docs/design/valve-reachability.md`` for the alternatives that were
+# measured and rejected, with the numbers.
 
 
 class Reachability(StrEnum):
@@ -299,31 +306,54 @@ def silence_floor(intervals_s: Sequence[float], *, multiple: float = DEFAULT_FLO
     return median(usable) * multiple
 
 
+def mad(values: Sequence[float]) -> float:
+    """Median absolute deviation — the spread of ``values``, robust to outliers.
+
+    Stands to the standard deviation as the median stands to the mean, and that
+    is exactly why it is used here: the thing being measured *is* an outlier, so
+    an estimator that a single wild value can inflate would hide it.
+    """
+    if not values:
+        return 0.0
+    centre = median(values)
+    return median([abs(v - centre) for v in values])
+
+
 def judge_silence(
     silence_s: float,
     peer_silences: Sequence[float],
     *,
     floor_s: float,
-    factor: float = DEFAULT_SILENCE_FACTOR,
+    k: float = DEFAULT_SILENCE_K,
     min_peers: int = DEFAULT_MIN_PEERS,
 ) -> SilenceVerdict:
-    """Judge one actuator's silence against its peers'.
+    """Judge one actuator's silence against its peers': ``median + k·MAD``, floored.
 
     ``peer_silences`` must **exclude** the actuator being judged. That is not a
     detail: with two valves and the dead one left in, the median sits halfway
-    between healthy and dead, the dead valve drags up its own reference and
+    between healthy and dead, so the dead valve drags up its own reference and
     acquits itself. Leaving it out keeps the reference honest however small the
-    fleet.
+    fleet — and it is what makes the wild-sibling case work, where a valve that
+    has just rejoined after a week would otherwise blow the bar wide open.
 
-    Both conditions have to hold. The factor asks "unusual for this fleet"; the
-    floor stops a tiny reference from making ordinary jitter look like a fault —
-    twice a median of two minutes is four minutes, which any valve can exceed by
-    simply reporting a little late.
+    The bar has two parts because they answer two questions. ``median + k·MAD``
+    asks *is this unusual for this fleet*, and widens on its own when the fleet's
+    cadence is genuinely irregular. The floor asks *is this unusual at all*, and
+    stops a tight, freshly-restarted fleet — where the MAD is zero and the bar
+    would collapse onto the median — from making ordinary jitter look like a
+    fault.
+
+    Tukey's fence (``Q3 + 1.5·IQR``) is the better-known criterion and was
+    measured against this one. It is more conservative and needs a sample this
+    domain does not have: quartiles over the three peers of a four-zone garden
+    are interpolations between two numbers. It missed two-dead-of-four and the
+    wild sibling, both of which this catches. Worth revisiting at ten zones or
+    more; see the design note.
     """
     if len(peer_silences) < min_peers:
         return SilenceVerdict(Reachability.UNKNOWN, silence_s)
     reference = median(peer_silences)
-    threshold = max(factor * reference, floor_s)
+    threshold = max(reference + k * mad(peer_silences), floor_s)
     status = Reachability.SILENT if silence_s > threshold else Reachability.LIVE
     return SilenceVerdict(status, silence_s, reference_s=reference, threshold_s=threshold)
 
@@ -332,7 +362,7 @@ def judge_fleet(
     silences: Mapping[str, float],
     *,
     floor_s: float,
-    factor: float = DEFAULT_SILENCE_FACTOR,
+    k: float = DEFAULT_SILENCE_K,
     min_peers: int = DEFAULT_MIN_PEERS,
 ) -> dict[str, SilenceVerdict]:
     """Judge every actuator against the others, leaving each out of its own reference.
@@ -351,7 +381,7 @@ def judge_fleet(
             silence,
             [s for other, s in silences.items() if other != name],
             floor_s=floor_s,
-            factor=factor,
+            k=k,
             min_peers=min_peers,
         )
         for name, silence in silences.items()

@@ -14,6 +14,10 @@ New contributors: see [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) first.
   machine and the `ValveOperator` (open/close, verification, failure handling).
 - [`controller-reliability.md`](controller-reliability.md) — the controller layer
   above the FSM: hardening applied and the invariants to preserve.
+- [`valve-reachability.md`](valve-reachability.md) — **Proposed (RFC)**: noticing
+  a valve that has stopped answering — a dead battery mid-season — when every
+  direct signal says it is fine. Judges each valve against its siblings rather
+  than against a clock, with the estimators that were measured and rejected.
 - [`unit-system.md`](unit-system.md) — metric-internal architecture (SI core,
   imperial only at the edges).
 - [`dependency-management.md`](dependency-management.md) — **Accepted (ADR)**: why

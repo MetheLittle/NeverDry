@@ -515,6 +515,26 @@ NeverDry's auto-close uses the *same* `delivery_timeout` you already configured 
 
 If you want to bypass the auto-close (for example to flush a line at the start of the season), close the valve from the same physical button before the timeout. Manual close always wins over the monitor.
 
+### 7.4 When a valve stops answering
+
+The zone card shows an **amber warning triangle** — *"Valve not responding — check the radio link or the batteries"* — when a valve has stopped answering NeverDry.
+
+**Why this exists.** A battery valve that runs flat mid-season is close to invisible. The switch keeps showing a perfectly ordinary *off*, the battery sensor keeps showing whatever it last managed to report, and your Zigbee coordinator will not call the device missing for a day or more, because a valve that sleeps is *supposed* to be quiet. Meanwhile the zone's deficit climbs and looks exactly like a dry spell. Usually the plants tell you first.
+
+**What the warning means, and what it does not.** It means the valve is not answering: a radio problem, or a flat battery. It does **not** mean the valve is broken or that no water came out. A valve that answers normally but delivers nothing — supply turned off, clogged filter — is a different fault, and it deliberately does *not* raise this warning, because it would send you to look in the wrong place.
+
+**What to check**, in the order that usually pays:
+
+1. **Batteries.** The most common cause by far, and the one the valve cannot report — a device with no power cannot tell you it has no power.
+2. **Radio range.** A valve at the edge of the mesh drops out in wet weather and comes back in dry. If it recovers on its own and the warning returns days later, this is usually why: add a mains-powered Zigbee device between the coordinator and the valve to act as a router.
+3. **The coordinator itself.** If *every* zone shows the warning at once, the problem is upstream — the Zigbee gateway, not the valves. NeverDry deliberately does not accuse individual valves in that case.
+
+**The warning clears itself.** As soon as the valve answers again — a successful open, or simply the device reporting in — the triangle disappears. You never have to dismiss it, and it will not linger after the problem is fixed.
+
+**Notifications are rare on purpose.** You get one notification when a valve is first found unresponsive, and then nothing more while the situation persists: an alert repeated about a problem you already know about is how the alert that matters gets ignored. NeverDry speaks again only when the silence actually **costs you a watering** — a scheduled run that could not happen. One message per missed watering, no hourly reminders.
+
+**A note on small gardens.** The warning works by comparing each valve with the others, which is what lets it work without you configuring any timeout: a valve is flagged when it is unusually quiet *for your installation*. With only one or two zones there is nothing to compare against, so NeverDry says nothing rather than guessing — three zones or more is where this becomes reliable.
+
 ---
 
 ## 8. Setting up automations
