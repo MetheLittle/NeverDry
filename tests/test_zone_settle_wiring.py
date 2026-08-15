@@ -212,3 +212,74 @@ class TestManualSessionSettlesThroughTheZone:
 
         assert zone._yearly_water_delivered < 8000.0
         assert zone._yearly_water_year == datetime.now().year
+
+
+# ── The completed delivery and the hose ───────────────────────────────
+
+
+class TestAFinishedZoneIsClearedNotCredited:
+    """The distinction that took a decision: outcome known, not amount known."""
+
+    def test_a_full_delivery_lands_on_exactly_zero(self, hass_mock, di_sensor):
+        """Not near zero. The target came from the deficit, so it clears it."""
+        zone = _zone(hass_mock, di_sensor)
+        controller = IrrigationController(hass_mock, di_sensor, [zone])
+        zone._zone_deficit = 5.0
+        zone.begin_cycle()
+
+        _settle_partial(controller, zone, delivered=50.0, target=50.0)
+
+        assert zone._zone_deficit == 0.0
+
+    def test_the_measured_volume_is_credited_not_the_demand(self, hass_mock, di_sensor):
+        """A metered cycle has already emptied the deficit, so demand reads ~0."""
+        zone = _zone(hass_mock, di_sensor)
+        controller = IrrigationController(hass_mock, di_sensor, [zone])
+        zone._zone_deficit = 0.05  # depleted live during the cycle
+        zone.begin_cycle()
+
+        _settle_partial(controller, zone, delivered=50.0, target=50.0)
+
+        assert zone._last_volume_delivered == 50.0
+
+    def test_the_session_duration_survives(self, hass_mock, di_sensor):
+        zone = _zone(hass_mock, di_sensor)
+        controller = IrrigationController(hass_mock, di_sensor, [zone])
+        zone._zone_deficit = 5.0
+        zone.begin_cycle()
+
+        _settle_partial(controller, zone, delivered=50.0, target=50.0, duration_s=97)
+
+        assert zone._last_session_duration_s == 97
+
+    def test_the_hose_case_infers_the_volume_from_the_deficit(self, hass_mock, di_sensor):
+        """Nothing was measured, so what was missing is what went in."""
+        zone = _zone(hass_mock, di_sensor)
+        zone._zone_deficit = 4.0  # 4 mm over 10 m2 at efficiency 1.0 = 40 L
+
+        zone.reset_deficit("mark_irrigated")
+
+        assert zone._zone_deficit == 0.0
+        assert zone._last_volume_delivered == 40.0
+
+    def test_the_hose_case_claims_no_duration(self, hass_mock, di_sensor):
+        """Writing 0 would assert a session length nobody measured."""
+        zone = _zone(hass_mock, di_sensor)
+        zone._last_session_duration_s = 120
+        zone._zone_deficit = 4.0
+
+        zone.reset_deficit("mark_irrigated")
+
+        assert zone._last_session_duration_s == 120
+
+    def test_clearing_rolls_the_year_too(self, hass_mock, di_sensor):
+        """The fourth copy of the roll-over lived here."""
+        zone = _zone(hass_mock, di_sensor)
+        zone._yearly_water_delivered = 8000.0
+        zone._yearly_water_year = datetime.now().year - 1
+        zone._zone_deficit = 4.0
+
+        zone.reset_deficit("mark_irrigated")
+
+        assert zone._yearly_water_delivered == 40.0
+        assert zone._yearly_water_year == datetime.now().year

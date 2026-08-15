@@ -742,12 +742,16 @@ class IrrigationController:
                 # Full irrigation — reset deficit to zero. Credit the measured
                 # ``delivered`` volume because flow-metered modes deplete the
                 # deficit in real time, so volume_liters would read ~0 here.
-                zone.reset_deficit(self._current_source or "automatic", delivered_liters=delivered)
-                # Not yet the zone's own: reset_deficit clears the deficit to
-                # exactly zero, which settle() does not do — it credits, and a
-                # full delivery lands near zero rather than on it. The two
-                # semantics still need reconciling before this branch can move.
-                zone._last_session_duration_s = round((ts_end - ts_start).total_seconds())
+                # The outcome is known — the zone is full — so the deficit goes
+                # to exactly zero rather than wherever the arithmetic lands. The
+                # measured volume is credited because a flow-metered cycle has
+                # already depleted the deficit in real time, so the demand would
+                # read ~0 by now.
+                zone.reset_deficit(
+                    self._current_source or "automatic",
+                    delivered_liters=delivered,
+                    duration_s=round((ts_end - ts_start).total_seconds()),
+                )
             else:
                 # Partial irrigation — the zone settles itself. It credits the
                 # delivery against its own cycle snapshot (the same value as

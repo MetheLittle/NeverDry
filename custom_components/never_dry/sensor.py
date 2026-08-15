@@ -1714,7 +1714,12 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._yearly_water_delivered = 0.0
         self._yearly_water_year = datetime.now().year
 
-    def reset_deficit(self, source: str = "unknown", delivered_liters: float | None = None) -> None:
+    def reset_deficit(
+        self,
+        source: str = "unknown",
+        delivered_liters: float | None = None,
+        duration_s: int | None = None,
+    ) -> None:
         """Reset this zone's deficit to zero (called after irrigation).
 
         When ``delivered_liters`` is provided it is credited to the water
@@ -1724,26 +1729,14 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         cycle settles. When omitted (manual reset / mark-irrigated), the volume
         is derived from the current deficit via ``volume_liters``.
         """
-        self._last_irrigation_source = source
-        credited = round(self.volume_liters if delivered_liters is None else delivered_liters, 1)
-        self._last_volume_delivered = credited
-        self._session_water_delivered = credited
-        self._total_water_delivered += credited
-        # Reset yearly counter on year change
-        now = datetime.now()
-        if now.year != self._yearly_water_year:
-            self._yearly_water_delivered = 0.0
-            self._yearly_water_year = now.year
-        self._yearly_water_delivered += credited
-        self._last_irrigated = now
-        self._zone_deficit = 0.0
+        self._zone.mark_irrigated(
+            source=source, at=datetime.now(), credited_liters=delivered_liters, duration_s=duration_s
+        )
 
     @property
     def volume_liters(self) -> float:
-        """Volume to irrigate this zone [L]."""
-        if self._efficiency <= 0:
-            return 0.0
-        return self._zone_deficit * self._area / self._efficiency
+        """Volume to irrigate this zone [L] — the zone's own demand."""
+        return self._zone.water_demand_l
 
     @property
     def _guard_duration_s(self) -> int:

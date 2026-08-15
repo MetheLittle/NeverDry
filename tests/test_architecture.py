@@ -152,13 +152,13 @@ def test_module_declared_inert_is_imported_by_nothing(module):
 #
 # The list grows as each wiring completes — it is a ledger of what has actually
 # been consolidated, not an aspiration. Still outstanding, deliberately: the
-# deficit-to-litres conversion (`volume_liters` on the entity, `water_demand_l`
-# on the Zone) and the seasonal Kc curve, both waiting on the Zone completion.
+# seasonal Kc curve, which needs the plant-family table to move with it.
 
 SINGLE_HOME_FORMULAS = (
     (r"alpha\s*\*\s*\(", "water_balance_model", "the ET rate"),
     (r"field_cap\w*\s*-\s*vwc", "water_balance_model", "the VWC deficit"),
     (r"efficiency\s*/\s*self\s*\.\s*area_m2", "zone", "crediting delivered water"),
+    (r"as_liters\s*\(.*\)\s*/\s*self\s*\.\s*efficiency", "zone", "the deficit as litres"),
 )
 
 
