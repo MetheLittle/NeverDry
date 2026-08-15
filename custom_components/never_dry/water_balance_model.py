@@ -37,11 +37,23 @@ References: ``docs/design_water_balance_reference_model.md`` (D1-D5, reference
 frames), ``docs/design_domain_object_model.md`` (the domain classes),
 GH #123 (the deficit reference-frame bug this model makes impossible).
 
-**Phase 1 — mostly inert scaffold.** The models themselves are not wired yet:
-``zone.py`` imports the :class:`Deficit` value object and ``sensor.py`` imports
-:func:`vwc_to_fraction`, but ``DrynessIndexSensor`` / the per-zone loop still
-compute their own deficit. Wiring them onto the models is a deliberate later
-phase.
+**Wiring status — the formulas have moved, the models have not.** The entity
+layer no longer computes any of this itself: :meth:`ETModel.et_hourly` is called
+by ``ETSensor``, by the hub's live integrator, and twice inside the recorder
+backfill, where five copies of the same expression used to live;
+:func:`vwc_deficit_mm` replaced the two copies of the probe formula. ``zone.py``
+takes :class:`Deficit` and :class:`ReferenceFrame`, and the frame a zone carries
+now follows the hub's actual model rather than defaulting to ET.
+
+What has *not* moved is the integration itself: ``DrynessIndexSensor`` still owns
+the forward-Euler loop and the deficit state, rather than holding a
+:class:`WaterBalanceModel` and calling :meth:`step`. That is the next phase, and
+it is the one that makes the tiers (:class:`HargreavesModel`,
+:class:`PenmanMonteithModel`) reachable — today they are correct, tested, and
+selectable by nobody.
+
+``tests/test_architecture.py`` asserts that each of these formulas has exactly
+one home, so a copy cannot quietly reappear.
 """
 
 from __future__ import annotations
@@ -268,6 +280,21 @@ def vwc_to_fraction(value: float) -> float | None:
     if not 0.0 <= fraction <= 1.0:
         return None
     return fraction
+
+
+def vwc_deficit_mm(vwc: float, *, field_capacity: float, root_depth: float) -> float:
+    """Millimetres of water missing from the root zone, from a VWC fraction.
+
+    ``(field_capacity - vwc) · root_depth`` gives metres of water; x1000 puts it
+    in the model's canonical millimetres. Unclamped on purpose — a negative
+    result means wetter than field capacity, which is real information the
+    caller may want before it is flattened to zero.
+
+    A module-level function rather than a method because the entity layer needs
+    exactly this arithmetic and nothing else about the model; one home for the
+    formula is the point.
+    """
+    return (field_capacity - vwc) * root_depth * _M_TO_MM
 
 
 # Union of everything a model's :meth:`WaterBalanceModel.step` may accept.
@@ -607,7 +634,7 @@ class VWCSystemModel(WaterBalanceModel):
         if not isinstance(inputs, VWCReading):
             raise TypeError(f"{type(self).__name__}.step expects VWCReading, got {type(inputs).__name__}")
         self._value_mm = _clamp(
-            (self._field_capacity - inputs.vwc) * self._root_depth * _M_TO_MM,
+            vwc_deficit_mm(inputs.vwc, field_capacity=self._field_capacity, root_depth=self._root_depth),
             0.0,
             self._d_max,
         )

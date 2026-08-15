@@ -107,7 +107,7 @@ from .const import (
 from .controller import IrrigationController
 from .services import async_setup_services
 from .unit_convert import LPM_TO_GPH, LPM_TO_LPH
-from .water_balance_model import vwc_to_fraction
+from .water_balance_model import ETModel, ReferenceFrame, vwc_deficit_mm, vwc_to_fraction
 from .zone import Zone as DomainZone
 
 _LOGGER = logging.getLogger(__name__)
@@ -628,7 +628,7 @@ class ETSensor(SensorEntity):
             return
         t = _to_celsius(new_state)
         if t is not None:
-            self._value = max(0.0, self._alpha * (t - self._t_base) / 24)
+            self._value = ETModel.et_hourly(t, alpha=self._alpha, t_base=self._t_base)
         self.async_write_ha_state()
 
     @property
@@ -826,7 +826,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 self.async_write_ha_state()
                 return
 
-            et_h = max(0.0, self._alpha * (t_median - self._t_base) / 24)
+            et_h = ETModel.et_hourly(t_median, alpha=self._alpha, t_base=self._t_base)
             et_dt = et_h * dt_h
             self._deficit = max(0.0, min(self._deficit + et_dt - rain_delta, self._d_max))
             self._broadcast_to_zones(dt_h, et_h, rain_delta)
@@ -883,7 +883,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 vwc,
             )
 
-        self._deficit = max(0.0, (self._field_cap - vwc) * self._root_depth * 1000)
+        self._deficit = max(0.0, vwc_deficit_mm(vwc, field_capacity=self._field_cap, root_depth=self._root_depth))
 
     def _compute_rain_delta(self) -> float:
         """Compute rain increment since last reading.
@@ -966,7 +966,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             return
 
         rain_delta = self._compute_rain_delta()
-        et_dt = max(0.0, self._alpha * (t_median - self._t_base) / 24) * dt_h
+        et_dt = ETModel.et_hourly(t_median, alpha=self._alpha, t_base=self._t_base) * dt_h
         self._deficit = max(0.0, min(self._deficit + et_dt - rain_delta, self._d_max))
 
     async def _backfill_from_recorder(self) -> None:
@@ -1068,7 +1068,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             if kind == "temp":
                 if last_temp is not None:
                     dt_h = (ts - last_time).total_seconds() / 3600.0
-                    et_h = max(0.0, self._alpha * (last_temp - self._t_base) / 24)
+                    et_h = ETModel.et_hourly(last_temp, alpha=self._alpha, t_base=self._t_base)
                     deficit = max(0.0, min(deficit + et_h * dt_h, self._d_max))
                 last_temp = value
                 last_time = ts
@@ -1076,7 +1076,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             elif kind == "rain":
                 if last_temp is not None:
                     dt_h = (ts - last_time).total_seconds() / 3600.0
-                    et_h = max(0.0, self._alpha * (last_temp - self._t_base) / 24)
+                    et_h = ETModel.et_hourly(last_temp, alpha=self._alpha, t_base=self._t_base)
                     deficit = max(0.0, min(deficit + et_h * dt_h, self._d_max))
                     last_time = ts
 
@@ -1261,6 +1261,13 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             microclimate_factor=self._microclimate_factor,
             d_max=self._d_max,
             threshold_mm=self._threshold,
+            # The frame follows the hub's model, not a default. With a soil
+            # probe configured the deficit is a VWC measurement scaled by Kc,
+            # not an ET integration, and a Deficit that says otherwise is the
+            # value object asserting the one thing it exists to prevent. Nothing
+            # reads the frame yet; tagging it correctly now is what stops the
+            # first reader from inheriting a lie.
+            frame=ReferenceFrame.VWC_SYSTEM if dryness_sensor._vwc_sensor else ReferenceFrame.ET,
         )
         # The counters default to "no year recorded"; today's entity starts on
         # the current one, and the published attribute must not become null.

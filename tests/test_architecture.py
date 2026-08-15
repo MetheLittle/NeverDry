@@ -143,6 +143,53 @@ def test_module_declared_inert_is_imported_by_nothing(module):
     )
 
 
+# ── One formula, one home ─────────────────────────────────────────────
+#
+# Wiring a domain object is not finished when the object is called: it is
+# finished when the copy it replaced is gone. Only a test can hold that, and its
+# absence is why three copies of the crop coefficient and two of the settle
+# bookkeeping survived for months.
+#
+# The list grows as each wiring completes — it is a ledger of what has actually
+# been consolidated, not an aspiration. Still outstanding, deliberately: the
+# deficit-to-litres conversion (`volume_liters` on the entity, `water_demand_l`
+# on the Zone) and the seasonal Kc curve, both waiting on the Zone completion.
+
+SINGLE_HOME_FORMULAS = (
+    (r"alpha\s*\*\s*\(", "water_balance_model", "the ET rate"),
+    (r"field_cap\w*\s*-\s*vwc", "water_balance_model", "the VWC deficit"),
+    (r"efficiency\s*/\s*self\s*\.\s*area_m2", "zone", "crediting delivered water"),
+)
+
+
+def _executable_source(module: str) -> str:
+    """Module source with comments and string literals removed.
+
+    A formula named in a docstring is documentation, not a second copy — and
+    every one of these formulas is *described* in prose somewhere on purpose.
+    Only code counts, so the tokens that are not code are dropped.
+    """
+    import io
+    import tokenize
+
+    source = (PACKAGE / f"{module}.py").read_bytes()
+    pieces: list[str] = []
+    for tok in tokenize.tokenize(io.BytesIO(source).readline):
+        if tok.type in (tokenize.STRING, tokenize.COMMENT):
+            continue
+        pieces.append(tok.string)
+    return " ".join(pieces)
+
+
+@pytest.mark.parametrize(("pattern", "home", "what"), SINGLE_HOME_FORMULAS)
+def test_formula_has_a_single_home(pattern, home, what):
+    """The formula may appear in exactly one module's executable code."""
+    import re
+
+    found = sorted(m for m in _integration_modules() if re.search(pattern, _executable_source(m)))
+    assert found == [home], f"{what} should live only in {home}.py, found in {found}"
+
+
 # ── "Mirrors const.py" has to be true ─────────────────────────────────
 
 

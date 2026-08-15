@@ -221,6 +221,11 @@ class Zone:
     # so it is per-zone. Only the clamping mechanism is shared across models.
     d_max: float = DEFAULT_D_MAX
     threshold_mm: float = DEFAULT_THRESHOLD_MM
+    # Which frame this zone's deficit is measured against. It has to be given,
+    # not assumed: a site running on a soil probe produces a VWC_SYSTEM deficit,
+    # and tagging it ET would be the value object asserting the one thing it was
+    # created to make impossible — a number carrying the wrong frame.
+    frame: ReferenceFrame = ReferenceFrame.ET
     deficit: Deficit = field(default=None)  # type: ignore[assignment]
 
     # ── Scheduling ──────────────────────────────────────────────────────────
@@ -242,7 +247,7 @@ class Zone:
         # deficit, which drifts high under per-zone irrigation (reference model
         # D4, GH #123).
         if self.deficit is None:
-            self.deficit = Deficit.zero(ReferenceFrame.ET, d_max=self.d_max, source=self.name)
+            self.deficit = Deficit.zero(self.frame, d_max=self.d_max, source=self.name)
 
     @property
     def cycle_baseline_mm(self) -> float | None:
