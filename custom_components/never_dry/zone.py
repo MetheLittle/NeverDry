@@ -39,8 +39,23 @@ because ``driver.py`` is HA-coupled and this module must not become so;
 other. That is also the first declared interface in the package, which anomaly C1
 notes is otherwise entirely absent.
 
-**Phase 1 — inert scaffold.** Nothing imports this module yet. Wiring
-``IrrigationZoneSensor`` and the controller onto it is a deliberate later phase.
+**Wiring status — storage done, behaviour pending.** ``IrrigationZoneSensor``
+holds a :class:`Zone` and every attribute it used to own is now a property onto
+it, so this class is the single storage of zone state. What has *not* moved is
+the behaviour: the controller still writes the counters field by field at the end
+of a cycle instead of calling :meth:`settle`, and ``reset_deficit`` carries its own
+copy of the year roll. :meth:`settle` and :meth:`mark_irrigated` are therefore
+written but unreached.
+
+That half-way position has a cost worth naming, because it is the reason to finish
+rather than to stop here: two clamping rules coexist. :meth:`credit_delivery`
+clamps into ``[0, d_max]``, while the entity's deficit setter deliberately does not
+— it had to stay compatible with callers that clamp for themselves. Restoring a
+persisted value goes through the setter, so it is not clamped at all.
+
+The wiring status is asserted in ``tests/test_architecture.py``, not only stated
+here: this paragraph claimed the module was inert for two releases after it
+stopped being so.
 
 References: ``docs/design_domain_object_model.md`` (the domain classes, the
 translation chain, ``Zone.placement``, per-zone ``D_max``),
