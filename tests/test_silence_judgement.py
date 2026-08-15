@@ -154,18 +154,38 @@ class TestWholeFleetSituations:
 
 
 class TestSilenceFloor:
-    def test_scales_with_how_often_the_fleet_speaks(self):
-        assert silence_floor([10 * MINUTE, 10 * MINUTE, 12 * MINUTE]) == 30 * MINUTE
+    """The floor comes from the upper tail, because reporting is bursty."""
 
-    def test_a_chatty_mesh_gets_a_small_floor(self):
-        assert silence_floor([30.0, 30.0, 30.0]) == 90.0
+    def test_bursty_reporting_is_not_described_by_its_median(self):
+        """The measurement that decided this, in miniature.
+
+        A live fleet gave a median gap of one minute and legitimate silences of
+        many hours: a floor on the median would have been three minutes and
+        would have called every sleeping valve dead.
+        """
+        bursty = [1 * MINUTE] * 40 + [9 * HOUR, 12 * HOUR, 16 * HOUR]
+        floor = silence_floor(bursty)
+        assert floor >= 9 * HOUR
+
+    def test_a_genuinely_regular_fleet_gets_a_tight_floor(self):
+        intervals = [10 * MINUTE] * 40
+        assert silence_floor(intervals) == 10 * MINUTE
+
+    def test_below_the_sample_size_the_longest_seen_is_used(self):
+        """A quantile over four points is a fiction; the longest real one is not."""
+        assert silence_floor([1 * MINUTE, 2 * MINUTE, 3 * HOUR]) == 3 * HOUR
+
+    def test_the_value_returned_actually_occurred(self):
+        """Nearest-rank, not interpolated: no invented number becomes a threshold."""
+        intervals = [float(i) for i in range(1, 101)]
+        assert silence_floor(intervals) in intervals
 
     def test_no_observation_means_no_derived_floor(self):
         assert silence_floor([]) is None
 
     def test_zero_and_negative_intervals_are_ignored(self):
         """A restart can produce a zero delta; it says nothing about cadence."""
-        assert silence_floor([0.0, -5.0, 10 * MINUTE, 10 * MINUTE]) == 30 * MINUTE
+        assert silence_floor([0.0, -5.0, 10 * MINUTE, 30 * MINUTE]) == 30 * MINUTE
 
     def test_only_unusable_values_means_none(self):
         assert silence_floor([0.0, 0.0]) is None

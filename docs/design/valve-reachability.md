@@ -26,20 +26,96 @@ There is a second, milder version of the same failure: the user presses
 times over about fifty seconds and then blocks the zone. That one is now visible
 too — see *Two signals* below.
 
+## Which entity does NeverDry even look at?
+
+Before asking *what* to measure, there is the question of *where*. In another
+installation NeverDry knows only what the user typed into the config flow:
+
+| Field | Required | |
+|---|---|---|
+| `valve` | **yes**, for any zone that irrigates | the on/off switch |
+| `battery_sensor` | no | |
+| `flow_meter_sensor` | no | |
+
+Everything else has to be **derived**, and it can be, using only Home Assistant
+core — no knowledge of Sonoff, Zigbee or any integration:
+
+```
+zone.valve (entity_id) → entity registry → device_id
+                       → device registry → every entity of that device
+```
+
+The point is that we never need to know *what* those entities are. We are not
+hunting for "the battery" or "the link quality": **any** entity of that device
+reporting is proof the device is on the mesh. The union is the signal; its
+members are irrelevant. This is the same discovery `_discover_hw_max_duration`
+already uses to find the on-device timer.
+
+It degrades cleanly:
+
+- **a switch with no device** (template or YAML switches) — no `device_id`, so
+  the union is the configured switch alone. Less signal, no error;
+- **a device with one entity** — same, with no special case to write;
+- **a multi-valve controller** — and this one is a real limit, not a degradation.
+  Four zones on one physical controller share one device, so they share one
+  union and therefore one freshness *by construction*. The sibling comparison
+  says nothing per valve; at best it says whether the controller is alive. A
+  large share of installations are like this (see the reporter on
+  [#173](https://github.com/never-dry/NeverDry/issues/173), whose four zones sit
+  behind one `drip_controller`). Written down here rather than discovered by a
+  user.
+
+For the cases where derivation is not enough, the escape is an optional per-zone
+*availability entity* binding — `Driver` already takes `availability_entity`,
+today not configurable anywhere. Derive first, ask only when derivation fails;
+never the other way round.
+
 ## Why one valve cannot be asked
 
 Every direct question has an unusable answer:
 
 | Question | Why it fails |
 |---|---|
-| Is the entity `unavailable`? | No: it reports a stale `off` indefinitely. |
-| Has it been quiet for more than N minutes? | Every mesh has its own cadence; no single N is right for a chatty valve and a sleepy one, and asking the user to pick it is asking them to guess. |
-| What does the recorder say about its cadence? | Nothing usable. The recorder stores state *changes*; a device re-reporting the same value writes no row. Measured on the live instance: 15–20 points in 24 h, median gap 0.9 min — all of them clustered around our own restarts, with an 18-hour hole in between. |
-| Is `last_seen` set? | Zigbee2MQTT 2.x publishes it to MQTT but nothing surfaces it in Home Assistant: the entities carry no raw payload attributes, and discovery creates no `last_seen` sensor. It would also require every user to change a Zigbee2MQTT default, would be undetectable when they had not, and would leave ZHA, Matter and Wi-Fi valves with nothing. |
+| Is the entity `unavailable`? | Eventually, yes — but the timeout a coordinator applies to a *battery* device is measured in days, so not on the timescale of tonight's watering. |
+| Has it been quiet for more than N minutes? | Every mesh has its own cadence; no single N suits a chatty valve and a sleepy one, and asking the user to pick it is asking them to guess. |
+| Is `last_seen` set? | Zigbee2MQTT 2.x publishes it to MQTT but nothing surfaces it in Home Assistant: entities carry no raw payload attributes and discovery creates no `last_seen` sensor. It would also require every user to change a Zigbee2MQTT default, would be undetectable when they had not, and would leave ZHA, Matter and Wi-Fi valves with nothing. |
 
 What *is* available on every entity, in every integration, with nothing to
 enable: **`last_reported`** — when Home Assistant last received a state write,
 whether or not the value changed. That is the raw material.
+
+## What the measurements actually said
+
+Four attempts on the live instance before the data was read correctly. All four
+failed the same way — **aggregating entities that measure something else** — and
+they are recorded here so the dead ends are not walked again.
+
+1. **"The recorder cannot give us cadence."** Measured `switch.*` and
+   `sensor.*_battery` only: 15–20 points in 24 h, clustered around our own
+   restarts. Concluded the recorder stores nothing useful. Wrong — those are two
+   entities out of twenty-one, and the only two that almost never change.
+2. **"The valve is alive, it reports every two minutes."** Swept everything
+   matching the zone name: ~2000 points, median gap 2 min. Wrong — the traffic
+   was **NeverDry's own sensors** (`duration`, `volume`, `deficit`), driven by our
+   ET broadcast. They live on the NeverDry *zone* device, not the manufacturer's,
+   so filtering by device rather than by name excludes them by construction.
+3. **"The quiet valve talks a third as often as its siblings."** 15 distinct
+   contact moments against 53. Wrong — the busy zones had simply *irrigated* more,
+   moving their irrigation counters. That measured watering activity, not mesh
+   health.
+4. **"The floor is `median × 3`."** Wrong for this data. Reporting is **bursty**:
+   several messages a minute apart while the device is awake, then a long sleep.
+   Measured across the fleet: median gap **1 minute**, longest legitimate silence
+   **9 to 16 hours**. A floor on the median is three minutes and calls every
+   sleeping valve dead. The floor has to come from the upper tail.
+
+Two findings survived, both from the configured switch alone:
+
+- it **does** go `unavailable` sometimes, so the coordinator's availability
+  tracking is real — just slow;
+- over 24 h the failing valve **never went `on`**, while its three siblings did.
+  A zone whose valve has not opened in a day, in watering season, is a signal in
+  its own right, needs only the mandatory entity, and is free from the recorder.
 
 ## The rule
 
@@ -53,8 +129,9 @@ threshold = max(reference + k·spread, floor)
 silent    = silence > threshold
 ```
 
-with `k = 3` and the floor derived from observed cadence, not set in minutes:
-`floor = median(observed inter-report intervals) × 3`.
+with `k = 3` and the floor derived from observed cadence rather than set in
+minutes: a high quantile (p95, nearest-rank) of the intervals actually seen
+between messages.
 
 Three properties follow from the shape, without special cases:
 
@@ -126,10 +203,38 @@ is always wrong here: the thing being detected *is* an outlier, so an estimator 
 single wild value can inflate will hide it. The MAD is its robust counterpart and
 keeps the intuition — level plus dispersion — intact.
 
-The floor keeps `median × 3` rather than `median + k·MAD`, deliberately: it
-answers "how long is quiet still normal", which is a multiple of the usual
-cadence, not a level plus a spread. Symmetry for its own sake would make it
-tighter than a single normal interval.
+The floor is a **high quantile** of observed intervals (nearest-rank, so the
+threshold is a value that genuinely occurred) rather than a multiple of any
+central estimator. It answers a different question — "how long is quiet still
+normal" — and on bursty reporting the middle describes the burst, not the sleep.
+Below twenty observations a quantile is a fiction and the longest silence
+actually seen is used instead.
+
+## Passive is a backstop; the probe is the answer
+
+The measurements above settle the ambition. Legitimate silence on this fleet
+reaches **9 to 16 hours**. To avoid false positives the floor has to sit up
+there, and by then a valve that died in the morning has already missed the
+evening watering. Passive silence therefore answers a slower question — *this
+valve has been gone for more than a day* — which is worth saying but is not the
+question that matters.
+
+The question that matters is *will this valve answer tonight*, and the only
+portable way to answer it is to **ask**:
+
+- a few minutes before a scheduled run, send an idempotent command —
+  `switch.turn_off` on an already-closed valve is a round trip on the radio and
+  no physical action;
+- watch whether **anything in the device's union** reports within a few seconds;
+- answered → live; nothing → warn *now*, while there is still time to act.
+
+The union does double duty: it is how the entity is found and how the probe is
+confirmed. And it is battery-friendly, because it wakes a valve a few times a
+day rather than every few minutes — which is exactly why a periodic liveness
+poll is the wrong shape and a pre-run probe is the right one.
+
+`Driver.async_ping` is where this belongs; it exists and today falls back to
+reading the actuator's own state, which is the same blind check that fails here.
 
 ## Honest limits
 

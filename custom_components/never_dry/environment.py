@@ -49,6 +49,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from math import ceil
 from statistics import median
 
 # Defaults mirror ``const.py`` so an Environment built with no overrides behaves
@@ -71,7 +72,15 @@ DEFAULT_MIN_PEERS: int = 2
 #: The floor is derived from how often the fleet normally speaks, not set in
 #: minutes: a mesh that reports every 30 s and one that reports every two hours
 #: deserve different floors, and neither should have to be configured.
-DEFAULT_FLOOR_MULTIPLE: float = 3.0
+#: It comes from the *upper tail* of observed intervals rather than the middle,
+#: because real reporting is bursty: measured on a live Zigbee fleet, the median
+#: gap between messages was 1 minute and the longest legitimate silence between
+#: bursts was 9 to 16 hours. A floor built on the median would be three minutes
+#: and would fire continuously.
+DEFAULT_FLOOR_QUANTILE: float = 0.95
+#: Below this many observations a quantile is a fiction; the longest silence
+#: actually seen is the honest answer.
+MIN_INTERVALS_FOR_QUANTILE: int = 20
 
 
 class SensorKind(StrEnum):
@@ -292,18 +301,35 @@ class SilenceVerdict:
         return self.status is Reachability.SILENT
 
 
-def silence_floor(intervals_s: Sequence[float], *, multiple: float = DEFAULT_FLOOR_MULTIPLE) -> float | None:
-    """Derive the "quiet is normal up to here" floor from observed cadence.
+def silence_floor(
+    intervals_s: Sequence[float],
+    *,
+    quantile: float = DEFAULT_FLOOR_QUANTILE,
+    min_observations: int = MIN_INTERVALS_FOR_QUANTILE,
+) -> float | None:
+    """Derive the "quiet is still normal up to here" floor from observed cadence.
 
-    ``intervals_s`` is how long the fleet normally goes between messages. The
-    floor is a multiple of the median of those, so it scales with the mesh
-    instead of being a constant somebody has to guess. ``None`` when there is
-    no observation to derive it from — the caller must then supply its own.
+    ``intervals_s`` is how long the fleet actually goes between messages. The
+    floor is a **high quantile** of those, not a multiple of the middle, because
+    device reporting is bursty rather than periodic: several messages a minute
+    apart while the device is awake, then hours of legitimate sleep. Measured on
+    a live Zigbee fleet of four valves over 24 h — median gap 1 minute, longest
+    gap between bursts 9 to 16 hours. A floor of ``median x 3`` would have been
+    three minutes, and would have called every sleeping valve dead.
+
+    Below ``min_observations`` a quantile is a fiction, so the longest silence
+    actually observed is used: it is the honest "this much quiet has happened
+    and was fine". ``None`` when there is nothing to derive it from.
     """
-    usable = [i for i in intervals_s if i > 0]
+    usable = sorted(i for i in intervals_s if i > 0)
     if not usable:
         return None
-    return median(usable) * multiple
+    if len(usable) < min_observations:
+        return usable[-1]
+    # Nearest-rank percentile: no interpolation, so the value returned is one
+    # that genuinely occurred rather than an average of two that did not.
+    rank = max(1, ceil(quantile * len(usable)))
+    return usable[min(rank, len(usable)) - 1]
 
 
 def mad(values: Sequence[float]) -> float:
