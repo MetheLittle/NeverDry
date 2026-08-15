@@ -121,13 +121,29 @@ BINDING_BY_KIND: dict[SensorKind, str] = {
 class RainSensorType(StrEnum):
     """How the rain binding reports, which decides how a delta is derived.
 
-    Mirrors ``const.py``. Carried here because it is a property of the *feed*,
-    not of any zone: it says how to read the sensor, not what to do with it.
+    Mirrors ``const.py`` — and the values matter, because this scaffold used to
+    declare three (``cumulative`` / ``rolling`` / ``event``) against the two the
+    integration actually ships. That third distinction was not an omission on
+    the shipped side: it was **deliberately removed**.
+
+    Telling a midnight-reset total from a rolling 24-hour window required
+    guessing from the shape of the readings, and the guess was wrong in both
+    directions — it wiped deficits at 05:00 under clear skies on a rolling
+    sensor, and dropped legitimate overnight rain on a true daily total (GH
+    #123). The replacement needs no guess: on **any** accumulator, credit only
+    the positive increment between readings. A decrease is never precipitation,
+    whatever produced it — a reset, a window ageing out, a glitch.
+
+    So there are two ways a sensor reports, not three: the value *is* the rain
+    (``EVENT``), or the value accumulates it (``DAILY_TOTAL``, whose name is
+    historical — the rule covers every accumulator).
+
+    Carried here because it is a property of the *feed*, not of any zone: it
+    says how to read the sensor, not what to do with it.
     """
 
-    CUMULATIVE = "cumulative"
-    ROLLING = "rolling"
     EVENT = "event"
+    DAILY_TOTAL = "daily_total"
 
 
 @dataclass(frozen=True)

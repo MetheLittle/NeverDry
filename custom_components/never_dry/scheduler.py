@@ -37,8 +37,12 @@ from enum import StrEnum
 
 from .zone import Zone
 
-#: Minimum gap between two service calls with the same key. Mirrors ``const.py``.
-DEFAULT_MIN_SERVICE_INTERVAL_S: int = 5
+#: Minimum gap between two service calls with the same key. Mirrors
+#: ``const.MIN_SERVICE_INTERVAL_S``, and the mirror is checked by
+#: ``tests/test_architecture.py`` — this constant said 5 against the shipped 10
+#: until that test was written, which would have halved the throttle the day the
+#: scheduler was wired.
+DEFAULT_MIN_SERVICE_INTERVAL_S: int = 10
 
 
 class Trigger(StrEnum):

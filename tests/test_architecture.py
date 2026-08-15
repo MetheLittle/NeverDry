@@ -143,6 +143,69 @@ def test_module_declared_inert_is_imported_by_nothing(module):
     )
 
 
+# ── "Mirrors const.py" has to be true ─────────────────────────────────
+
+
+def test_domain_enums_mirror_const():
+    """A scaffold that says it mirrors ``const.py`` must actually mirror it.
+
+    ``RainSensorType`` declared three values against the two the integration
+    ships. The missing third was not an oversight on the shipped side: telling a
+    midnight-reset total from a rolling window was removed deliberately, because
+    guessing between them wiped deficits at 05:00 on one and dropped overnight
+    rain on the other (GH #123). A scaffold still offering the choice would have
+    reintroduced the bug the day it was wired.
+    """
+    from never_dry.const import (
+        IRRIGATION_MODE_MANUAL,
+        IRRIGATION_MODE_REACTIVE,
+        IRRIGATION_MODE_SCHEDULED,
+        RAIN_TYPE_DAILY_TOTAL,
+        RAIN_TYPE_EVENT,
+    )
+    from never_dry.environment import RainSensorType
+    from never_dry.zone import IrrigationMode
+
+    assert {t.value for t in RainSensorType} == {RAIN_TYPE_EVENT, RAIN_TYPE_DAILY_TOTAL}
+    assert {m.value for m in IrrigationMode} == {
+        IRRIGATION_MODE_MANUAL,
+        IRRIGATION_MODE_REACTIVE,
+        IRRIGATION_MODE_SCHEDULED,
+    }
+
+
+@pytest.mark.parametrize(
+    ("domain_module", "domain_name", "const_name"),
+    [
+        ("zone", "DEFAULT_EFFICIENCY", "DEFAULT_EFFICIENCY"),
+        ("zone", "DEFAULT_THRESHOLD_MM", "DEFAULT_THRESHOLD"),
+        ("zone", "DEFAULT_MICROCLIMATE_FACTOR", "DEFAULT_MICROCLIMATE_FACTOR"),
+        ("water_balance_model", "DEFAULT_ALPHA", "DEFAULT_ALPHA"),
+        ("water_balance_model", "DEFAULT_T_BASE", "DEFAULT_T_BASE"),
+        ("water_balance_model", "DEFAULT_D_MAX", "DEFAULT_D_MAX"),
+        ("water_balance_model", "DEFAULT_FIELD_CAPACITY", "DEFAULT_FIELD_CAPACITY"),
+        ("water_balance_model", "DEFAULT_ROOT_DEPTH", "DEFAULT_ROOT_DEPTH"),
+        ("water_balance_model", "DEFAULT_KC", "DEFAULT_KC"),
+        ("environment", "DEFAULT_BACKFILL_DAYS", "DEFAULT_BACKFILL_DAYS"),
+        ("scheduler", "DEFAULT_MIN_SERVICE_INTERVAL_S", "MIN_SERVICE_INTERVAL_S"),
+    ],
+)
+def test_domain_defaults_mirror_const(domain_module, domain_name, const_name):
+    """The pure modules keep their own copies so they stay importable alone.
+
+    Copies drift. These are the ones that claim to be copies, checked against
+    the originals — a one-line guard against a whole class of silent divergence.
+    """
+    import importlib
+
+    from never_dry import const
+
+    mod = importlib.import_module(f"never_dry.{domain_module}")
+    assert getattr(mod, domain_name) == getattr(const, const_name), (
+        f"{domain_module}.{domain_name} has drifted from const.{const_name}"
+    )
+
+
 @pytest.mark.parametrize("module", sorted(WIRED))
 def test_a_wired_module_does_not_claim_to_be_inert(module):
     """Its docstring has to agree with its status.
