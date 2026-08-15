@@ -39,19 +39,25 @@ because ``driver.py`` is HA-coupled and this module must not become so;
 other. That is also the first declared interface in the package, which anomaly C1
 notes is otherwise entirely absent.
 
-**Wiring status — storage done, behaviour pending.** ``IrrigationZoneSensor``
-holds a :class:`Zone` and every attribute it used to own is now a property onto
-it, so this class is the single storage of zone state. What has *not* moved is
-the behaviour: the controller still writes the counters field by field at the end
-of a cycle instead of calling :meth:`settle`, and ``reset_deficit`` carries its own
-copy of the year roll. :meth:`settle` and :meth:`mark_irrigated` are therefore
-written but unreached.
+**Wiring status — storage and settling done, two behaviours left.**
+``IrrigationZoneSensor`` holds a :class:`Zone` and every attribute it used to own
+is a property onto it, so this class is the single storage of zone state. Both
+settle paths in the controller — the commanded partial delivery and the manual
+session — now call :meth:`settle` instead of writing seven counter fields each.
+That closed a divergence the two copies had grown: only one of them rolled the
+yearly total on a new year.
 
-That half-way position has a cost worth naming, because it is the reason to finish
-rather than to stop here: two clamping rules coexist. :meth:`credit_delivery`
-clamps into ``[0, d_max]``, while the entity's deficit setter deliberately does not
-— it had to stay compatible with callers that clamp for themselves. Restoring a
-persisted value goes through the setter, so it is not clamped at all.
+Still outside: the **full**-delivery branch, which calls ``reset_deficit`` because
+it clears the deficit to *exactly* zero, and :meth:`settle` does not — it credits,
+and a full delivery lands near zero rather than on it. Reconciling those two
+semantics is its own decision, not a mechanical move. :meth:`mark_irrigated` is
+written and still unreached for the same reason.
+
+The other cost of stopping half-way, worth naming because it is the argument for
+finishing: two clamping rules coexist. :meth:`credit_delivery` clamps into
+``[0, d_max]``, while the entity's deficit setter deliberately does not — it had to
+stay compatible with callers that clamp for themselves. Restoring a persisted
+value goes through the setter, so it is not clamped at all.
 
 The wiring status is asserted in ``tests/test_architecture.py``, not only stated
 here: this paragraph claimed the module was inert for two releases after it

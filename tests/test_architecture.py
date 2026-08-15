@@ -153,6 +153,4 @@ def test_a_wired_module_does_not_claim_to_be_inert(module):
     """
     source = (PACKAGE / f"{module}.py").read_text(encoding="utf-8")
     docstring = ast.get_docstring(ast.parse(source)) or ""
-    assert INERT_CLAIM not in docstring, (
-        f"{module}.py is wired but its docstring still says {INERT_CLAIM!r}"
-    )
+    assert INERT_CLAIM not in docstring, f"{module}.py is wired but its docstring still says {INERT_CLAIM!r}"

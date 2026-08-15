@@ -727,18 +727,25 @@ class IrrigationController:
                 # ``delivered`` volume because flow-metered modes deplete the
                 # deficit in real time, so volume_liters would read ~0 here.
                 zone.reset_deficit(self._current_source or "automatic", delivered_liters=delivered)
+                # Not yet the zone's own: reset_deficit clears the deficit to
+                # exactly zero, which settle() does not do — it credits, and a
+                # full delivery lands near zero rather than on it. The two
+                # semantics still need reconciling before this branch can move.
+                zone._last_session_duration_s = round((ts_end - ts_start).total_seconds())
             else:
-                # Partial irrigation — authoritative recompute from snapshot
+                # Partial irrigation — the zone settles itself. It credits the
+                # delivery against its own cycle snapshot (the same value as
+                # ``deficit_at_start``, see _irrigate_zones), moves every counter
+                # and stamps the session in one call. Writing those seven fields
+                # from here is what let the yearly total miss a new year: this
+                # branch never rolled it, only the full-delivery one did.
                 all_complete = False
-                # The zone credits it against its own cycle snapshot, which is
-                # the same value as ``deficit_at_start`` (see _irrigate_zones).
-                zone.credit_delivery(delivered)
-                zone._last_volume_delivered = round(delivered, 1)
-                zone._session_water_delivered = round(delivered, 1)
-                zone._total_water_delivered += delivered
-                zone._yearly_water_delivered += delivered
-                zone._last_irrigated = datetime.now()
-                zone._last_irrigation_source = self._current_source or "automatic"
+                zone.settle_cycle(
+                    delivered,
+                    source=self._current_source or "automatic",
+                    at=datetime.now(),
+                    duration_s=round((ts_end - ts_start).total_seconds()),
+                )
                 _LOGGER.info(
                     "Partial irrigation: zone='%s', delivered=%.1fL/%.1fL, deficit reduced to %.2fmm",
                     zone_name,
@@ -746,7 +753,6 @@ class IrrigationController:
                     target,
                     zone._zone_deficit,
                 )
-            zone._last_session_duration_s = round((ts_end - ts_start).total_seconds())
             zone._deficit_at_irrigation_start = None
             zone.async_write_ha_state()
             self._log_session_result(
@@ -1448,15 +1454,12 @@ class IrrigationController:
             )
 
         if delivered_liters > 0 and zone._area > 0:
-            # No cycle was opened on this path, so the zone credits against its
-            # current deficit — which is what this site did explicitly before.
-            zone.credit_delivery(delivered_liters)
-            zone._last_irrigation_source = "manual"
-            zone._last_irrigated = ts_end
-            zone._last_volume_delivered = round(delivered_liters, 1)
-            zone._session_water_delivered = round(delivered_liters, 1)
-            zone._total_water_delivered += delivered_liters
-            zone._yearly_water_delivered += delivered_liters
+            # Same call as the commanded path: no cycle was opened here, so the
+            # zone credits against its current deficit rather than a snapshot —
+            # that distinction lives inside credit_delivery, which is the whole
+            # reason the arithmetic belongs to the zone and not to two callers
+            # that had drifted apart.
+            zone.settle_cycle(delivered_liters, source="manual", at=ts_end, duration_s=round(elapsed_s))
             _LOGGER.info(
                 "Manual irrigation accounted: zone='%s', delivered=%.1fL, new deficit=%.2fmm",
                 zone_name,
@@ -1475,6 +1478,9 @@ class IrrigationController:
         )
         if session_meta is not None:
             ts_start, deficit_pre = session_meta
+            # settle_cycle already wrote this when there was water to credit;
+            # this covers the session that delivered nothing measurable and so
+            # never reached it, and still has a duration worth reporting.
             zone._last_session_duration_s = round(elapsed_s)
             self._log_session_result(
                 zone_name=zone_name,
