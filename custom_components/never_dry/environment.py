@@ -46,8 +46,10 @@ quantity), GH #146 (site exposure, the per-zone counterpart to this object).
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from statistics import median
 
 # Defaults mirror ``const.py`` so an Environment built with no overrides behaves
 # exactly like today's system sensor. Kept as module constants (not a HA import)
@@ -56,6 +58,18 @@ DEFAULT_LATITUDE: float = 45.0
 DEFAULT_BACKFILL_DAYS: int = 90
 DEFAULT_RAIN_DELAY_THRESHOLD: float = 0.60
 DEFAULT_RAIN_DELAY_HOURS: float = 12.0
+
+# ── Silence judgement: how quiet is too quiet ───────────────────────────────
+#: How far past the peer reference a valve must be before it is called silent.
+DEFAULT_SILENCE_FACTOR: float = 2.0
+#: Fewer peers than this and there is nothing to compare against. Two is the
+#: real minimum: with one peer the "median" is that peer, which is still a
+#: usable reference, but with none there is no reference at all.
+DEFAULT_MIN_PEERS: int = 2
+#: The floor is derived from how often the fleet normally speaks, not set in
+#: minutes: a mesh that reports every 30 s and one that reports every two hours
+#: deserve different floors, and neither should have to be configured.
+DEFAULT_FLOOR_MULTIPLE: float = 3.0
 
 
 class SensorKind(StrEnum):
@@ -217,3 +231,128 @@ class Environment:
     def yearly_rain_liters(self, area_m2: float) -> float:
         """Project the yearly rain onto an area: 1 mm over 1 m² is 1 litre."""
         return self.yearly_rain_mm * area_m2
+
+
+# ── Is this valve unusually quiet? ──────────────────────────────────────────
+#
+# A valve that drops off the radio mesh keeps reporting a perfectly ordinary
+# "off": nothing in its own state says it is gone, and the availability timeout
+# a Zigbee coordinator applies to a battery device is measured in *days*,
+# because a sleeping valve is supposed to be quiet. So the question cannot be
+# answered by looking at one valve.
+#
+# It can be answered by looking at the others. "Has this one been quiet for N
+# minutes" needs an N nobody can choose well; "is this one unusually quiet
+# compared to its siblings" needs no N at all, and self-calibrates: when the
+# whole mesh goes quiet at night the reference moves with it, and right after a
+# restart everything is fresh together so nobody is accused.
+#
+# This lives at site level rather than on the zone because no valve can judge
+# itself — the comparison *is* the measurement.
+
+
+class Reachability(StrEnum):
+    """What the silence of one actuator, seen against its peers, tells us.
+
+    Three values rather than a boolean, because "we cannot tell" is a real and
+    common answer — one valve configured, or a fleet too small to compare — and
+    collapsing it into "fine" is how a warning system loses its meaning. Absence
+    of evidence is not evidence of absence.
+    """
+
+    LIVE = "live"
+    SILENT = "silent"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class SilenceVerdict:
+    """The judgement on one actuator, with the numbers it was reached from.
+
+    Carries ``reference_s`` and ``threshold_s`` so the reason can be shown
+    rather than asserted: "quiet for three hours while the others last spoke
+    four minutes ago" is actionable, "not responding" alone is not.
+    """
+
+    status: Reachability
+    silence_s: float
+    reference_s: float | None = None
+    threshold_s: float | None = None
+
+    @property
+    def is_silent(self) -> bool:
+        """``True`` only on a positive finding — ``UNKNOWN`` is not a fault."""
+        return self.status is Reachability.SILENT
+
+
+def silence_floor(intervals_s: Sequence[float], *, multiple: float = DEFAULT_FLOOR_MULTIPLE) -> float | None:
+    """Derive the "quiet is normal up to here" floor from observed cadence.
+
+    ``intervals_s`` is how long the fleet normally goes between messages. The
+    floor is a multiple of the median of those, so it scales with the mesh
+    instead of being a constant somebody has to guess. ``None`` when there is
+    no observation to derive it from — the caller must then supply its own.
+    """
+    usable = [i for i in intervals_s if i > 0]
+    if not usable:
+        return None
+    return median(usable) * multiple
+
+
+def judge_silence(
+    silence_s: float,
+    peer_silences: Sequence[float],
+    *,
+    floor_s: float,
+    factor: float = DEFAULT_SILENCE_FACTOR,
+    min_peers: int = DEFAULT_MIN_PEERS,
+) -> SilenceVerdict:
+    """Judge one actuator's silence against its peers'.
+
+    ``peer_silences`` must **exclude** the actuator being judged. That is not a
+    detail: with two valves and the dead one left in, the median sits halfway
+    between healthy and dead, the dead valve drags up its own reference and
+    acquits itself. Leaving it out keeps the reference honest however small the
+    fleet.
+
+    Both conditions have to hold. The factor asks "unusual for this fleet"; the
+    floor stops a tiny reference from making ordinary jitter look like a fault —
+    twice a median of two minutes is four minutes, which any valve can exceed by
+    simply reporting a little late.
+    """
+    if len(peer_silences) < min_peers:
+        return SilenceVerdict(Reachability.UNKNOWN, silence_s)
+    reference = median(peer_silences)
+    threshold = max(factor * reference, floor_s)
+    status = Reachability.SILENT if silence_s > threshold else Reachability.LIVE
+    return SilenceVerdict(status, silence_s, reference_s=reference, threshold_s=threshold)
+
+
+def judge_fleet(
+    silences: Mapping[str, float],
+    *,
+    floor_s: float,
+    factor: float = DEFAULT_SILENCE_FACTOR,
+    min_peers: int = DEFAULT_MIN_PEERS,
+) -> dict[str, SilenceVerdict]:
+    """Judge every actuator against the others, leaving each out of its own reference.
+
+    ``silences`` maps an actuator id to how long it has been quiet, in seconds —
+    supplied at runtime by whatever drives that actuator, which is the only
+    layer that knows when its entity last reported.
+
+    When the whole mesh falls over, every silence rises together, the reference
+    rises with them and nobody is singled out. That is the right answer: it is
+    not a fault *of a valve*, and a coordinator that has gone away is its own
+    signal, reported elsewhere.
+    """
+    return {
+        name: judge_silence(
+            silence,
+            [s for other, s in silences.items() if other != name],
+            floor_s=floor_s,
+            factor=factor,
+            min_peers=min_peers,
+        )
+        for name, silence in silences.items()
+    }
