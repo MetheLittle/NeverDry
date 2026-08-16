@@ -309,26 +309,39 @@ class TestCapabilityMatch:
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
         assert isinstance(build_model(env, method_id="hargreaves"), HargreavesModel)
 
-    def test_declaring_the_sensors_is_not_enough_while_the_input_cannot_be_built(self):
+    def test_declaring_the_sensors_is_not_enough_if_the_input_cannot_be_built(self):
         """Two conditions, and this is the one that is easy to forget.
 
-        A site can declare everything Penman-Monteith requires and still not be
-        offered it, because nothing yet builds the reading it consumes. Offering
-        it would produce a model that raises on its first update — selectable
-        and not runnable, which is worse than absent.
+        Every catalogued model is runnable today, so the rule is checked against
+        a model that is not. It is worth keeping: a written-and-tested class
+        whose reading nothing produces is *selectable and not runnable*, which
+        is worse than absent — it builds, and then raises on every update. That
+        happened twice, on a live instance, before this existed.
         """
-        from never_dry.environment import Environment
-        from never_dry.water_balance_model import PenmanMonteithModel, models_offered_by
+        from dataclasses import dataclass
 
-        env = Environment(
-            temperature_sensor="sensor.t",
-            rain_sensor="sensor.r",
-            humidity_sensor="sensor.h",
-            wind_speed_sensor="sensor.w",
-            net_radiation_sensor="sensor.rad",
-        )
-        assert env.satisfies(PenmanMonteithModel.required_sensors)
-        assert PenmanMonteithModel not in models_offered_by(env)
+        from never_dry.environment import Environment
+        from never_dry.water_balance_model import ETModel, models_offered_by
+
+        @dataclass(frozen=True)
+        class UnbuildableReading:
+            dt_h: float
+
+        class NotFedByAnyone(ETModel):
+            method_id = "not_fed"
+            input_type = UnbuildableReading
+
+        env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
+        assert env.satisfies(NotFedByAnyone.required_sensors)
+
+        import never_dry.water_balance_model as wbm
+
+        original = wbm.MODEL_CATALOGUE
+        wbm.MODEL_CATALOGUE = (*original, NotFedByAnyone)
+        try:
+            assert NotFedByAnyone not in models_offered_by(env)
+        finally:
+            wbm.MODEL_CATALOGUE = original
 
     def test_a_probe_wins_over_the_weather_tiers(self):
         """A measured soil is better evidence than an estimate, so it leads the order."""
@@ -507,3 +520,70 @@ class TestDiurnalRange:
         for h in range(24):
             tracker.observe(h, 15.0 + 8.0 * (h % 12) / 12.0)
         assert not tracker.is_implausible()
+
+
+class TestNetRadiation:
+    """Rn is computed, never asked for — and the two halves pull opposite ways."""
+
+    def _ra(self, doy=196, lat=45.0):
+        from never_dry.water_balance_model import HargreavesModel
+
+        return HargreavesModel.extraterrestrial_radiation(doy, lat)
+
+    def test_a_bright_day_keeps_most_of_what_arrives(self):
+        from never_dry.water_balance_model import net_radiation_mj
+
+        ra = self._ra()
+        rn = net_radiation_mj(solar_mj=0.75 * ra, ra_mj=ra, tmax_c=31.0, tmin_c=19.0, rh_pct=50.0)
+        assert 0.4 * ra < rn < 0.7 * ra
+
+    def test_an_overcast_day_keeps_less(self):
+        """Same site, same day, a third of the radiation: the balance must follow."""
+        from never_dry.water_balance_model import net_radiation_mj
+
+        ra = self._ra()
+        bright = net_radiation_mj(solar_mj=0.75 * ra, ra_mj=ra, tmax_c=31.0, tmin_c=19.0, rh_pct=50.0)
+        dull = net_radiation_mj(solar_mj=0.25 * ra, ra_mj=ra, tmax_c=24.0, tmin_c=20.0, rh_pct=85.0)
+        assert dull < bright
+
+    def test_dry_air_loses_more_to_the_sky(self):
+        """Water vapour is what sends the ground's heat back; without it, more escapes."""
+        from never_dry.water_balance_model import net_radiation_mj
+
+        ra = self._ra()
+        humid = net_radiation_mj(solar_mj=0.7 * ra, ra_mj=ra, tmax_c=30.0, tmin_c=18.0, rh_pct=80.0)
+        dry = net_radiation_mj(solar_mj=0.7 * ra, ra_mj=ra, tmax_c=30.0, tmin_c=18.0, rh_pct=20.0)
+        assert dry < humid
+
+    def test_the_ground_never_appears_to_gain_radiation_at_night(self):
+        """Found by this test: with Rs at zero the bracket turned negative and the
+        balance came out *positive* — the soil warming itself from a colder sky.
+
+        FAO-56 defines the cloudiness ratio over a day; fed an instantaneous zero
+        it breaks. The loss is floored at zero instead: neutralised, never
+        reversed. Night-time cooling therefore goes uncredited, which understates
+        nothing that matters — evapotranspiration at night is near zero anyway.
+        """
+        from never_dry.water_balance_model import net_radiation_mj
+
+        ra = self._ra()
+        rn = net_radiation_mj(solar_mj=0.0, ra_mj=ra, tmax_c=25.0, tmin_c=15.0, rh_pct=60.0)
+        assert rn <= 0.0
+
+    def test_a_site_without_a_pyranometer_estimates_the_radiation(self):
+        """The fallback: the same diurnal range, used to produce a radiation."""
+        from never_dry.water_balance_model import solar_radiation_from_range
+
+        ra = self._ra()
+        clear = solar_radiation_from_range(ra, tmax_c=32.0, tmin_c=16.0)
+        cloudy = solar_radiation_from_range(ra, tmax_c=24.0, tmin_c=21.0)
+        assert clear > cloudy
+        assert 0.0 < clear < ra
+
+    def test_the_estimate_is_in_the_same_range_as_a_measurement(self):
+        """It stands in for Rs, so it has to be comparable to one, not merely ordered."""
+        from never_dry.water_balance_model import solar_radiation_from_range
+
+        ra = self._ra()
+        estimated = solar_radiation_from_range(ra, tmax_c=31.0, tmin_c=19.0)
+        assert 0.4 * ra < estimated < 0.85 * ra

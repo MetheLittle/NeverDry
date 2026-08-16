@@ -520,8 +520,14 @@ class PenmanMonteithModel(ETBalanceModel):
 
     method_id: ClassVar[str] = "penman_monteith"
 
+    # Radiation is absent on purpose. FAO-56 computes the net radiation this
+    # equation reads, and can estimate the incoming shortwave from the diurnal
+    # range when no pyranometer exists (eq. 50) — so a site with humidity and
+    # wind can run this tier, more accurately with a radiation sensor and still
+    # usefully without one. Requiring the instrument would exclude the majority
+    # of stations to gain precision they cannot supply anyway.
     required_sensors: ClassVar[frozenset[SensorKind]] = frozenset(
-        {SensorKind.TEMPERATURE, SensorKind.HUMIDITY, SensorKind.WIND_SPEED, SensorKind.NET_RADIATION}
+        {SensorKind.TEMPERATURE, SensorKind.HUMIDITY, SensorKind.WIND_SPEED}
     )
 
     def __init__(
@@ -745,6 +751,109 @@ class VWCPerZoneModel(VWCSystemModel):
         return ReferenceFrame.VWC_PER_ZONE
 
 
+# ── Net radiation: computed, never asked for ───────────────────────────────
+#
+# FAO-56 does not expect net radiation to be measured. Rn is a *balance* —
+# incoming shortwave minus what the surface reflects, minus the net longwave the
+# ground exchanges with the sky — and measuring it takes a four-sensor net
+# radiometer, a research instrument. What a consumer weather station reports is
+# global solar radiation Rs, a pyranometer reading, and FAO-56 derives Rn from
+# it (eq. 38-40). So the integration asks for Rs and computes the rest.
+
+#: Albedo of the FAO-56 reference crop (clipped grass): the fraction of incoming
+#: shortwave the surface sends straight back.
+_REFERENCE_ALBEDO: float = 0.23
+
+#: Stefan-Boltzmann constant [MJ/K^4/m^2/day], for the longwave term.
+_STEFAN_BOLTZMANN: float = 4.903e-9
+
+#: Fraction of extraterrestrial radiation reaching the ground on a clear day
+#: (FAO-56 eq. 37 at sea level). Turns Ra into Rso, which is what tells a bright
+#: day from a dull one when Rs is measured.
+_CLEAR_SKY_FRACTION: float = 0.75
+
+#: Adjustment coefficient for estimating Rs from the diurnal range (FAO-56
+#: eq. 50). 0.16 is the interior value; coastal sites run nearer 0.19, and the
+#: difference is smaller than the error of having no measurement at all.
+_KRS_INTERIOR: float = 0.16
+
+#: W/m2 -> MJ/m2/day. A pyranometer reports an instantaneous flux; the equations
+#: work in daily energy, and 86400 seconds over a million joules is the bridge.
+W_M2_TO_MJ_DAY: float = 0.0864
+
+
+def solar_radiation_from_range(ra_mj: float, tmax_c: float, tmin_c: float) -> float:
+    """Estimate Rs [MJ/m2/day] from the diurnal range — FAO-56 eq. 50.
+
+    The fallback for a site with no pyranometer: a wide range means the ground
+    both heated and cooled freely, which is what a clear sky looks like from the
+    ground. Same physical reasoning as the Hargreaves term, used here to produce
+    a radiation rather than an evapotranspiration.
+    """
+    return _KRS_INTERIOR * math.sqrt(max(0.0, tmax_c - tmin_c)) * ra_mj
+
+
+def wind_at_2m(speed_m_s: float, height_m: float) -> float:
+    """Convert a wind speed measured at ``height_m`` to the 2 m value — FAO-56 eq. 47.
+
+    The equation is defined for wind at two metres above a grass surface, and a
+    station on a mast reads faster air: a 10 m reading is about three quarters of
+    itself once brought down. Left unconverted it inflates the aerodynamic term,
+    and the error is systematic rather than noisy — the same direction every hour
+    of every day.
+    """
+    if height_m <= 0 or abs(height_m - 2.0) < 1e-9:
+        return speed_m_s
+    return speed_m_s * 4.87 / math.log(67.8 * height_m - 5.42)
+
+
+def net_radiation_mj(
+    *,
+    solar_mj: float,
+    ra_mj: float,
+    tmax_c: float,
+    tmin_c: float,
+    rh_pct: float,
+) -> float:
+    """Net radiation Rn [MJ/m2/day] from measured or estimated Rs — FAO-56 eq. 38-40.
+
+    Two halves. The shortwave one is what the surface keeps of what arrives,
+    ``(1 - albedo) * Rs``. The longwave one is what it loses to the sky, and it
+    is not a constant: it grows on dry air, because water vapour is what sends
+    the ground's heat back, and it grows on clear nights, which is why the ratio
+    of measured to clear-sky radiation appears in it.
+
+    ``rh_pct`` enters through the actual vapour pressure; ``ra_mj`` (astronomy,
+    from latitude and date) sets the clear-sky reference the measurement is
+    judged against.
+    """
+    net_shortwave = (1.0 - _REFERENCE_ALBEDO) * solar_mj
+
+    saturation = 0.6108 * math.exp(17.27 * ((tmax_c + tmin_c) / 2.0) / (((tmax_c + tmin_c) / 2.0) + 237.3))
+    actual_vapour = saturation * _clamp(rh_pct, 0.0, 100.0) / 100.0
+
+    clear_sky = _CLEAR_SKY_FRACTION * ra_mj
+    # FAO-56 defines this ratio over a *day*; here it arrives instantaneous,
+    # which breaks at night: Rs is zero, the bracket below turns negative, and
+    # the ground appears to *gain* longwave radiation from a colder sky. The
+    # factor is therefore floored at zero — the loss can be neutralised, never
+    # reversed. The cost is that night-time cooling is not credited; carrying
+    # the daytime ratio into the night, as FAO-56 prescribes, needs a daily
+    # accumulation of Rs that nothing keeps yet.
+    cloudiness = _clamp(solar_mj / clear_sky, 0.0, 1.0) if clear_sky > 0 else 1.0
+    sky_factor = max(0.0, 1.35 * cloudiness - 0.35)
+
+    tmax_k4 = (tmax_c + 273.16) ** 4
+    tmin_k4 = (tmin_c + 273.16) ** 4
+    net_longwave = (
+        _STEFAN_BOLTZMANN
+        * ((tmax_k4 + tmin_k4) / 2.0)
+        * (0.34 - 0.14 * math.sqrt(max(0.0, actual_vapour)))
+        * sky_factor
+    )
+    return net_shortwave - net_longwave
+
+
 # ── The diurnal range, observed rather than asked for ──────────────────────
 
 
@@ -849,7 +958,7 @@ MODEL_CATALOGUE: tuple[type[WaterBalanceModel], ...] = (
 #: and not by the automatic choice, which would otherwise pick the richest
 #: *declared* model and then raise on every reading. Widening this set is the
 #: last step of wiring a tier, not the first.
-RUNNABLE_INPUTS: frozenset[type] = frozenset({ETStep, HargreavesStep, VWCReading})
+RUNNABLE_INPUTS: frozenset[type] = frozenset({ETStep, HargreavesStep, PenmanStep, VWCReading})
 
 #: What the **automatic** choice may pick, which is deliberately narrower than
 #: what may be chosen. Since the diurnal range is observed rather than declared,

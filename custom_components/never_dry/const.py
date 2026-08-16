@@ -23,6 +23,13 @@ CONF_TEMP_MIN_SENSOR = "temp_min_sensor"
 # best one my sensors support", which is what every existing installation has
 # been doing implicitly. Stored as the model's own identifier otherwise, so the
 # class can move without invalidating the choice.
+# Height above ground of the anemometer, in metres. FAO-56 works with wind at
+# 2 m; a station on a mast reads faster air, and the correction is systematic —
+# the same direction every hour — so the default is the WMO standard mast rather
+# than the equation's own reference.
+CONF_ANEMOMETER_HEIGHT = "anemometer_height_m"
+DEFAULT_ANEMOMETER_HEIGHT_M = 10.0
+
 CONF_ET_METHOD = "et_method"
 ET_METHOD_AUTO = "auto"
 DEFAULT_ET_METHOD = ET_METHOD_AUTO
@@ -40,6 +47,7 @@ DEFAULT_ET_METHOD = ET_METHOD_AUTO
 ET_METHOD_OPTIONS = (
     ET_METHOD_AUTO,
     "vwc_system",
+    "penman_monteith",
     "hargreaves",
     "et_simple",
 )

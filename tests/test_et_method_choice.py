@@ -46,23 +46,24 @@ class TestAutomatic:
 class TestRefusal:
     """A method whose inputs are missing is refused at the form, not at runtime."""
 
-    def test_a_method_that_cannot_run_is_refused_however_the_site_is_equipped(self):
-        """Penman-Monteith is written and tested, and nothing builds its input
-        yet. It is not in the dropdown; this is the second lock, for an entry
-        edited by hand or restored from a version that offered it.
+    def test_a_site_missing_the_sensors_is_refused_and_told_which(self):
+        """Penman-Monteith on a site with only a thermometer: the answer names the
+        gap, because that is a gap the user can close.
+        """
+        assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "penman_monteith"}) == "et_method_missing_sensors"
 
-        Refused even with every required sensor declared: the sensors are not what
-        is missing, so a "missing sensors" answer would send the user shopping for
-        hardware that would change nothing.
+    def test_the_same_site_is_accepted_once_humidity_and_wind_are_declared(self):
+        """Radiation is not required: without a pyranometer the incoming shortwave
+        is estimated from the diurnal range, so the tier is reachable for a station
+        that has the air measurements but no radiation instrument.
         """
         equipped = {
             **BARE_SITE,
             CONF_ET_METHOD: "penman_monteith",
             CONF_HUMIDITY_SENSOR: "sensor.h",
             CONF_WIND_SPEED_SENSOR: "sensor.w",
-            CONF_NET_RADIATION_SENSOR: "sensor.rad",
         }
-        assert _et_method_error(equipped) == "et_method_unknown"
+        assert _et_method_error(equipped) is None
 
     def test_the_probe_model_without_a_probe_is_refused(self):
         assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "vwc_system"}) == "et_method_missing_sensors"
@@ -182,16 +183,53 @@ class TestEveryOfferedMethodCanActuallyRun:
             },
         )
 
+    #: What each method needs declared in order to actually run, rather than
+    #: quietly degrade to the simple tier and prove nothing.
+    SENSORS_FOR: ClassVar[dict] = {
+        "et_simple": {},
+        "hargreaves": {},
+        "vwc_system": {CONF_VWC_SENSOR: "sensor.soil"},
+        "penman_monteith": {CONF_HUMIDITY_SENSOR: "sensor.h", CONF_WIND_SPEED_SENSOR: "sensor.w"},
+    }
+
     def test_each_offered_method_survives_an_update(self, hass_mock):
+        """Drives a real update per method, on a site equipped for that method.
+
+        The equipment matters: without it `build_model` degrades to the simple
+        tier and the test passes while exercising nothing. Both crashes found on
+        the live instance were in models that were never actually reached.
+        """
         from unittest.mock import MagicMock
 
         from never_dry.const import ET_METHOD_AUTO, ET_METHOD_OPTIONS
+        from never_dry.water_balance_model import model_by_id
 
         hass_mock.states.get = MagicMock(return_value=MagicMock(state="24.0"))
         for method in ET_METHOD_OPTIONS:
-            extra = {CONF_VWC_SENSOR: "sensor.soil"} if method in ("vwc_system", ET_METHOD_AUTO) else {}
-            hub = self._hub(hass_mock, method, **extra)
+            if method == ET_METHOD_AUTO:
+                continue
+            hub = self._hub(hass_mock, method, **self.SENSORS_FOR[method])
+            assert isinstance(hub._model, model_by_id(method)), f"{method} degraded instead of running"
+            # A day of readings, so the tiers that need the diurnal range have one.
+            for hour in range(24):
+                hub._diurnal.observe(float(hour), 16.0 + (hour % 12))
             hub._on_sensor_change(MagicMock())  # must not raise
+
+    def test_a_tier_that_needs_the_daily_range_waits_instead_of_guessing(self, hass_mock):
+        """Before the window fills there is no honest reading, so the deficit freezes.
+
+        The alternative is a partial range, which is systematically too small and
+        reads as an overcast day — watering less than the garden needs, silently.
+        """
+        from unittest.mock import MagicMock
+
+        hass_mock.states.get = MagicMock(return_value=MagicMock(state="24.0"))
+        hub = self._hub(hass_mock, "hargreaves")
+        before = hub._deficit
+
+        hub._on_sensor_change(MagicMock())
+
+        assert hub._deficit == before
 
     def test_a_probe_site_that_picks_the_simple_tier_still_works(self, hass_mock):
         """The disagreement the choice made possible, and the reason the branch moved.

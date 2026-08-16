@@ -373,7 +373,9 @@
         "name": "Water balance method",
         "state": {
           "et_simple": "Simple (temperature only)",
-          "vwc_system": "Soil moisture probe"
+          "vwc_system": "Soil moisture probe",
+          "hargreaves": "Hargreaves-Samani (diurnal range)",
+          "penman_monteith": "Penman-Monteith (FAO-56)"
         }
       }
     }

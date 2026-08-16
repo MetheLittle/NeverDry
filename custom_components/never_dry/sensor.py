@@ -43,6 +43,7 @@ from homeassistant.helpers.typing import ConfigType
 from . import flow_utils
 from .const import (
     CONF_ALPHA,
+    CONF_ANEMOMETER_HEIGHT,
     CONF_BACKFILL_DAYS,
     CONF_D_MAX,
     CONF_ET_METHOD,
@@ -81,6 +82,7 @@ from .const import (
     CONF_ZONE_VOLUME_ENTITY,
     CONF_ZONES,
     DEFAULT_ALPHA,
+    DEFAULT_ANEMOMETER_HEIGHT_M,
     DEFAULT_BACKFILL_DAYS,
     DEFAULT_D_MAX,
     DEFAULT_DELIVERY_MODE,
@@ -122,17 +124,23 @@ from .valve_fsm import FailureKind, ValveState
 from .water_balance_model import (
     MODEL_CATALOGUE,
     RUNNABLE_INPUTS,
+    W_M2_TO_MJ_DAY,
     DiurnalRange,
     ETModel,
     ETStep,
     HargreavesModel,
     HargreavesStep,
     ModelInput,
+    PenmanMonteithModel,
+    PenmanStep,
     ReferenceFrame,
     VWCReading,
     WaterBalanceModel,
     build_model,
+    net_radiation_mj,
+    solar_radiation_from_range,
     vwc_to_fraction,
+    wind_at_2m,
 )
 from .zone import Zone as DomainZone
 
@@ -209,6 +217,62 @@ class SensorBuffer:
 
     def __len__(self) -> int:
         return len(self._buf)
+
+
+def _read_float(hass, entity_id: str | None) -> float | None:
+    """A numeric reading from ``entity_id``, or ``None`` when there is not one.
+
+    Unavailable, unknown, missing and non-numeric all answer the same way on
+    purpose: the caller has to decide what to do without a reading, and merging
+    the cases stops that decision being made four times.
+    """
+    if not entity_id:
+        return None
+    state = hass.states.get(entity_id)
+    if state is None or state.state in ("unavailable", "unknown"):
+        return None
+    try:
+        value = float(state.state)
+    except (ValueError, TypeError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _wind_to_m_s(hass, entity_id: str | None, value: float) -> float:
+    """Wind speed in m/s, converting from whatever unit the entity declares.
+
+    Read from the entity rather than assumed: consumer stations report km/h,
+    Home Assistant may convert to mph in an imperial system, and the equation
+    wants m/s. A factor of 3.6 applied in the wrong direction is not a rounding
+    error, it is a different climate.
+    """
+    state = hass.states.get(entity_id) if entity_id else None
+    unit = (state.attributes.get("unit_of_measurement") if state else None) or "m/s"
+    unit = str(unit).lower()
+    if unit in ("km/h", "kph"):
+        return value / 3.6
+    if unit in ("mph", "mi/h"):
+        return value * 0.44704
+    if unit in ("kn", "kt", "knot", "knots"):
+        return value * 0.514444
+    return value
+
+
+def _read_solar_mj(hass, entity_id: str | None) -> float | None:
+    """Solar radiation as MJ/m2/day, or ``None`` when unreadable.
+
+    A pyranometer reports an instantaneous flux in W/m2 while the equations work
+    in daily energy, so the reading is converted rather than compared. An entity
+    already publishing MJ/m2/day is passed through.
+    """
+    value = _read_float(hass, entity_id)
+    if value is None:
+        return None
+    state = hass.states.get(entity_id)
+    unit = str((state.attributes.get("unit_of_measurement") if state else None) or "W/m²").lower()
+    if "mj" in unit:
+        return value
+    return value * W_M2_TO_MJ_DAY
 
 
 def _to_celsius(state) -> float | None:
@@ -755,6 +819,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         # Observed from the thermometer we already read, so the daily extremes
         # never have to be asked for as two more entities.
         self._diurnal = DiurnalRange()
+        self._anemometer_h = config.get(CONF_ANEMOMETER_HEIGHT, DEFAULT_ANEMOMETER_HEIGHT_M)
         # One warning per condition, not one per poll: a probe reporting
         # percentages does so at every reading, and an unreadable one likewise.
         self._vwc_percent_warned = False
@@ -1020,6 +1085,8 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         that is offered without an entry here is selectable and not runnable,
         which is the failure this shape exists to make impossible.
         """
+        if isinstance(self._model, PenmanMonteithModel):
+            return self._build_penman_reading(dt_h, temp_c, rain_mm, now)
         if isinstance(self._model, HargreavesModel):
             extremes = self._diurnal.extremes()
             if extremes is None:
@@ -1033,6 +1100,43 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 rain_mm=rain_mm,
             )
         return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
+
+    def _build_penman_reading(self, dt_h: float, temp_c: float, rain_mm: float, now: datetime) -> ModelInput | None:
+        """The full-weather reading, with the net radiation computed rather than read.
+
+        A pyranometer reports the shortwave arriving; FAO-56 needs the *balance*,
+        which also depends on what the ground loses to the sky — and that term
+        needs the day's extremes and the humidity. So this waits for the diurnal
+        window like Hargreaves does, even though the tier reads a radiation
+        sensor: without the extremes the longwave half cannot be computed.
+
+        With no pyranometer the radiation is estimated from the same extremes
+        (FAO-56 eq. 50), which is what makes the tier reachable for a site that
+        has humidity and wind but no radiation instrument.
+        """
+        extremes = self._diurnal.extremes()
+        if extremes is None:
+            return None
+        tmin, tmax = extremes
+
+        rh = _read_float(self._hass, self._env.humidity_sensor)
+        wind_raw = _read_float(self._hass, self._env.wind_speed_sensor)
+        if rh is None or wind_raw is None:
+            return None
+
+        ra = HargreavesModel.extraterrestrial_radiation(now.timetuple().tm_yday, self._env.latitude)
+        solar = _read_solar_mj(self._hass, self._env.net_radiation_sensor)
+        if solar is None:
+            solar = solar_radiation_from_range(ra, tmax_c=tmax, tmin_c=tmin)
+
+        return PenmanStep(
+            dt_h=dt_h,
+            temp_c=temp_c,
+            rh_pct=rh,
+            wind_m_s=wind_at_2m(_wind_to_m_s(self._hass, self._env.wind_speed_sensor, wind_raw), self._anemometer_h),
+            net_radiation_mj=net_radiation_mj(solar_mj=solar, ra_mj=ra, tmax_c=tmax, tmin_c=tmin, rh_pct=rh),
+            rain_mm=rain_mm,
+        )
 
     def _broadcast_to_zones(self, dt_h: float, et_h: float, rain: float) -> None:
         """Notify all registered zone sensors with ET/rain data."""

@@ -377,7 +377,9 @@
         "name": "Metodo di bilancio idrico",
         "state": {
           "et_simple": "Semplice (solo temperatura)",
-          "vwc_system": "Sonda di umidità del suolo"
+          "vwc_system": "Sonda di umidità del suolo",
+          "hargreaves": "Hargreaves-Samani (escursione giornaliera)",
+          "penman_monteith": "Penman-Monteith (FAO-56)"
         }
       }
     }
