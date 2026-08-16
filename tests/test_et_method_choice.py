@@ -270,9 +270,24 @@ class TestTheUserCanSeeWhichModelRuns:
 
     def test_automatic_reports_what_it_resolved_to(self, hass_mock):
         hub = self._hub(hass_mock, **{CONF_ET_METHOD: "auto"})
-        assert hub.active_method == "et_simple"
-        assert hub.extra_state_attributes["et_method"] == "et_simple"
+        assert hub.active_method == "hargreaves"
+        assert hub.extra_state_attributes["et_method"] == "hargreaves"
         assert hub.extra_state_attributes["et_method_configured"] == "auto"
+
+    def test_a_flat_thermometer_is_explained_not_merely_overruled(self, hass_mock):
+        """The answer alone is not actionable: "simple" tells a user nothing.
+
+        The reason has to name the observation and say the choice can be
+        overruled, because the statistic may be wrong about a site the user
+        knows.
+        """
+        hub = self._hub(hass_mock, **{CONF_ET_METHOD: "auto"})
+        hub._select_model(observed_range_c=0.8)
+
+        assert hub.active_method == "et_simple"
+        reason = hub.extra_state_attributes["et_method_reason"]
+        assert "0.8" in reason
+        assert "select it explicitly" in reason
 
     def test_a_probe_site_reports_the_probe_model(self, hass_mock):
         hub = self._hub(hass_mock, **{CONF_VWC_SENSOR: "sensor.soil"})
@@ -282,7 +297,8 @@ class TestTheUserCanSeeWhichModelRuns:
         """The case that is invisible without this: asked for one thing, running another."""
         hub = self._hub(hass_mock, **{CONF_ET_METHOD: "penman_monteith"})
         assert hub.extra_state_attributes["et_method_configured"] == "penman_monteith"
-        assert hub.active_method == "et_simple"
+        assert hub.active_method == "hargreaves"
+        assert "cannot run it" in hub.extra_state_attributes["et_method_reason"]
 
     def test_the_entity_publishes_it_with_the_reason(self, hass_mock):
         from never_dry.sensor import WaterBalanceMethodSensor
@@ -290,8 +306,9 @@ class TestTheUserCanSeeWhichModelRuns:
         hub = self._hub(hass_mock, **{CONF_ET_METHOD: "auto"})
         entity = WaterBalanceMethodSensor(hub)
 
-        assert entity.native_value == "et_simple"
+        assert entity.native_value == "hargreaves"
         attrs = entity.extra_state_attributes
         assert attrs["configured"] == "auto"
+        assert attrs["reason"]
         assert attrs["reference_frame"] == "et"
         assert "temperature" in attrs["declared_sensors"]

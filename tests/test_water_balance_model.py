@@ -287,20 +287,44 @@ class TestCapabilityMatch:
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
         assert set(models_offered_by(env)) == {ETModel, HargreavesModel}
 
-    def test_the_automatic_choice_stays_on_the_tier_that_was_already_running(self):
-        """A better estimate is still a different one, and different has to be asked for.
+    def test_the_automatic_choice_takes_the_best_the_sensors_support(self):
+        """Automatic means what it says, on an upgrade exactly as on a fresh install.
 
-        Hargreaves became available to every existing installation the moment the
-        range stopped being a declared sensor. Ranking it above the simple tier
-        would have switched the physics under every garden on upgrade, silently,
-        to a method none of them had ever run.
+        Pinning existing gardens to whatever they happened to be running would
+        make "automatic" mean "whatever you had", which nobody would ask for.
+        Someone who adds a sensor expects the estimate to improve; someone who
+        wants a specific method names it.
         """
         from never_dry.environment import Environment
-        from never_dry.water_balance_model import AUTO_RANKING, ETModel, HargreavesModel, build_model
+        from never_dry.water_balance_model import HargreavesModel, build_model
 
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
-        assert isinstance(build_model(env), ETModel)
-        assert HargreavesModel not in AUTO_RANKING
+        assert isinstance(build_model(env), HargreavesModel)
+
+    def test_a_flat_thermometer_withdraws_the_tiers_that_read_the_range(self):
+        """Evidence, not dogma: a sensor that never swings cannot feed Hargreaves.
+
+        A shaded or indoor probe shows a flat day, which the formula reads as
+        permanent overcast and turns into a systematic under-estimate — every
+        hour, invisibly. So the automatic choice steps back to the tier that does
+        not look at the range.
+        """
+        from never_dry.environment import Environment
+        from never_dry.water_balance_model import ETModel, build_model
+
+        env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
+        assert isinstance(build_model(env, diurnal_range_c=0.7), ETModel)
+
+    def test_an_explicit_choice_survives_the_same_evidence(self):
+        """The statistic does not know what the user knows — a sensor about to be
+        moved, a site where the flatness is real. Naming a method is an assertion,
+        and it is honoured.
+        """
+        from never_dry.environment import Environment
+        from never_dry.water_balance_model import HargreavesModel, build_model
+
+        env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
+        assert isinstance(build_model(env, method_id="hargreaves", diurnal_range_c=0.7), HargreavesModel)
 
     def test_it_can_still_be_chosen_explicitly(self):
         from never_dry.environment import Environment
@@ -364,10 +388,10 @@ class TestBuildModel:
 
         return Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
 
-    def test_without_a_preference_it_reproduces_todays_behaviour(self):
-        from never_dry.water_balance_model import ETModel, build_model
+    def test_without_a_preference_it_takes_the_best_supported(self):
+        from never_dry.water_balance_model import HargreavesModel, build_model
 
-        assert isinstance(build_model(self._bare_site()), ETModel)
+        assert isinstance(build_model(self._bare_site()), HargreavesModel)
 
     def test_a_site_with_a_probe_gets_the_probe_model(self):
         from never_dry.environment import Environment
@@ -378,16 +402,16 @@ class TestBuildModel:
 
     def test_a_choice_the_site_cannot_support_degrades_instead_of_failing(self):
         """A sensor can be removed after the choice was stored. Watering must not stop."""
-        from never_dry.water_balance_model import ETModel, build_model
+        from never_dry.water_balance_model import HargreavesModel, build_model
 
         model = build_model(self._bare_site(), method_id="penman_monteith")
-        assert isinstance(model, ETModel)
+        assert isinstance(model, HargreavesModel)
 
     def test_an_unknown_identifier_falls_back_rather_than_raising(self):
         """A config entry from a future version must not break setup."""
-        from never_dry.water_balance_model import ETModel, build_model
+        from never_dry.water_balance_model import build_model
 
-        assert isinstance(build_model(self._bare_site(), method_id="no_such_model"), ETModel)
+        assert isinstance(build_model(self._bare_site(), method_id="no_such_model"), HargreavesModel)
 
     def test_a_supported_choice_is_honoured_over_the_default_order(self):
         """The user's preference beats the ranking — that is the point of asking."""

@@ -16,7 +16,7 @@ import math
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from time import monotonic
 
 from homeassistant.components.sensor import (
@@ -793,16 +793,9 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         # into the other is the model's business, and it is chosen once — by
         # what the installation declared, which is the capability match.
         self._configured_method = config.get(CONF_ET_METHOD, DEFAULT_ET_METHOD)
-        method = self._configured_method
-        self._model: WaterBalanceModel = build_model(
-            self._env,
-            method_id=None if method == ET_METHOD_AUTO else method,
-            alpha=self._alpha,
-            t_base=self._t_base,
-            d_max=self._d_max,
-            field_capacity=self._field_cap,
-            root_depth=self._root_depth,
-        )
+        self._method_reason = ""
+        self._model: WaterBalanceModel = ETModel()
+        self._select_model()
         # None = baseline unknown (fresh boot): the first reading fixes the
         # baseline WITHOUT crediting. Starting at 0.0 re-credited the whole
         # cumulative/24h rain reading at every restart — 14.2 mm of rain
@@ -850,6 +843,49 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
     def reference_frame(self) -> ReferenceFrame:
         """The frame this hub's deficit is defined against — the model decides it."""
         return self._model.reference_frame
+
+    def _select_model(self, observed_range_c: float | None = None) -> None:
+        """Choose the model once, and record in one sentence why.
+
+        Called at construction and again when the recorder has filled the
+        diurnal window — that is, at startup, with the evidence in hand. Never
+        again: a method that changes while the integration runs would move the
+        physics under a garden with nobody watching, which is the failure this
+        whole design is built to avoid.
+
+        The reason is kept because the answer alone is not actionable. "Simple"
+        tells a user nothing; "simple, because the thermometer shows no real
+        daily swing" tells them where to look, and that they may overrule it.
+        """
+        explicit = self._configured_method != ET_METHOD_AUTO
+        self._model = build_model(
+            self._env,
+            method_id=None if not explicit else self._configured_method,
+            diurnal_range_c=observed_range_c,
+            alpha=self._alpha,
+            t_base=self._t_base,
+            d_max=self._d_max,
+            field_capacity=self._field_cap,
+            root_depth=self._root_depth,
+        )
+        running = type(self._model).method_id
+
+        if explicit and running == self._configured_method:
+            self._method_reason = "chosen explicitly"
+        elif explicit:
+            self._method_reason = (
+                f"'{self._configured_method}' was chosen but this installation cannot run it; "
+                f"using the best it supports"
+            )
+        elif observed_range_c is not None and observed_range_c < DiurnalRange.IMPLAUSIBLE_RANGE_C:
+            self._method_reason = (
+                f"automatic: the temperature sensor shows a daily swing of only "
+                f"{observed_range_c:.1f} °C, which is too flat to be real weather — so the methods "
+                f"that read the daily range were left out. If your sensor is genuinely outdoors and "
+                f"you want Hargreaves-Samani, select it explicitly."
+            )
+        else:
+            self._method_reason = "automatic: the best method the declared sensors support"
 
     @property
     def active_method(self) -> str:
@@ -945,6 +981,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             # see the answer is reading a number without knowing how it was made.
             "et_method": self.active_method,
             "et_method_configured": self._configured_method,
+            "et_method_reason": self._method_reason,
         }
         if self._last_rain is not None:
             attrs["rain_baseline_mm"] = round(self._last_rain, 2)
@@ -1003,6 +1040,17 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 _LOGGER.info("VWC mode: skipping ET-model backfill")
             else:
                 await self._backfill_from_recorder()
+
+        # The automatic choice is made once, here, with the evidence rather than
+        # without it. Filling the diurnal window from the recorder first means a
+        # site is judged on the swing its thermometer actually shows, and that a
+        # richer tier starts working immediately instead of after a day of
+        # warm-up.
+        await self._bootstrap_diurnal_range()
+        if self._configured_method == ET_METHOD_AUTO:
+            observed = self._diurnal.extremes()
+            self._select_model(None if observed is None else observed[1] - observed[0])
+        _LOGGER.info("Water balance method: %s — %s", self.active_method, self._method_reason)
 
         tracked = [self._temp_sensor, self._rain_sensor]
         if self._vwc_sensor:
@@ -1090,7 +1138,10 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         if isinstance(self._model, HargreavesModel):
             extremes = self._diurnal.extremes()
             if extremes is None:
-                return None
+                # Warming up: the tier falls back to the temperature-only rate
+                # rather than freezing, because a fresh install would otherwise
+                # look like a garden that never dries out.
+                return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
             tmin, tmax = extremes
             return HargreavesStep(
                 dt_h=dt_h,
@@ -1116,13 +1167,15 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         """
         extremes = self._diurnal.extremes()
         if extremes is None:
-            return None
+            return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
         tmin, tmax = extremes
 
         rh = _read_float(self._hass, self._env.humidity_sensor)
         wind_raw = _read_float(self._hass, self._env.wind_speed_sensor)
         if rh is None or wind_raw is None:
-            return None
+            # A sensor unavailable this tick is not a reason to stop watering:
+            # fall back for this step and pick the richer reading up on the next.
+            return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
 
         ra = HargreavesModel.extraterrestrial_radiation(now.timetuple().tm_yday, self._env.latitude)
         solar = _read_solar_mj(self._hass, self._env.net_radiation_sensor)
@@ -1272,6 +1325,51 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
 
         rain_delta = self._compute_rain_delta()
         self._model.step(ETStep(dt_h=dt_h, temp_c=t_median, rain_mm=rain_delta))
+
+    async def _bootstrap_diurnal_range(self) -> None:
+        """Fill the diurnal window from recorder history, so the choice is informed.
+
+        Without it the window starts empty at every restart and the site is
+        judged, or left warming up, on no data at all. The thermometer almost
+        always predates the integration, so the evidence is usually already
+        there — it just has to be read.
+
+        Failures are not fatal and not reported loudly: an installation without
+        a recorder simply fills the window live, which is the previous behaviour.
+        """
+        try:
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.history import get_significant_states
+        except ImportError:
+            return
+
+        instance = get_instance(self._hass)
+        if instance is None:
+            return
+
+        now = datetime.now(UTC)
+        start = now - timedelta(hours=26)
+        try:
+            history = await instance.async_add_executor_job(
+                get_significant_states, self._hass, start, now, [self._temp_sensor]
+            )
+        except Exception as exc:
+            _LOGGER.debug("Diurnal range bootstrap skipped: %s", exc)
+            return
+
+        seen = 0
+        for state in (history or {}).get(self._temp_sensor, []):
+            value = _to_celsius(state)
+            if value is None:
+                continue
+            self._diurnal.observe(state.last_changed.timestamp() / 3600.0, value)
+            seen += 1
+        if seen:
+            _LOGGER.debug(
+                "Diurnal range bootstrapped from %d readings — %d hours covered",
+                seen,
+                self._diurnal.coverage_h,
+            )
 
     async def _backfill_from_recorder(self) -> None:
         """Replay historical T/rain from HA recorder to bootstrap deficit.
@@ -2764,6 +2862,7 @@ class WaterBalanceMethodSensor(SensorEntity):
         """What was asked for, and what the site can feed — the *why* of the answer."""
         return {
             "configured": self._hub._configured_method,
+            "reason": self._hub._method_reason,
             "reference_frame": self._hub.reference_frame.value,
             "declared_sensors": sorted(k.value for k in self._hub.environment.declared_sensors),
         }

@@ -47,10 +47,20 @@ LEGACY_ENTRY = {
 class TestTheModelIsTheOneThatWasRunning:
     """An upgrade must not change which physics computes the deficit."""
 
-    def test_a_legacy_entry_still_runs_the_simple_tier(self, hass_mock):
-        """No stored choice and no extra sensors: the only honest answer is today's model."""
+    def test_a_legacy_entry_moves_to_the_best_its_sensors_support(self, hass_mock):
+        """An upgrade *does* change the method here, and that is the decision, not a slip.
+
+        "Automatic" that meant "whatever you already had" would never improve for
+        anyone: a user who adds a sensor expects the estimate to follow, and one
+        who wants a fixed method names it. The change is announced — the running
+        method is an entity, with the reason attached, and it is logged at
+        startup.
+        """
+        from never_dry.water_balance_model import HargreavesModel
+
         hub = DrynessIndexSensor(hass_mock, dict(LEGACY_ENTRY))
-        assert isinstance(hub._model, ETModel)
+        assert isinstance(hub._model, HargreavesModel)
+        assert hub._configured_method == "auto"
 
     def test_the_stored_parameters_reach_it(self, hass_mock):
         """A site that tuned alpha must keep the tuning, not inherit the default."""

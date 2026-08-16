@@ -553,17 +553,77 @@ idempotency, MQTT fallback); the resulting close surfaces as `EXT`.
 | zone deficits | 0.02–0.05 mm | per test | Deliberately tiny so the guard-scaled `delivery_timeout` stays at the configured 4 s floor (loops end in seconds, compatible with the guard-duration timeout scaling) |
 | `VALVE`, `METER` | entity ids | `test_end_trigger_matrix.py` | Scripted through the `_Env` helper: mutable valve state (`on`/`off`) simulates external/watchdog closes; `meter_step` makes the meter progress (measured credit) or stay frozen (guard-flow fallback credit) |
 
-## 8. Adding a new ET tier
+## 8. Adding a new water-balance method
 
-To add a new ET calculation method (e.g., Hargreaves-Samani):
+The entity layer no longer computes the balance: `DrynessIndexSensor` holds a
+`WaterBalanceModel` and calls `step()`. Adding a method therefore means adding a
+class, declaring what it needs, and teaching the hub to build its reading — in
+that order, because each step is what makes the next one safe.
 
-1. Add new config keys in `const.py` (e.g., `CONF_T_MAX_SENSOR`, `CONF_T_MIN_SENSOR`)
-2. Add a new method in `DrynessIndexSensor` (e.g., `_update_from_hargreaves()`)
-3. Add selection logic in `_on_sensor_change()` to choose the appropriate method
-4. The broadcast to zone listeners remains the same — zones only need `(dt_h, et_h, rain)`
-5. Update `config_flow.py` to expose the new sensor fields
-6. Update `strings.json` and `translations/en.json` with UI labels
-7. Add tests in `test_never_dry_sensor.py`
+1. **Write the class** in `water_balance_model.py`, subclassing `ETBalanceModel`
+   (an ET tier: supply `et_rate`, the integrator is shared) or
+   `WaterBalanceModel` (a different frame entirely). The module is pure: no
+   Home Assistant import, no I/O. A guard enforces it.
+2. **Declare three class attributes.** `method_id` is the identifier stored in
+   the config entry — a name, not a class path, so the class can move without
+   invalidating anyone's choice. `required_sensors` is what the site must
+   declare, written in the same `SensorKind` vocabulary `Environment` uses.
+   `input_type` is the DTO `step()` consumes.
+3. **Add it to `MODEL_CATALOGUE`.** This makes it *choosable*, not yet runnable.
+4. **Build its reading** in `DrynessIndexSensor._build_reading`. This is the one
+   place the hub's knowledge of sensors meets the model's knowledge of what it
+   needs. Return `None` when an input is not available yet — the hub then
+   freezes the deficit, which is the honest answer, rather than stepping with a
+   partial value.
+5. **Add its DTO to `RUNNABLE_INPUTS`** and its `method_id` to
+   `const.ET_METHOD_OPTIONS`. Only now is it offered, in the dropdown and to the
+   automatic choice. Doing this before step 4 ships a method that builds and
+   then raises on its first reading — which happened twice, and is why the order
+   is written down.
+6. **Decide whether it joins `AUTO_RANKING`.** A method that requires no more
+   sensors than one already running would otherwise switch the physics under
+   every existing installation on upgrade, silently. A better estimate is still
+   a different one. New methods join the ranking after field observation.
+7. **Translations**: the dropdown option (`selector.et_method.options`) and the
+   diagnostic entity's state (`entity.sensor.water_balance_method.state`), in
+   `strings.json` and every `translations/*.json`.
+8. **Tests**: the model's own arithmetic in `test_water_balance_model.py`, and
+   the entry in `TestEveryOfferedMethodCanActuallyRun.SENSORS_FOR` so the
+   end-to-end guard drives a real update against a site equipped for it.
+
+### What is computed rather than required
+
+Two inputs the equations use are deliberately *not* asked for, because asking
+would exclude most installations to gain precision they cannot supply:
+
+| Quantity | Why it is not a config field |
+|---|---|
+| Daily max/min temperature | Observed from the thermometer already being read (`DiurnalRange`, rolling 24 h). Asking for two more entities invites the same sensor in both, which yields a zero range and an evapotranspiration of exactly zero — a garden never watered, silently |
+| Net radiation | A four-sensor net radiometer measures it; a weather station reports global solar radiation. FAO-56 derives the balance from that (eq. 38-40), and estimates the incoming shortwave from the diurnal range when there is no pyranometer at all (eq. 50) |
+
+## 8b. Architectural guards, and what they expect of you
+
+These run in CI on every pull request, in `tests/test_architecture.py` and
+`tests/test_translation_consistency.py`. They are not style checks: each exists
+because the property it holds was lost at least once, in production.
+
+| Guard | What it requires | Why it exists |
+|---|---|---|
+| **Purity** | Domain modules (`zone`, `water_balance_model`, `environment`, `scheduler`) import no Home Assistant | One convenience import of `homeassistant.util.dt` is enough to make the rules untestable without a runtime |
+| **No upward dependency** | The domain never imports the entity layer | A cycle would mean the rules cannot be read, or moved, without the entity layer coming along |
+| **Declared edges** | Every import *between* domain modules appears in `ALLOWED_DOMAIN_EDGES`, with a reason | Spaghetti is not one bad import, it is a dozen reasonable ones nobody had to justify. Checked in both directions: an edge nobody uses any more also fails, because a permission list that only grows stops describing the code and starts excusing it |
+| **Acyclic package** | No import cycle anywhere | Python tolerates most cycles as long as the import order happens to work, so they surface months later as an obscure `ImportError` on someone else's machine |
+| **`WIRED` / `INERT`** | Which domain modules production imports is declared and checked both ways | A scaffold that quietly becomes load-bearing is how a second source of truth is born — it happened, and a fix landed in the copy that did not run |
+| **One formula, one home** | A listed formula appears in exactly one module's executable code | Wiring an object is not finished when it is called; it is finished when the copy it replaced is gone |
+| **`const` mirrors** | A scaffold claiming to mirror `const.py` actually does | A stale mirror reintroduces the bug the shipped side had deliberately removed |
+| **Form/runtime agreement** | What the config flow accepts is what `build_model` runs | A drift here is silent by construction: setup succeeds, the model degrades, and the user believes a tier is running that is not |
+| **Every offered method runs** | Each dropdown entry survives a real update on a site equipped for it | Construction was never the hard part. Two methods built correctly and raised on their first reading |
+| **Select options are lists** | `SelectSelectorConfig(options=...)` is list-shaped | The suite stubs Home Assistant, so nothing validates selector config: a form that cannot open in the real product passed 1286 tests |
+
+The last row is the general lesson, and worth carrying into any new test: **the
+suite models Home Assistant, and wherever the model is thinner than the
+original, the difference is invisible until it runs.** A guard that can only be
+expressed statically is still worth writing.
 
 ## 9. Versioning and releases
 

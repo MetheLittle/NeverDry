@@ -420,10 +420,35 @@ class ETBalanceModel(WaterBalanceModel):
 
     is_stateful: ClassVar[bool] = True
 
-    def __init__(self, *, kc: float = DEFAULT_KC, d_max: float = DEFAULT_D_MAX, initial_mm: float = 0.0) -> None:
-        """Configure the crop coefficient ``kc`` and the deficit clamp ``d_max``."""
+    def __init__(
+        self,
+        *,
+        kc: float = DEFAULT_KC,
+        d_max: float = DEFAULT_D_MAX,
+        initial_mm: float = 0.0,
+        alpha: float = DEFAULT_ALPHA,
+        t_base: float = DEFAULT_T_BASE,
+    ) -> None:
+        """Configure ``kc``, the clamp ``d_max``, and the warm-up rate parameters."""
         super().__init__(d_max=d_max, initial_mm=initial_mm)
         self._kc = kc
+        self._alpha = alpha
+        self._t_base = t_base
+
+    def warmup_rate(self, inputs: ETStep) -> float:
+        """The temperature-only rate, used while this tier's own inputs are missing.
+
+        Every richer tier needs something that takes time to become available —
+        a diurnal range that has to be observed for a day. Freezing the deficit
+        until then is defensible for a restart and wrong for a fresh install,
+        where it would mean a garden that appears not to dry out at all.
+
+        So a tier that cannot compute its own rate yet falls back to the one
+        every site can compute. It is a worse estimate, which is the point: it
+        is the estimate this integration ran for everyone until now, and it is
+        strictly better than pretending nothing evaporates.
+        """
+        return ETModel.et_hourly(inputs.temp_c, alpha=self._alpha, t_base=self._t_base)
 
     @property
     def reference_frame(self) -> ReferenceFrame:
@@ -482,9 +507,7 @@ class ETModel(ETBalanceModel):
         initial_mm: float = 0.0,
     ) -> None:
         """Configure ET sensitivity ``alpha``, base temperature ``t_base`` and ``kc``."""
-        super().__init__(kc=kc, d_max=d_max, initial_mm=initial_mm)
-        self._alpha = alpha
-        self._t_base = t_base
+        super().__init__(kc=kc, d_max=d_max, initial_mm=initial_mm, alpha=alpha, t_base=t_base)
 
     @staticmethod
     def et_hourly(temp_c: float, *, alpha: float = DEFAULT_ALPHA, t_base: float = DEFAULT_T_BASE) -> float:
@@ -537,9 +560,11 @@ class PenmanMonteithModel(ETBalanceModel):
         pressure_kpa: float = DEFAULT_PRESSURE_KPA,
         d_max: float = DEFAULT_D_MAX,
         initial_mm: float = 0.0,
+        alpha: float = DEFAULT_ALPHA,
+        t_base: float = DEFAULT_T_BASE,
     ) -> None:
         """Configure ``kc`` and site atmospheric ``pressure_kpa`` (altitude-dependent)."""
-        super().__init__(kc=kc, d_max=d_max, initial_mm=initial_mm)
+        super().__init__(kc=kc, d_max=d_max, initial_mm=initial_mm, alpha=alpha, t_base=t_base)
         self._pressure_kpa = pressure_kpa
 
     @staticmethod
@@ -571,6 +596,8 @@ class PenmanMonteithModel(ETBalanceModel):
 
     def et_rate(self, inputs: ModelInput) -> float:
         """The Penman-Monteith ET rate [mm/h] from a :class:`PenmanStep` (ET₀/24)."""
+        if isinstance(inputs, ETStep):
+            return self.warmup_rate(inputs)
         if not isinstance(inputs, PenmanStep):
             raise TypeError(f"PenmanMonteithModel.step expects PenmanStep, got {type(inputs).__name__}")
         et0 = self.et0_daily(
@@ -619,9 +646,11 @@ class HargreavesModel(ETBalanceModel):
         kc: float = DEFAULT_KC,
         d_max: float = DEFAULT_D_MAX,
         initial_mm: float = 0.0,
+        alpha: float = DEFAULT_ALPHA,
+        t_base: float = DEFAULT_T_BASE,
     ) -> None:
         """Configure the site ``latitude_deg`` (drives the astronomical radiation) and ``kc``."""
-        super().__init__(kc=kc, d_max=d_max, initial_mm=initial_mm)
+        super().__init__(kc=kc, d_max=d_max, initial_mm=initial_mm, alpha=alpha, t_base=t_base)
         self._latitude_deg = latitude_deg
 
     @staticmethod
@@ -651,6 +680,8 @@ class HargreavesModel(ETBalanceModel):
 
     def et_rate(self, inputs: ModelInput) -> float:
         """The Hargreaves ET rate [mm/h] from a :class:`HargreavesStep` (ET₀/24)."""
+        if isinstance(inputs, ETStep):
+            return self.warmup_rate(inputs)
         if not isinstance(inputs, HargreavesStep):
             raise TypeError(f"HargreavesModel.step expects HargreavesStep, got {type(inputs).__name__}")
         et0 = self.et0_daily(
@@ -960,17 +991,6 @@ MODEL_CATALOGUE: tuple[type[WaterBalanceModel], ...] = (
 #: last step of wiring a tier, not the first.
 RUNNABLE_INPUTS: frozenset[type] = frozenset({ETStep, HargreavesStep, PenmanStep, VWCReading})
 
-#: What the **automatic** choice may pick, which is deliberately narrower than
-#: what may be chosen. Since the diurnal range is observed rather than declared,
-#: Hargreaves-Samani requires exactly what the simple tier requires — so ranking
-#: it higher would switch the method under every existing installation on
-#: upgrade, silently, to physics no garden has run yet. A better estimate is
-#: still a different one, and a different one has to be asked for.
-#:
-#: It joins this tuple when it has been watched in the field, not when it starts
-#: working.
-AUTO_RANKING: tuple[type[WaterBalanceModel], ...] = (VWCSystemModel, ETModel)
-
 #: Fallback when the site declares nothing at all — the model that needs least.
 DEFAULT_METHOD_ID: str = ETModel.method_id
 
@@ -1006,6 +1026,7 @@ def build_model(
     env,
     *,
     method_id: str | None = None,
+    diurnal_range_c: float | None = None,
     alpha: float = DEFAULT_ALPHA,
     t_base: float = DEFAULT_T_BASE,
     d_max: float = DEFAULT_D_MAX,
@@ -1014,6 +1035,12 @@ def build_model(
     kc: float = DEFAULT_KC,
 ) -> WaterBalanceModel:
     """Build the water-balance model this site should run.
+
+    ``diurnal_range_c`` is the range actually observed, when it is known. It is
+    evidence, and it is used **only** to narrow the automatic choice: an explicit
+    choice is always honoured, because a user who names a method is asserting
+    something the statistics cannot see — a sensor about to be moved, a site
+    where the flatness is real.
 
     ``method_id`` is the user's choice when they have made one. It is honoured
     only if the site still satisfies it: a sensor can be removed after the
@@ -1030,9 +1057,26 @@ def build_model(
     offered = models_offered_by(env)
     chosen = model_by_id(method_id) if method_id else None
     if chosen is None or chosen not in offered:
-        # No usable choice: fall back along the automatic ranking, which is
-        # narrower than the catalogue on purpose — see :data:`AUTO_RANKING`.
-        automatic = [model for model in AUTO_RANKING if model in offered]
+        automatic = offered
+        if diurnal_range_c is not None and diurnal_range_c < DiurnalRange.IMPLAUSIBLE_RANGE_C:
+            # A day that never warms and never cools is not weather; it is a
+            # thermometer that does not see the sky. A tier reading the diurnal
+            # range would take that flatness for permanent overcast and
+            # understate the water needed, every hour, invisibly. Those tiers
+            # are withdrawn from the **automatic** choice only — never from an
+            # explicit one, which is why this narrowing lives inside this branch
+            # and not above it. A user who names a method is asserting something
+            # the statistic cannot see.
+            automatic = tuple(m for m in automatic if m.input_type is not HargreavesStep)
+        # Automatic means the best the declared sensors support, for an upgrade
+        # exactly as for a fresh install. The alternative — pinning existing
+        # gardens to what they happened to be running — makes "automatic" mean
+        # "whatever you had", which is not a promise anyone would ask for.
+        #
+        # It does mean the number moves on upgrade for a site that declared more
+        # than the simple tier needs. That is why the running method is
+        # published as an entity and logged at startup: a change the user can
+        # see is a different thing from a change that happens in silence.
         chosen = automatic[0] if automatic else ETModel
     if issubclass(chosen, VWCSystemModel):
         return chosen(field_capacity=field_capacity, root_depth=root_depth, d_max=d_max)
@@ -1042,5 +1086,5 @@ def build_model(
         # The astronomical radiation term is a function of *where you are*, and
         # the site knows it. Hargreaves is the one tier whose constructor needs
         # something from the environment beyond the sensors it reads.
-        return chosen(latitude_deg=env.latitude, kc=kc, d_max=d_max)
-    return chosen(kc=kc, d_max=d_max)
+        return chosen(latitude_deg=env.latitude, kc=kc, d_max=d_max, alpha=alpha, t_base=t_base)
+    return chosen(kc=kc, d_max=d_max, alpha=alpha, t_base=t_base)
