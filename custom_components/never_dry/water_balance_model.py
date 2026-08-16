@@ -37,20 +37,22 @@ References: ``docs/design_water_balance_reference_model.md`` (D1-D5, reference
 frames), ``docs/design_domain_object_model.md`` (the domain classes),
 GH #123 (the deficit reference-frame bug this model makes impossible).
 
-**Wiring status — the formulas have moved, the models have not.** The entity
-layer no longer computes any of this itself: :meth:`ETModel.et_hourly` is called
-by ``ETSensor``, by the hub's live integrator, and twice inside the recorder
-backfill, where five copies of the same expression used to live;
-:func:`vwc_deficit_mm` replaced the two copies of the probe formula. ``zone.py``
-takes :class:`Deficit` and :class:`ReferenceFrame`, and the frame a zone carries
-now follows the hub's actual model rather than defaulting to ET.
+**Wiring status — the model owns the balance.** ``DrynessIndexSensor`` holds a
+:class:`WaterBalanceModel` and calls :meth:`step`; its ``_deficit`` is a view
+onto the model, so there is one storage rather than two. Which model it holds is
+decided by :func:`build_model` from what the site declared — the capability
+match, ``Environment.declared_sensors >= model.required_sensors``.
 
-What has *not* moved is the integration itself: ``DrynessIndexSensor`` still owns
-the forward-Euler loop and the deficit state, rather than holding a
-:class:`WaterBalanceModel` and calling :meth:`step`. That is the next phase, and
-it is the one that makes the tiers (:class:`HargreavesModel`,
-:class:`PenmanMonteithModel`) reachable — today they are correct, tested, and
-selectable by nobody.
+The zones are reached through the rate, not the model: the hub asks its model for
+``et_rate`` and broadcasts it, and each zone integrates that rate against its own
+Kc. So the tier a site runs propagates to every zone without any zone knowing
+which tier it is.
+
+What has *not* moved, and is a real limit rather than an oversight: the recorder
+**backfill** replays history through :meth:`ETModel.et_hourly` directly, so a
+site running a higher tier is bootstrapped with the temperature-only estimate.
+Replaying Penman-Monteith would need historical humidity, wind and radiation,
+which is a different problem from choosing a model for the present.
 
 ``tests/test_architecture.py`` asserts that each of these formulas has exactly
 one home, so a copy cannot quietly reappear.
@@ -63,6 +65,8 @@ import math
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import ClassVar
+
+from .environment import SensorKind
 
 # Defaults mirror ``const.py`` so a model built with no overrides behaves exactly
 # like today's sensors. Kept as module constants (not a HA import) to keep the
@@ -319,6 +323,19 @@ class WaterBalanceModel(abc.ABC):
     #: reading from scratch (VWC). Subclasses set it as a class attribute.
     is_stateful: ClassVar[bool]
 
+    #: Stable identifier for this method, stored in the config entry and shown
+    #: in the form. A name, not a class path: the class may move, the user's
+    #: choice must not.
+    method_id: ClassVar[str]
+
+    #: The environmental inputs this model cannot work without, in the same
+    #: vocabulary :class:`~.environment.Environment` declares bindings in. It is
+    #: half of the capability match — ``declared >= required`` — and it lives on
+    #: the model because *what a method needs* is a property of the method, not
+    #: of the installation. Rain is absent on purpose: it is subtracted when
+    #: present and simply zero when not, so it never makes a model unavailable.
+    required_sensors: ClassVar[frozenset[SensorKind]]
+
     def __init__(self, *, d_max: float = DEFAULT_D_MAX, initial_mm: float = 0.0, source: str | None = None) -> None:
         """Initialise the model at ``initial_mm`` (default 0 — reference model D4)."""
         self._d_max = d_max
@@ -357,6 +374,19 @@ class WaterBalanceModel(abc.ABC):
     def reset(self) -> Deficit:
         """Reset the deficit to zero (a zone was fully irrigated) and return it."""
         self._value_mm = 0.0
+        return self.deficit
+
+    def restore(self, value_mm: float) -> Deficit:
+        """Adopt a deficit computed elsewhere — a persisted value or a backfill.
+
+        Distinct from :meth:`step` on purpose: this is not a reading, it is the
+        model being told where it already was. A restart and a recorder replay
+        both need it, and neither can be expressed as a step.
+
+        Clamped like every other entry point, because a stored value can outlive
+        the ``d_max`` that was in force when it was written.
+        """
+        self._value_mm = _clamp(float(value_mm), 0.0, self._d_max)
         return self.deficit
 
 
@@ -431,6 +461,10 @@ class ETModel(ETBalanceModel):
     ``DrynessIndexSensor``) that the abstraction unifies here.
     """
 
+    method_id: ClassVar[str] = "et_simple"
+
+    required_sensors: ClassVar[frozenset[SensorKind]] = frozenset({SensorKind.TEMPERATURE})
+
     def __init__(
         self,
         *,
@@ -474,6 +508,12 @@ class PenmanMonteithModel(ETBalanceModel):
     works in mm/h, so the rate is ET₀/24. Soil heat flux ``G`` is taken as 0
     (daily assumption).
     """
+
+    method_id: ClassVar[str] = "penman_monteith"
+
+    required_sensors: ClassVar[frozenset[SensorKind]] = frozenset(
+        {SensorKind.TEMPERATURE, SensorKind.HUMIDITY, SensorKind.WIND_SPEED, SensorKind.NET_RADIATION}
+    )
 
     def __init__(
         self,
@@ -547,6 +587,10 @@ class HargreavesModel(ETBalanceModel):
     on each :class:`HargreavesStep`. The rate is ET0/24 for the hourly integrator.
     """
 
+    method_id: ClassVar[str] = "hargreaves"
+
+    required_sensors: ClassVar[frozenset[SensorKind]] = frozenset({SensorKind.TEMP_MAX, SensorKind.TEMP_MIN})
+
     def __init__(
         self,
         *,
@@ -609,6 +653,10 @@ class VWCSystemModel(WaterBalanceModel):
     VWC deficit is benign (reference model D5). All zones scale the same current
     reading by their Kc downstream; the frame is shared.
     """
+
+    method_id: ClassVar[str] = "vwc_system"
+
+    required_sensors: ClassVar[frozenset[SensorKind]] = frozenset({SensorKind.SOIL_MOISTURE})
 
     is_stateful: ClassVar[bool] = False
 
@@ -678,3 +726,79 @@ class VWCPerZoneModel(VWCSystemModel):
     def reference_frame(self) -> ReferenceFrame:
         """A per-zone probe is *not* shared: deficits differ patch by patch."""
         return ReferenceFrame.VWC_PER_ZONE
+
+
+# ── The catalogue, and choosing from it ────────────────────────────────────
+#
+# Two halves of one rule live here. The catalogue is what the integration can
+# offer at all; the capability match is which of those a given installation may
+# actually pick. Keeping them together is deliberate: a model added to the
+# catalogue without declaring what it needs would be offered to everyone, and
+# that is precisely the failure the match exists to prevent.
+
+#: Every model the integration can offer, richest first. Order is the tie-break
+#: when nobody has expressed a preference: with more sensors declared you get a
+#: better estimate without having to ask for it.
+MODEL_CATALOGUE: tuple[type[WaterBalanceModel], ...] = (
+    VWCSystemModel,
+    PenmanMonteithModel,
+    HargreavesModel,
+    ETModel,
+)
+
+#: Fallback when the site declares nothing at all — the model that needs least.
+DEFAULT_METHOD_ID: str = ETModel.method_id
+
+
+def models_offered_by(env) -> tuple[type[WaterBalanceModel], ...]:
+    """The models this installation may choose, richest first.
+
+    The whole rule is ``env.satisfies(model.required_sensors)``. A site with a
+    thermometer alone gets one option; adding a humidity, wind and radiation
+    sensor unlocks Penman-Monteith without touching any code.
+
+    Takes the site rather than a set of sensor kinds so the caller cannot
+    accidentally ask the question against a stale snapshot of the bindings.
+    """
+    return tuple(model for model in MODEL_CATALOGUE if env.satisfies(model.required_sensors))
+
+
+def model_by_id(method_id: str) -> type[WaterBalanceModel] | None:
+    """The catalogue entry with this identifier, or ``None`` if unknown."""
+    return next((m for m in MODEL_CATALOGUE if m.method_id == method_id), None)
+
+
+def build_model(
+    env,
+    *,
+    method_id: str | None = None,
+    alpha: float = DEFAULT_ALPHA,
+    t_base: float = DEFAULT_T_BASE,
+    d_max: float = DEFAULT_D_MAX,
+    field_capacity: float = DEFAULT_FIELD_CAPACITY,
+    root_depth: float = DEFAULT_ROOT_DEPTH,
+    kc: float = DEFAULT_KC,
+) -> WaterBalanceModel:
+    """Build the water-balance model this site should run.
+
+    ``method_id`` is the user's choice when they have made one. It is honoured
+    only if the site still satisfies it: a sensor can be removed after the
+    choice was stored, and silently running a model whose inputs are missing
+    would produce a confident wrong number. In that case the richest satisfied
+    model is used instead — degrading, not failing, because irrigation must
+    keep working.
+
+    With no choice stored, the richest satisfied model wins, which preserves
+    today's behaviour exactly: a site with only a thermometer gets
+    :class:`ETModel`, and one with a soil probe gets the VWC model that already
+    bypassed ET.
+    """
+    offered = models_offered_by(env)
+    chosen = model_by_id(method_id) if method_id else None
+    if chosen is None or chosen not in offered:
+        chosen = offered[0] if offered else ETModel
+    if issubclass(chosen, VWCSystemModel):
+        return chosen(field_capacity=field_capacity, root_depth=root_depth, d_max=d_max)
+    if issubclass(chosen, ETModel):
+        return chosen(alpha=alpha, t_base=t_base, kc=kc, d_max=d_max)
+    return chosen(kc=kc, d_max=d_max)

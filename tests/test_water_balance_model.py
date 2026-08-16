@@ -250,3 +250,125 @@ class TestHigherTiers:
         assert ETModel().reference_frame is ReferenceFrame.ET
         assert HargreavesModel(latitude_deg=45.0).reference_frame is ReferenceFrame.ET
         assert PenmanMonteithModel().reference_frame is ReferenceFrame.ET
+
+
+class TestCapabilityMatch:
+    """Which models a site may pick, and what happens when its sensors change.
+
+    The rule is one line — ``declared >= required`` — so what these tests really
+    hold is the two halves being written in the same vocabulary. A model added
+    to the catalogue without declaring what it needs would be offered to
+    everyone, which is the failure the match exists to prevent.
+    """
+
+    def test_every_catalogued_model_declares_what_it_needs(self):
+        from never_dry.water_balance_model import MODEL_CATALOGUE
+
+        for model in MODEL_CATALOGUE:
+            assert isinstance(model.required_sensors, frozenset), model.__name__
+            assert model.method_id, model.__name__
+
+    def test_identifiers_are_unique(self):
+        """The id is stored in the config entry: a collision would silently swap models."""
+        from never_dry.water_balance_model import MODEL_CATALOGUE
+
+        ids = [m.method_id for m in MODEL_CATALOGUE]
+        assert len(ids) == len(set(ids))
+
+    def test_a_thermometer_alone_offers_only_the_simple_tier(self):
+        from never_dry.environment import Environment
+        from never_dry.water_balance_model import ETModel, models_offered_by
+
+        env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
+        assert models_offered_by(env) == (ETModel,)
+
+    def test_declaring_the_richer_sensors_unlocks_penman_without_touching_code(self):
+        from never_dry.environment import Environment
+        from never_dry.water_balance_model import PenmanMonteithModel, models_offered_by
+
+        env = Environment(
+            temperature_sensor="sensor.t",
+            rain_sensor="sensor.r",
+            humidity_sensor="sensor.h",
+            wind_speed_sensor="sensor.w",
+            net_radiation_sensor="sensor.rad",
+        )
+        assert PenmanMonteithModel in models_offered_by(env)
+
+    def test_a_probe_wins_over_the_weather_tiers(self):
+        """A measured soil is better evidence than an estimate, so it leads the order."""
+        from never_dry.environment import Environment
+        from never_dry.water_balance_model import VWCSystemModel, models_offered_by
+
+        env = Environment(
+            temperature_sensor="sensor.t",
+            rain_sensor="sensor.r",
+            soil_moisture_sensor="sensor.vwc",
+        )
+        assert models_offered_by(env)[0] is VWCSystemModel
+
+
+class TestBuildModel:
+    """Turning a site plus a stored preference into the object that runs."""
+
+    def _bare_site(self):
+        from never_dry.environment import Environment
+
+        return Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
+
+    def test_without_a_preference_it_reproduces_todays_behaviour(self):
+        from never_dry.water_balance_model import ETModel, build_model
+
+        assert isinstance(build_model(self._bare_site()), ETModel)
+
+    def test_a_site_with_a_probe_gets_the_probe_model(self):
+        from never_dry.environment import Environment
+        from never_dry.water_balance_model import VWCSystemModel, build_model
+
+        env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r", soil_moisture_sensor="sensor.vwc")
+        assert isinstance(build_model(env), VWCSystemModel)
+
+    def test_a_choice_the_site_cannot_support_degrades_instead_of_failing(self):
+        """A sensor can be removed after the choice was stored. Watering must not stop."""
+        from never_dry.water_balance_model import ETModel, build_model
+
+        model = build_model(self._bare_site(), method_id="penman_monteith")
+        assert isinstance(model, ETModel)
+
+    def test_an_unknown_identifier_falls_back_rather_than_raising(self):
+        """A config entry from a future version must not break setup."""
+        from never_dry.water_balance_model import ETModel, build_model
+
+        assert isinstance(build_model(self._bare_site(), method_id="no_such_model"), ETModel)
+
+    def test_a_supported_choice_is_honoured_over_the_default_order(self):
+        """The user's preference beats the ranking — that is the point of asking."""
+        from never_dry.environment import Environment
+        from never_dry.water_balance_model import ETModel, build_model
+
+        env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r", soil_moisture_sensor="sensor.vwc")
+        assert isinstance(build_model(env, method_id="et_simple"), ETModel)
+
+    def test_the_configured_values_reach_the_model(self):
+        from never_dry.water_balance_model import build_model
+
+        model = build_model(self._bare_site(), alpha=0.5, t_base=5.0, d_max=42.0)
+        assert model.d_max == 42.0
+        assert model.step(ETStep(dt_h=24.0, temp_c=15.0)).value_mm == pytest.approx(0.5 * (15.0 - 5.0))
+
+
+class TestRestore:
+    """Adopting a value computed elsewhere — a restart, or a recorder replay."""
+
+    def test_it_adopts_the_value(self):
+        model = ETModel()
+        assert model.restore(12.5).value_mm == 12.5
+
+    def test_a_stored_value_above_the_current_ceiling_is_clamped(self):
+        """d_max can shrink between releases; a stored value must not outlive it."""
+        model = ETModel(d_max=10.0)
+        assert model.restore(50.0).value_mm == 10.0
+
+    def test_a_negative_stored_value_is_refused(self):
+        model = ETModel()
+        assert model.restore(-3.0).value_mm == 0.0

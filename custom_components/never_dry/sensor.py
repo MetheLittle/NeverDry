@@ -111,7 +111,15 @@ from .environment import DEFAULT_LATITUDE, Environment, RainSensorType
 from .services import async_setup_services
 from .unit_convert import LPM_TO_GPH, LPM_TO_LPH
 from .valve_fsm import FailureKind, ValveState
-from .water_balance_model import ETModel, ReferenceFrame, vwc_deficit_mm, vwc_to_fraction
+from .water_balance_model import (
+    ETModel,
+    ETStep,
+    ReferenceFrame,
+    VWCReading,
+    WaterBalanceModel,
+    build_model,
+    vwc_to_fraction,
+)
 from .zone import Zone as DomainZone
 
 _LOGGER = logging.getLogger(__name__)
@@ -696,7 +704,18 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         self._d_max = config.get(CONF_D_MAX, DEFAULT_D_MAX)
         self._field_cap = config.get(CONF_FIELD_CAPACITY, DEFAULT_FIELD_CAPACITY)
         self._root_depth = config.get(CONF_ROOT_DEPTH, DEFAULT_ROOT_DEPTH)
-        self._deficit = 0.0
+        # The water balance itself lives in the model, not here. This entity
+        # supplies readings and publishes the answer; which physics turns one
+        # into the other is the model's business, and it is chosen once — by
+        # what the installation declared, which is the capability match.
+        self._model: WaterBalanceModel = build_model(
+            self._env,
+            alpha=self._alpha,
+            t_base=self._t_base,
+            d_max=self._d_max,
+            field_capacity=self._field_cap,
+            root_depth=self._root_depth,
+        )
         # None = baseline unknown (fresh boot): the first reading fixes the
         # baseline WITHOUT crediting. Starting at 0.0 re-credited the whole
         # cumulative/24h rain reading at every restart — 14.2 mm of rain
@@ -716,6 +735,30 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         self._vwc_invalid_warned = False
         if device_info:
             self._attr_device_info = device_info
+
+    # ── Delegation to the model (the water balance) ─────────────────────────
+
+    @property
+    def _deficit(self) -> float:
+        """The current deficit [mm] — a view onto the model, which owns it.
+
+        Kept under the old private name so every existing reader and writer is
+        unaffected, exactly as the site attributes were when they moved into
+        :class:`Environment`. The point is that there is now one storage: an
+        assignment here cannot drift from what the model integrates, because it
+        *is* what the model integrates.
+        """
+        return self._model.deficit.value_mm
+
+    @_deficit.setter
+    def _deficit(self, value: float) -> None:
+        """Adopt a deficit computed outside a reading — a restore or a backfill."""
+        self._model.restore(value)
+
+    @property
+    def reference_frame(self) -> ReferenceFrame:
+        """The frame this hub's deficit is defined against — the model decides it."""
+        return self._model.reference_frame
 
     # ── Delegation to the site (Environment) ────────────────────────────────
     #
@@ -897,9 +940,14 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 self.async_write_ha_state()
                 return
 
-            et_h = ETModel.et_hourly(t_median, alpha=self._alpha, t_base=self._t_base)
-            et_dt = et_h * dt_h
-            self._deficit = max(0.0, min(self._deficit + et_dt - rain_delta, self._d_max))
+            # The reading goes to the model and the model does the physics. The
+            # rate is asked for separately because the zones need it: each one
+            # integrates the same rate against its own Kc, so the tier the site
+            # runs reaches every zone through this broadcast, with no zone
+            # needing to know which tier that is.
+            reading = ETStep(dt_h=dt_h, temp_c=t_median, rain_mm=rain_delta)
+            et_h = self._model.et_rate(reading)
+            self._model.step(reading)
             self._broadcast_to_zones(dt_h, et_h, rain_delta)
 
         self.async_write_ha_state()
@@ -954,7 +1002,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 vwc,
             )
 
-        self._deficit = max(0.0, vwc_deficit_mm(vwc, field_capacity=self._field_cap, root_depth=self._root_depth))
+        self._model.step(VWCReading(vwc=vwc))
 
     def _compute_rain_delta(self) -> float:
         """Compute rain increment since last reading.
@@ -1037,8 +1085,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             return
 
         rain_delta = self._compute_rain_delta()
-        et_dt = ETModel.et_hourly(t_median, alpha=self._alpha, t_base=self._t_base) * dt_h
-        self._deficit = max(0.0, min(self._deficit + et_dt - rain_delta, self._d_max))
+        self._model.step(ETStep(dt_h=dt_h, temp_c=t_median, rain_mm=rain_delta))
 
     async def _backfill_from_recorder(self) -> None:
         """Replay historical T/rain from HA recorder to bootstrap deficit.
