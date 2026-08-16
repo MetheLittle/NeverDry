@@ -547,21 +547,28 @@ class NeverDryZoneCard extends HTMLElement {
   }
 
   _exposureCell(ents) {
-    const carrier = ents.deficit || ents.volume;
-    const a = (carrier && carrier.attributes) || {};
+    // The main zone entity, not the deficit projection: the configuration
+    // attributes live on the Volume sensor, while the deficit carries only the
+    // valve/session ones. Reading the wrong carrier finds nothing and draws
+    // nothing, which is indistinguishable from "this zone has no exposure".
+    const a = { ...((ents.volume && ents.volume.attributes) || {}), ...((ents.deficit && ents.deficit.attributes) || {}) };
     const key = a.exposure;
     if (!key) return "";
 
+    // Label and icon per exposure: the icon carries the meaning at a glance in a
+    // grid people scan rather than read, and a single sun for every zone would
+    // carry none.
     const labels = {
-      deep_shade: "expDeepShade",
-      morning_sun: "expMorningSun",
-      afternoon_sun: "expAfternoonSun",
-      full_sun: "expFullSun",
-      windy: "expWindy",
-      reflected_heat: "expReflectedHeat",
-      custom: "expCustom",
+      deep_shade: ["expDeepShade", "mdi:weather-cloudy"],
+      morning_sun: ["expMorningSun", "mdi:weather-sunset-up"],
+      afternoon_sun: ["expAfternoonSun", "mdi:weather-sunset-down"],
+      full_sun: ["expFullSun", "mdi:weather-sunny"],
+      windy: ["expWindy", "mdi:weather-windy"],
+      reflected_heat: ["expReflectedHeat", "mdi:sun-thermometer"],
+      custom: ["expCustom", "mdi:tune-variant"],
     };
-    const name = labels[key] ? t(this._hass, labels[key]) : String(key);
+    const [labelKey, icon] = labels[key] || [null, "mdi:weather-partly-cloudy"];
+    const name = labelKey ? t(this._hass, labelKey) : String(key);
     const factor = Number(a.microclimate_factor);
     // The multiplier is only worth the space when it is doing something: at 1.00
     // it says "no correction", which the preset name already says.
@@ -569,7 +576,7 @@ class NeverDryZoneCard extends HTMLElement {
 
     return `
         <div class="nd-cell">
-          <ha-icon icon="mdi:weather-sunny"></ha-icon>
+          <ha-icon icon="${icon}"></ha-icon>
           <div class="nd-cell-txt">
             <span class="nd-cell-lbl">${escapeHtml(t(this._hass, "exposure"))}</span>
             <span class="nd-cell-val">${escapeHtml(value)}</span>
