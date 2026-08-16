@@ -47,14 +47,78 @@ When the deficit is high, your soil is dry and needs water. When it rains, the d
 
 So if your deficit is 10 mm and your garden is 45 m², you need 450 liters (adjusted for your irrigation system's efficiency).
 
-### Evapotranspiration (ET)
+### How the water loss is estimated: the four methods
 
-The integration estimates how much water your soil loses each hour based on temperature:
+NeverDry can compute the deficit in four ways. Which one you get is decided by
+**the sensors you have declared** — you do not have to know the science to get a
+sensible answer, and you can override the choice if you do.
 
-- **Below 9°C** (configurable): no water loss — plants are dormant
-- **Above 9°C**: water loss increases linearly with temperature
-- **Hot summer day (35°C)**: approximately 0.24 mm/h → 5.7 mm/day
-- **Cool spring day (15°C)**: approximately 0.06 mm/h → 1.3 mm/day
+#### What each method needs
+
+| Method | Thermometer | Air humidity | Wind | Solar radiation | Soil probe |
+|---|---|---|---|---|---|
+| **Simple (temperature)** | required | — | — | — | — |
+| **Hargreaves-Samani** | required | — | — | — | — |
+| **Penman-Monteith (FAO-56)** | required | required | required | improves it | — |
+| **Soil moisture probe** | — | — | — | — | required |
+
+Two entries in that table need a word:
+
+- **Solar radiation improves Penman-Monteith, it is not required.** With a
+  pyranometer the radiation balance is computed from the measurement; without
+  one it is estimated from the daily temperature swing. Requiring the instrument
+  would shut most weather stations out of the method for precision they cannot
+  supply anyway.
+- **Rain is not listed** because no method needs it to compute evaporation. Rain
+  is subtracted from the balance afterwards; with no rain sensor the term is
+  simply zero.
+
+**You are never asked for daily maximum and minimum temperature.** NeverDry
+observes them from the thermometer it already reads.
+
+#### What each method actually uses
+
+The table above answers "what do I have to connect". This one answers "what is
+the difference", which is not the same question — the first two methods read the
+same sensor and do very different things with it.
+
+| Method | Read from sensors | Worked out by NeverDry | Constants |
+|---|---|---|---|
+| **Simple** | the temperature *right now* | nothing | `alpha`, which **you** have to tune, and a base temperature |
+| **Hargreaves-Samani** | temperature, continuously | the day's **max and min**; the **sunlight available** at your latitude on today's date | fixed, internationally calibrated |
+| **Penman-Monteith** | temperature, humidity, wind, radiation if present | daily max/min; the **radiation balance**; the radiation itself if there is no sensor; wind corrected to 2 m | physical constants |
+| **Soil probe** | water content | the deficit, directly | field capacity, root depth |
+
+The practical difference between the first two, on the same thermometer:
+
+- The simple method **does not know what month it is.** The same 12 °C in
+  January and in July gives it the same answer. Hargreaves gives roughly three
+  times more in July, because it computes how much sunlight is astronomically
+  available at your latitude on that date.
+- The simple method **does not know whether the sky is clear.** A wide swing
+  between night and day means clear skies; a narrow one means cloud or humidity.
+  Hargreaves reads that; the simple method cannot see it.
+- The simple method has `alpha`, a number you are expected to tune and that
+  nobody can really tune. Hargreaves has none.
+
+#### When "automatic" picks what
+
+Automatic means **the best method your declared sensors support** — including
+after an upgrade. If you add a humidity and a wind sensor, the estimate improves
+on its own; that is the point of leaving it on automatic.
+
+One case is decided by measurement rather than by the sensor list: if your
+thermometer shows almost no difference between night and day over a full day, it
+is probably sheltered, indoors or in permanent shade. The methods that read the
+daily swing would take that flatness for permanent cloud and **water your garden
+less than it needs, every day, without saying so**. So automatic steps back to
+the simple method and tells you why.
+
+**Where to see it:** the *Water balance method* sensor on the NeverDry device
+shows the method actually running, and its attributes carry the reason it was
+chosen, what you configured, and which sensors were counted. If you disagree —
+for instance because you know the sensor is genuinely outdoors — pick the method
+yourself in the options and your choice is kept.
 
 ### Precipitation handling
 
