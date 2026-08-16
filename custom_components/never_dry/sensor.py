@@ -892,6 +892,11 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         # would otherwise publish half a list with no explanation, which reads
         # as "the feature is not working" rather than "it has not run yet".
         self._last_inputs: dict = {"status": "no reading computed since startup"}
+        # Entities that show what the model was fed. They subscribe directly
+        # rather than watching this entity's state: the inputs change without
+        # the deficit changing — at startup, most obviously — and a listener on
+        # the state would sleep through exactly the update that matters.
+        self._input_listeners: list[Callable[[], None]] = []
         self._model: WaterBalanceModel = ETModel()
         self._select_model()
         # None = baseline unknown (fresh boot): the first reading fixes the
@@ -1286,6 +1291,21 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         }
         return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
 
+    def register_input_listener(self, callback_fn: Callable[[], None]) -> Callable[[], None]:
+        """Subscribe to changes of the published model inputs; returns the unsubscribe."""
+        self._input_listeners.append(callback_fn)
+
+        def _unsubscribe() -> None:
+            with contextlib.suppress(ValueError):
+                self._input_listeners.remove(callback_fn)
+
+        return _unsubscribe
+
+    def _notify_input_listeners(self) -> None:
+        """Tell the derived entities to republish."""
+        for listener in list(self._input_listeners):
+            listener()
+
     def _publish_initial_inputs(self) -> None:
         """Fill the derived values once at startup, without touching the balance.
 
@@ -1307,6 +1327,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             return
         with contextlib.suppress(Exception):
             self._build_reading(0.0, temp, 0.0, datetime.now())
+        self._notify_input_listeners()
 
     def _warming_up_inputs(self, temp_c: float) -> dict:
         """What to publish while a tier cannot yet compute its own rate.
@@ -1393,6 +1414,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
     def _broadcast_to_zones(self, dt_h: float, et_h: float, rain: float) -> None:
         """Notify all registered zone sensors with ET/rain data."""
         self._last_et_rate = et_h
+        self._notify_input_listeners()
         for listener in self._zone_listeners:
             listener(dt_h, et_h, rain)
 
@@ -3075,13 +3097,10 @@ class WaterBalanceMethodSensor(SensorEntity):
         inputs forever, because at startup no reading has been built yet. The hub
         writes its own state on every tick; this rides on that.
         """
-        # ``self.hass``, not a reference captured at construction: Home Assistant
-        # assigns it before this runs, while the hub has none yet — capturing it
-        # early stored ``None`` and the entity came up unavailable.
-        self.async_on_remove(async_track_state_change_event(self.hass, [self._hub.entity_id], self._on_hub_change))
+        self.async_on_remove(self._hub.register_input_listener(self._republish))
 
     @callback
-    def _on_hub_change(self, _event) -> None:
+    def _republish(self) -> None:
         """Republish: the method rarely changes, the inputs change every tick."""
         self.async_write_ha_state()
 
@@ -3150,11 +3169,11 @@ class ModelInputSensor(SensorEntity):
             self._attr_device_info = device_info
 
     async def async_added_to_hass(self) -> None:
-        """Follow the hub: these change on every tick, and nothing else moves them."""
-        self.async_on_remove(async_track_state_change_event(self.hass, [self._hub.entity_id], self._on_hub_change))
+        """Follow the hub's inputs directly, not its state."""
+        self.async_on_remove(self._hub.register_input_listener(self._republish))
 
     @callback
-    def _on_hub_change(self, _event) -> None:
+    def _republish(self) -> None:
         self.async_write_ha_state()
 
     @property
