@@ -801,4 +801,9 @@ def build_model(
         return chosen(field_capacity=field_capacity, root_depth=root_depth, d_max=d_max)
     if issubclass(chosen, ETModel):
         return chosen(alpha=alpha, t_base=t_base, kc=kc, d_max=d_max)
+    if issubclass(chosen, HargreavesModel):
+        # The astronomical radiation term is a function of *where you are*, and
+        # the site knows it. Hargreaves is the one tier whose constructor needs
+        # something from the environment beyond the sensors it reads.
+        return chosen(latitude_deg=env.latitude, kc=kc, d_max=d_max)
     return chosen(kc=kc, d_max=d_max)

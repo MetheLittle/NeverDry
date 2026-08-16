@@ -13,6 +13,8 @@ question with the same rule — which is why the validator builds a real
 form-shaped code.
 """
 
+from typing import ClassVar
+
 from never_dry.config_flow import _et_method_error
 from never_dry.const import (
     CONF_ET_METHOD,
@@ -91,3 +93,71 @@ class TestAcceptance:
         """The options form sends nothing for a cleared picker; ``None`` must not satisfy."""
         cleared = {**BARE_SITE, CONF_ET_METHOD: "vwc_system", CONF_VWC_SENSOR: None}
         assert _et_method_error(cleared) == "et_method_missing_sensors"
+
+
+class TestFormAndRuntimeAgree:
+    """The guard for the drift this design can suffer and nothing else would show.
+
+    Two places answer "can this site run this method": the form, so the user is
+    told, and ``build_model``, so the right object runs. They are written once
+    and called twice today — but nothing structural stops someone adding a
+    special case to one of them, and the symptom would be silent. A method the
+    form accepts and the builder declines produces a model the user did not
+    choose, with no error anywhere.
+    """
+
+    SITES: ClassVar[dict] = {
+        "bare": BARE_SITE,
+        "with_probe": {**BARE_SITE, CONF_VWC_SENSOR: "sensor.vwc"},
+        "with_extremes": {
+            **BARE_SITE,
+            CONF_TEMP_MAX_SENSOR: "sensor.tmax",
+            CONF_TEMP_MIN_SENSOR: "sensor.tmin",
+        },
+        "full_weather": {
+            **BARE_SITE,
+            CONF_HUMIDITY_SENSOR: "sensor.h",
+            CONF_WIND_SPEED_SENSOR: "sensor.w",
+            CONF_NET_RADIATION_SENSOR: "sensor.rad",
+        },
+    }
+
+    def _environment_for(self, site):
+        from never_dry.environment import Environment
+
+        return Environment(
+            temperature_sensor=site.get(CONF_TEMP_SENSOR) or "",
+            rain_sensor=site.get(CONF_RAIN_SENSOR) or "",
+            soil_moisture_sensor=site.get(CONF_VWC_SENSOR),
+            humidity_sensor=site.get(CONF_HUMIDITY_SENSOR),
+            wind_speed_sensor=site.get(CONF_WIND_SPEED_SENSOR),
+            net_radiation_sensor=site.get(CONF_NET_RADIATION_SENSOR),
+            temp_max_sensor=site.get(CONF_TEMP_MAX_SENSOR),
+            temp_min_sensor=site.get(CONF_TEMP_MIN_SENSOR),
+        )
+
+    def test_an_accepted_method_is_the_one_that_actually_runs(self):
+        from never_dry.water_balance_model import MODEL_CATALOGUE, build_model
+
+        checked = 0
+        for site in self.SITES.values():
+            for model in MODEL_CATALOGUE:
+                accepted = _et_method_error({**site, CONF_ET_METHOD: model.method_id}) is None
+                built = build_model(self._environment_for(site), method_id=model.method_id)
+                if accepted:
+                    assert isinstance(built, model), (
+                        f"the form accepted {model.method_id} but the builder ran {type(built).__name__}"
+                    )
+                else:
+                    assert not isinstance(built, model), (
+                        f"the form refused {model.method_id} but the builder ran it anyway"
+                    )
+                checked += 1
+        assert checked == len(self.SITES) * len(MODEL_CATALOGUE)
+
+    def test_automatic_always_produces_something_runnable(self):
+        """Whatever the site declares, ``auto`` must land on a model, never on nothing."""
+        from never_dry.water_balance_model import WaterBalanceModel, build_model
+
+        for site in self.SITES.values():
+            assert isinstance(build_model(self._environment_for(site)), WaterBalanceModel)

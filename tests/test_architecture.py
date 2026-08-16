@@ -266,3 +266,98 @@ def test_a_wired_module_does_not_claim_to_be_inert(module):
     source = (PACKAGE / f"{module}.py").read_text(encoding="utf-8")
     docstring = ast.get_docstring(ast.parse(source)) or ""
     assert INERT_CLAIM not in docstring, f"{module}.py is wired but its docstring still says {INERT_CLAIM!r}"
+
+
+# ── The shape of the graph, not only its layers ───────────────────────
+#
+# Purity and "no upward dependency" bound the domain from the outside. They say
+# nothing about what the domain modules do to *each other*, and that is where a
+# model turns to spaghetti: not in one bad import, but in a dozen reasonable
+# ones nobody had to justify. Two properties keep the graph readable.
+#
+# The first is that it stays acyclic. The second is that every edge between
+# domain modules is written down here — so adding one is a decision with a
+# diff, and the reviewer sees the arrow rather than inferring it.
+
+#: Every allowed import between domain modules, as ``importer -> imported``.
+#: An edge missing from this map fails the test even if it is perfectly
+#: sensible; that is the point — write it down, and say why in the commit.
+ALLOWED_DOMAIN_EDGES: dict[str, set[str]] = {
+    # The models are the vocabulary of the deficit, and the zone owns one.
+    "zone": {"water_balance_model"},
+    # A model declares what it needs in the same words the site declares what it
+    # has, so the capability match is expressible at all. The reverse arrow must
+    # never appear: the site knows nothing about the physics that reads it.
+    "water_balance_model": {"environment"},
+    # Scheduling decides *which zone* comes next, so it reads zones.
+    "scheduler": {"zone"},
+    "environment": set(),
+}
+
+
+def _domain_edges() -> dict[str, set[str]]:
+    """The import graph restricted to domain modules, as it exists today."""
+    domain = set(PURE_DOMAIN_MODULES)
+    return {module: _imported_names(module) & domain for module in domain}
+
+
+@pytest.mark.parametrize("module", PURE_DOMAIN_MODULES)
+def test_domain_imports_are_declared(module):
+    """A domain module may import only what this file says it may.
+
+    The failure message is the useful part: it names the undeclared edge, so the
+    fix is either to add it here with a reason, or to notice that the import was
+    the shortcut it looked like.
+    """
+    actual = _domain_edges()[module]
+    allowed = ALLOWED_DOMAIN_EDGES[module]
+    undeclared = sorted(actual - allowed)
+    assert not undeclared, (
+        f"{module}.py imports {undeclared}, which ALLOWED_DOMAIN_EDGES does not permit. "
+        f"Add the edge with a reason, or drop the import"
+    )
+
+
+def test_declared_edges_are_not_stale():
+    """The other direction: an edge that no longer exists must not be claimed.
+
+    A permission list that only ever grows stops describing the code and starts
+    excusing it.
+    """
+    actual = _domain_edges()
+    stale = {module: sorted(allowed - actual[module]) for module, allowed in ALLOWED_DOMAIN_EDGES.items()}
+    stale = {module: names for module, names in stale.items() if names}
+    assert not stale, f"declared edges nobody uses any more: {stale}"
+
+
+def test_the_package_has_no_import_cycles():
+    """No cycle anywhere in the package, domain and HA layer alike.
+
+    A cycle is the point at which two modules stop being two things. It is also
+    the failure that hides best: Python tolerates most of them at runtime as
+    long as the import order happens to work, so it surfaces as an obscure
+    ImportError months later, on someone else's machine.
+    """
+    modules = set(_integration_modules())
+    graph = {m: _imported_names(m) & modules for m in modules}
+
+    visiting: set[str] = set()
+    done: set[str] = set()
+    cycles: list[list[str]] = []
+
+    def walk(node: str, path: list[str]) -> None:
+        if node in done:
+            return
+        if node in visiting:
+            cycles.append([*path[path.index(node) :], node])
+            return
+        visiting.add(node)
+        for nxt in sorted(graph[node]):
+            walk(nxt, [*path, node])
+        visiting.discard(node)
+        done.add(node)
+
+    for module in sorted(modules):
+        walk(module, [])
+
+    assert not cycles, f"import cycles: {[' -> '.join(c) for c in cycles]}"
