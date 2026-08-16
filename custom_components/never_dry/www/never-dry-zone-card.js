@@ -40,6 +40,15 @@ const I18N = {
     waitingForValve: "waiting for first contact",
     unreachableHint: "check the radio link or the batteries",
     valve: "Valve",
+    exposure: "Exposure",
+    configure: "Configure this zone",
+    expDeepShade: "Deep shade",
+    expMorningSun: "Morning sun",
+    expAfternoonSun: "Afternoon sun",
+    expFullSun: "Full sun",
+    expWindy: "Windy",
+    expReflectedHeat: "Reflected heat",
+    expCustom: "Custom",
     secNext: "Next session",
     secLast: "Last session",
     secTotals: "Totals",
@@ -60,6 +69,15 @@ const I18N = {
     waitingForValve: "in attesa di risposta",
     unreachableHint: "controlla il collegamento radio o le batterie",
     valve: "Valvola",
+    exposure: "Esposizione",
+    configure: "Configura questa zona",
+    expDeepShade: "Ombra piena",
+    expMorningSun: "Sole al mattino",
+    expAfternoonSun: "Sole al pomeriggio",
+    expFullSun: "Pieno sole",
+    expWindy: "Ventoso",
+    expReflectedHeat: "Calore riflesso",
+    expCustom: "Personalizzata",
     secNext: "Prossima sessione",
     secLast: "Ultima sessione",
     secTotals: "Totali",
@@ -334,6 +352,7 @@ class NeverDryZoneCard extends HTMLElement {
         <div class="nd-head">
           <ha-icon icon="mdi:sprinkler-variant"></ha-icon>
           <span class="nd-title"></span>
+          <a class="nd-config" href="#" title="" hidden><ha-icon icon="mdi:cog-outline"></ha-icon></a>
         </div>
 
         <div class="nd-status">
@@ -477,7 +496,9 @@ class NeverDryZoneCard extends HTMLElement {
       ["mdi:percent", ents.efficiency, "Efficiency"],
       ["mdi:cog", ents.irrigationMode, "Mode"],
       ["mdi:clock-time-six", ents.irrigationTime, "Irrigation time"],
-    ]);
+    ], this._exposureCell(ents));
+
+    this._updateConfigLink(ents);
 
     // --- action buttons (localized label from button entity friendly_name) ---
     for (const d of this._actionDefs) {
@@ -489,10 +510,77 @@ class NeverDryZoneCard extends HTMLElement {
     }
   }
 
-  _fillSection(key, title, items) {
+  /**
+   * The site exposure, as a cell built from attributes rather than an entity.
+   *
+   * It multiplies the crop coefficient, so it is one of the few settings that
+   * silently changes how much every session delivers — and until now the card
+   * showed the resulting Kc without showing what shaped it. A user comparing two
+   * zones with the same plants and different water had nothing to look at.
+   *
+   * Attributes, not an entity: the exposure is static configuration, and a
+   * per-zone entity for a value that changes twice a year is noise in a list
+   * people are meant to read.
+   */
+  /**
+   * Point the gear at this zone's device page, or at the integration.
+   *
+   * Home Assistant has no deep link into one step of an options flow, so the
+   * device page is as close as the platform allows — from there the zone's
+   * settings are one click away. Better than the alternative, which is telling
+   * people to go and find it.
+   *
+   * The device id comes from the entity registry the frontend already holds. It
+   * is not guaranteed to be there on every version, so a missing one falls back
+   * to the integration page rather than rendering a link that goes nowhere.
+   */
+  _updateConfigLink(ents) {
+    const link = this.querySelector(".nd-config");
+    if (!link) return;
+    const carrier = ents.deficit || ents.volume;
+    const registry = (this._hass && this._hass.entities) || {};
+    const deviceId = carrier && registry[carrier.entity_id] && registry[carrier.entity_id].device_id;
+
+    link.href = deviceId ? `/config/devices/device/${deviceId}` : "/config/integrations/integration/never_dry";
+    link.title = t(this._hass, "configure");
+    link.hidden = !carrier;
+  }
+
+  _exposureCell(ents) {
+    const carrier = ents.deficit || ents.volume;
+    const a = (carrier && carrier.attributes) || {};
+    const key = a.exposure;
+    if (!key) return "";
+
+    const labels = {
+      deep_shade: "expDeepShade",
+      morning_sun: "expMorningSun",
+      afternoon_sun: "expAfternoonSun",
+      full_sun: "expFullSun",
+      windy: "expWindy",
+      reflected_heat: "expReflectedHeat",
+      custom: "expCustom",
+    };
+    const name = labels[key] ? t(this._hass, labels[key]) : String(key);
+    const factor = Number(a.microclimate_factor);
+    // The multiplier is only worth the space when it is doing something: at 1.00
+    // it says "no correction", which the preset name already says.
+    const value = Number.isFinite(factor) && Math.abs(factor - 1) > 1e-9 ? `${name} (x${factor.toFixed(2)})` : name;
+
+    return `
+        <div class="nd-cell">
+          <ha-icon icon="mdi:weather-sunny"></ha-icon>
+          <div class="nd-cell-txt">
+            <span class="nd-cell-lbl">${escapeHtml(t(this._hass, "exposure"))}</span>
+            <span class="nd-cell-val">${escapeHtml(value)}</span>
+          </div>
+        </div>`;
+  }
+
+  _fillSection(key, title, items, extraHtml = "") {
     const box = this.querySelector(`.nd-section[data-key="${key}"]`);
     if (!box) return;
-    const html = this._rows(items);
+    const html = this._rows(items) + extraHtml;
     box.querySelector(".nd-sec-title").textContent = title;
     box.querySelector(".nd-grid").innerHTML = html;
     box.style.display = html ? "" : "none"; // hide a section with no available data
@@ -676,6 +764,8 @@ const CARD_CSS = `
     transition: width .4s ease, background .4s ease; }
   .nd-bar-sub { font-size:.75rem; color:var(--secondary-text-color); margin-top:4px; }
   .nd-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; }
+  .nd-config { margin-left:auto; color:var(--secondary-text-color); text-decoration:none; opacity:.7; }
+  .nd-config:hover { opacity:1; color:var(--primary-color); }
   .nd-cell { display:flex; align-items:center; gap:8px; min-width:0; }
   .nd-cell ha-icon { color:var(--state-icon-color, var(--paper-item-icon-color));
     flex:0 0 auto; }
