@@ -146,6 +146,35 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> bo
     return True
 
 
+async def _async_card_version(hass: HomeAssistant) -> str:
+    """Cache-busting token for the card URL: release version plus a content hash.
+
+    The release version alone is not enough, and the gap is not academic. The
+    browser keeps the file under this exact URL and Home Assistant's service
+    worker keeps it harder still, so a card edited between releases is served
+    from cache for ever — a reload does not help, because nothing about the
+    address changed. That cost an evening of "the card has not been updated"
+    when it had.
+
+    Hashing the file makes the address follow the content: any edit is a new
+    URL, and no edit is not. Read in an executor because setup runs on the event
+    loop and this touches the disk.
+    """
+
+    def _hash() -> str:
+        import hashlib
+
+        card = pathlib.Path(__file__).parent / "www" / "never-dry-zone-card.js"
+        try:
+            return hashlib.sha1(card.read_bytes(), usedforsecurity=False).hexdigest()[:8]
+        except OSError:
+            # No card, no cache to bust; the version alone is a valid answer.
+            return ""
+
+    digest = await hass.async_add_executor_job(_hash)
+    return f"{_INTEGRATION_VERSION}-{digest}" if digest else _INTEGRATION_VERSION
+
+
 async def _async_register_frontend(hass: HomeAssistant) -> None:
     """Serve and auto-load the NeverDry Zone Lovelace card.
 
@@ -160,7 +189,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
         return
 
     www_dir = str(pathlib.Path(__file__).parent / "www")
-    url = f"{_CARD_URL}?v={_INTEGRATION_VERSION}"
+    url = f"{_CARD_URL}?v={await _async_card_version(hass)}"
     try:
         from homeassistant.components.http import StaticPathConfig
 
