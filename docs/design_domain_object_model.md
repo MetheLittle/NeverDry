@@ -319,8 +319,9 @@ strings — never readings.
 | Member | Kind | Meaning |
 |---|---|---|
 | `temperature_sensor`, `rain_sensor` | attr | The two feeds every ET tier consumes |
-| `humidity_sensor`, `wind_speed_sensor`, `net_radiation_sensor` | attr | What unlocks Penman-Monteith |
-| `temp_max_sensor`, `temp_min_sensor` | attr | What unlocks Hargreaves |
+| `humidity_sensor`, `wind_speed_sensor` | attr | What unlocks Penman-Monteith |
+| `net_radiation_sensor` | attr | A pyranometer (solar radiation). Improves Penman-Monteith; not required, since the radiation is estimated from the diurnal range when absent. Named for the quantity the equation reads, not the one the user supplies — a rename worth doing |
+| ~~`temp_max_sensor`, `temp_min_sensor`~~ | — | **Withdrawn.** The daily extremes are observed from the thermometer (`DiurnalRange`), not declared: the same entity in both fields gives a zero range and an evapotranspiration of exactly zero |
 | `soil_moisture_sensor` | attr | What unlocks VWC mode |
 | `rain_probability_sensor` | attr | Forecast feed behind the rain delay |
 | `latitude` | attr | A property of the place: the astronomical radiation term, and the hemisphere flip of the seasonal Kc |
@@ -726,16 +727,16 @@ Every object in this document now has a module. The table says, for each, how fa
 class is from the code that still does the work — because **none of the scaffolds is wired**.
 Read the two columns as "what the model says" against "what runs today".
 
-| Object | Current state |
+| Object | Current state (2026-08-16) |
 |---|---|
-| Environment | ⚠️ **scaffold written, inert**: `environment.py` (sensor inventory, `declared_sensors`/`satisfies`/`missing_for` capability matching, `RainDelayPolicy`, yearly rain). What runs today is still `DrynessIndexSensor` as **feed hub / broadcaster** (temperature + rain → `et_h`, `rain_delta` → zones), holding the globals the RFC redistributes. Its `_deficit` accumulator is **retired as ET state** and survives only as the interim VWC-system value (D2/D5) |
-| Zone | ⚠️ **scaffold written, inert**: `zone.py` (`Placement`, per-zone `d_max`, `Deficit` ownership, the single `credit_delivery`, `CycleSoakRule`, `WaterCounters`). What runs today is `IrrigationZoneSensor` — a data bag whose accounting lives in `IrrigationController`, which reads and writes 13 of its privates and repeats the crediting formula in 4 places (**anomaly A1**). `_zone_deficit` is authoritative and a new zone starts at 0 (D4). Cycle & soak, placement, per-zone `d_max`: designed, not implemented |
-| Scheduler | ⚠️ **scaffold written, inert**: `scheduler.py` (`evaluate_scheduled`/`evaluate_reactive` → `Decision`, `ConcurrencyPolicy`, `next_eligible`). What runs today is the same two rules written inline inside two HA callbacks in `IrrigationController`, where they cannot be read as a policy or tested without a controller. Still no cron/sequences/calendars — deliberately, that is Irrigation Unlimited's territory — and the queue stays deferred |
-| ZoneDriver | ⚠️ exists but internal: `ValveOperator` (FSM, safety layers, latency tracker) + valve/switch adapter (GH #74/#94); native volume delivery in progress. Delivered liters returned as a bare float — no DeliveryResult qualifier yet. **Scaffold extracted**: `driver.py` (`Driver`/`ZoneDriver`/`MasterDriver`), inert until wired. ✅ **Renamed 2026-08-09** to match this model's term — the module was unreferenced by any production code or test, so the rename cost nothing and no longer waits on the wiring. `ManualActuator` keeps its name deliberately: it is *not* a `Driver` (it shares only the `DeliveryResult` contract). Lowercase *actuator* survives in prose where it means the physical valve the driver drives |
-| MasterDriver | ❌ not implemented (GH #95); its scaffold lives in `driver.py` (`MasterDriver`) |
-| ManualActuator | ❌ not implemented; **scaffold extracted**: `ManualActuator` in `driver.py` (valve-less, `request_irrigation`/`mark_irrigated` → `DeliveryResult(declared)`), inert. For hand-watered house plants — a *how* with no hardware |
-| WaterBalanceModel | ⚠️ implicit today: the ET/VWC fork inside `DrynessIndexSensor._on_sensor_change` + the per-zone loop, with the ET formula duplicated in `ETSensor`. **Scaffold extracted**: `water_balance_model.py` (`WaterBalanceModel` + `ETBalanceModel` tiers `ETModel`/`HargreavesModel`/`PenmanMonteithModel` + `VWCSystemModel`/`VWCPerZoneModel`), pure, inert until wired |
-| Deficit | ❌ today a bare `float` (`_zone_deficit`, `DrynessIndexSensor._deficit`) with the frame left implicit. **Scaffold extracted**: `Deficit` value object in `water_balance_model.py` |
+| Environment | ✅ **wired**: `environment.py` holds the site — bindings, backfill window, latitude, yearly rain — and `DrynessIndexSensor` reads it rather than keeping eleven loose attributes. `satisfies`/`missing_for` are the capability match, and they now have a caller: `models_offered_by` |
+| Zone | ✅ **wired**: every path that changes zone state goes through `zone.py`. `settle` (amount known) and `mark_irrigated` (outcome known) are named apart rather than reconciled. Still designed, not implemented: cycle & soak, placement, per-zone `d_max` |
+| Scheduler | ✅ **wired**: both handlers ask `scheduler.py` and act on the answer; the serial concurrency policy has a name, and skips are reported as `THROTTLED` / `ALREADY_RUNNING` instead of one falling silent. `next_eligible` stays unreached: the queue is deferred (DA-3) |
+| ZoneDriver | ✅ **command layer wired** (2026-08-16): `sensor.py` builds a `ZoneDriver` and the controller issues `async_turn_on/off`. This delivered the already-open confirmation fix, which had lived in the unwired copy, and the entity adapter for `valve.*` (GH #94). The **delivery loop** still lives in the controller — the next seam. `valve_operator.py` is superseded and imported by nothing, kept until the field test is done (AI-270) |
+| MasterDriver | ❌ not implemented (GH #95); the class exists in `driver.py`, reached by nothing |
+| ManualActuator | ❌ not implemented; `ManualActuator` in `driver.py`, unreached. For hand-watered house plants — a *how* with no hardware |
+| WaterBalanceModel | ✅ **wired**: `DrynessIndexSensor` holds a model and calls `step()`; its `_deficit` is a view onto it, so there is one storage. All four methods run and are selectable — `ETModel`, `HargreavesModel`, `PenmanMonteithModel`, `VWCSystemModel` — with `VWCPerZoneModel` still unreached (AI-174). Two inputs are derived rather than declared: the daily extremes (`DiurnalRange`) and the day's solar energy (`DailySolarEnergy`), which feeds a computed net radiation |
+| Deficit | ✅ **wired**: the value object carries millimetres *and* the reference frame, and the frame a zone reports now follows the model actually running rather than defaulting to ET |
 
 The refactoring direction is symmetric on both axes: make the **Driver** base explicit when
 implementing GH #95 (so `MasterDriver` inherits the safety layers rather than reimplementing

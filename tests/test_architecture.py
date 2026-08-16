@@ -361,3 +361,69 @@ def test_the_package_has_no_import_cycles():
         walk(module, [])
 
     assert not cycles, f"import cycles: {[' -> '.join(c) for c in cycles]}"
+
+
+# ── Documentation that contradicts the code ───────────────────────────
+#
+# The guards above stop a claim rotting inside the package. Prose rots the same
+# way and nothing catches it: `scientific-model.md` called two methods "planned,
+# not implemented" while both were running, and the developer manual opened with
+# "All formulas live in sensor.py" — the opposite of what the wiring was for.
+#
+# Neither was a lie when written, which is the point. A statement about the code
+# has to be checked against the code, or it is only checked when a reader
+# happens to notice.
+
+DOCS = PACKAGE.parent.parent / "docs"
+
+
+def test_no_document_calls_a_runnable_method_planned():
+    """A method that runs may not be described as planned, anywhere in docs/.
+
+    Checked per paragraph, and per row inside a table: "planned" is a legitimate
+    word about work that *is* planned, and only its appearance next to a method
+    that already runs is the defect. The table granularity is not a detail — a
+    status table legitimately says "not implemented" of one object while naming
+    a running method in another row, and a guard that cries wolf there is a
+    guard somebody eventually deletes.
+    """
+    import re
+
+    from never_dry.water_balance_model import MODEL_CATALOGUE, RUNNABLE_INPUTS
+
+    runnable = [m for m in MODEL_CATALOGUE if m.input_type in RUNNABLE_INPUTS]
+    names = {
+        "hargreaves": "Hargreaves",
+        "penman_monteith": "Penman-Monteith",
+        "vwc_system": "soil moisture probe",
+    }
+    stale: list[str] = []
+
+    for path in sorted(DOCS.rglob("*.md")):
+        blocks: list[str] = []
+        for paragraph in re.split(r"\n\s*\n", path.read_text(encoding="utf-8")):
+            # A markdown table is one paragraph but many independent statements.
+            blocks.extend(paragraph.splitlines() if paragraph.lstrip().startswith("|") else [paragraph])
+
+        for block in blocks:
+            lowered = block.lower()
+            if "planned" not in lowered and "not implemented" not in lowered:
+                continue
+            for model in runnable:
+                name = names.get(model.method_id)
+                if name and name.lower() in lowered:
+                    stale.append(f"{path.relative_to(DOCS.parent)}: '{name}' described as planned")
+
+    assert not stale, "documentation contradicts the code:\n  " + "\n  ".join(stale)
+
+
+def test_the_developer_manual_does_not_place_the_formulas_in_the_entity_layer():
+    """The claim that broke first, kept as a test because it broke silently.
+
+    "All formulas live in sensor.py" was true for a year and became the exact
+    opposite of the design without a single line of prose changing.
+    """
+    manual = (DOCS / "developer_manual.md").read_text(encoding="utf-8")
+    assert "All formulas live in `sensor.py`" not in manual, (
+        "the formulas live in water_balance_model.py — the manual is describing the code from before the wiring"
+    )
