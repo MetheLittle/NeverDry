@@ -188,3 +188,33 @@ class TestTheValveKeepsItsHabits:
         driver = ZoneDriver(hass_mock, "switch.zone", name="z")
         assert driver._fsm_config.has_flow_meter is False
         assert driver._fsm_config.max_consecutive_failures == driver._max_retries + 1
+
+
+class TestChangingTheModelDoesNotLoseTheDeficit:
+    """The model holds the deficit, so replacing it is replacing the state.
+
+    Found on a live garden: the hub restores its value, then re-selects the model
+    once the diurnal evidence is in, and the second step handed back a fresh
+    object starting at zero. The index went from 10 mm to 0 with nothing in the
+    log — a garden that believes it has just been watered, and stops watering.
+    """
+
+    def test_the_value_survives_a_re_selection(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(LEGACY_ENTRY))
+        hub._deficit = 9.4
+
+        hub._select_model(observed_range_c=11.0)
+
+        assert hub._deficit == pytest.approx(9.4)
+
+    def test_it_survives_a_re_selection_that_changes_the_method(self, hass_mock):
+        """The demotion path is the one that changes the object, so it is the risk."""
+        from never_dry.water_balance_model import ETModel
+
+        hub = DrynessIndexSensor(hass_mock, dict(LEGACY_ENTRY))
+        hub._deficit = 9.4
+
+        hub._select_model(observed_range_c=0.5)
+
+        assert isinstance(hub._model, ETModel)
+        assert hub._deficit == pytest.approx(9.4)

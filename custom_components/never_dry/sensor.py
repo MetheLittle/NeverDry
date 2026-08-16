@@ -857,6 +857,12 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         tells a user nothing; "simple, because the thermometer shows no real
         daily swing" tells them where to look, and that they may overrule it.
         """
+        # A model is state, not only physics: it holds the deficit. Re-selecting
+        # after the restore has run would hand back a brand-new object starting
+        # at zero, wiping the value the entity just recovered — which is exactly
+        # what happened the first time this ran on a live garden.
+        carried = self._model.deficit.value_mm if getattr(self, "_model", None) is not None else None
+
         explicit = self._configured_method != ET_METHOD_AUTO
         self._model = build_model(
             self._env,
@@ -868,6 +874,8 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             field_capacity=self._field_cap,
             root_depth=self._root_depth,
         )
+        if carried:
+            self._model.restore(carried)
         running = type(self._model).method_id
 
         if explicit and running == self._configured_method:
