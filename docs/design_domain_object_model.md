@@ -1,6 +1,6 @@
 # Design — Domain Object Model
 
-**Status:** Draft
+**Status:** Accepted (ADR), 2026-08-16
 **Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object; 2026-08-01 RFC to dissolve `System` into `Environment` + capability-matched models)
 **Related:** GH #74 (actuator abstraction discussion), GH #94 (`valve.*` support), GH #95 (master valve/pump), [Water-Balance Reference Model](design_water_balance_reference_model.md) (where the deficit lives), [Domain Model Anomalies](design_domain_model_anomalies.md) (code-verified audit against this model)
 
@@ -573,9 +573,29 @@ about a dead valve *before* the next scheduled run, not from a failed one.
 
 ### RFC: dissolve `System` into `Environment` + capability-matched models
 
-**Status: RFC (Proposed) — 2026-08-01.** Supersedes the earlier "rename System → Weather/Environment"
-note. Direction is agreed; not yet implemented (the water-balance/actuator scaffolds are still inert).
-Promote to Accepted only once wired.
+**Status: Accepted (ADR) — 2026-08-16.** Supersedes the earlier "rename System → Weather/Environment"
+note. Promoted on the condition this section set for itself: it is wired. `Environment` exists and is
+built from the config entry; each model declares `required_sensors` in the same vocabulary the site
+declares bindings in; `models_offered_by` joins the two; and the form asks for the inputs the richer
+tiers need, so `declared_sensors` can actually satisfy them.
+
+Two consequences of wiring it are worth recording, because neither was foreseen when this was
+written:
+
+- **The dropdown is not filtered to what the site supports.** A form that narrows its options at
+  render time goes stale within the same submission, since it does not react to what is typed — and
+  a user who cannot see a method has no way to learn which sensor unlocks it. Every method is
+  offered, and the choice is refused on submit with the missing sensors named. The capability match
+  is therefore a *validator* as well as a selector, which is a role this RFC did not give it.
+- **A stored choice degrades rather than fails.** A sensor can be removed after the method was
+  chosen. Refusing to start would stop the watering; running a model whose inputs are missing would
+  produce a confident wrong number. The third way — fall back to the richest supported model — is
+  the only one that keeps both the water and the honesty, and it is what `build_model` does.
+
+**What is not yet true**, and is deliberately not hidden by this promotion: the recorder backfill
+still replays history through the temperature-only formula, so a site on a higher tier is
+bootstrapped with the simple estimate. Replaying Penman-Monteith needs historical humidity, wind and
+radiation — a different problem from choosing a model for the present.
 
 **Problem.** The object today called **System** is a catch-all that bundles three unrelated
 responsibilities, and one of its "global params" is not global at all:
