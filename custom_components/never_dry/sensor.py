@@ -125,6 +125,7 @@ from .water_balance_model import (
     MODEL_CATALOGUE,
     RUNNABLE_INPUTS,
     W_M2_TO_MJ_DAY,
+    DailySolarEnergy,
     DiurnalRange,
     ETModel,
     ETStep,
@@ -828,7 +829,10 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         # rather than trusted: a derived maximum that looks wrong, or a radiation
         # balance that does not match the pyranometer, is visible here and
         # nowhere else.
-        self._last_inputs: dict = {}
+        # Never empty: between a restart and the first computation the entity
+        # would otherwise publish half a list with no explanation, which reads
+        # as "the feature is not working" rather than "it has not run yet".
+        self._last_inputs: dict = {"status": "no reading computed since startup"}
         self._model: WaterBalanceModel = ETModel()
         self._select_model()
         # None = baseline unknown (fresh boot): the first reading fixes the
@@ -847,6 +851,9 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         # Observed from the thermometer we already read, so the daily extremes
         # never have to be asked for as two more entities.
         self._diurnal = DiurnalRange()
+        # The pyranometer reports power; the equations need the day's energy.
+        # Accumulated here rather than converted per reading — see DailySolarEnergy.
+        self._solar_day = DailySolarEnergy()
         self._anemometer_h = config.get(CONF_ANEMOMETER_HEIGHT, DEFAULT_ANEMOMETER_HEIGHT_M)
         # One warning per condition, not one per poll: a probe reporting
         # percentages does so at every reading, and an unreadable one likewise.
@@ -1152,7 +1159,11 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             # Every temperature reading also feeds the diurnal range, whether or
             # not the running tier uses it: switching method must not mean
             # waiting a day for the window to fill.
-            self._diurnal.observe(now.timestamp() / 3600.0, t_median)
+            hours = now.timestamp() / 3600.0
+            self._diurnal.observe(hours, t_median)
+            watts = _read_float(self._hass, self._env.net_radiation_sensor)
+            if watts is not None:
+                self._solar_day.observe(hours, watts)
 
             # The reading goes to the model and the model does the physics. The
             # rate is asked for separately because the zones need it: each one
@@ -1193,6 +1204,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
             tmin, tmax = extremes
             self._last_inputs = {
+                "status": "computing",
                 "measured_temperature_c": round(temp_c, 2),
                 "derived_temp_max_c": round(tmax, 2),
                 "derived_temp_min_c": round(tmin, 2),
@@ -1207,6 +1219,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 rain_mm=rain_mm,
             )
         self._last_inputs = {
+            "status": "computing",
             "measured_temperature_c": round(temp_c, 2),
             "diurnal_window_hours": self._diurnal.coverage_h,
         }
@@ -1220,6 +1233,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         not.
         """
         return {
+            "status": "warming up",
             "measured_temperature_c": round(temp_c, 2),
             "diurnal_window_hours": self._diurnal.coverage_h,
             "warming_up_because": f"the daily range needs {DiurnalRange.MIN_COVERAGE_H} hours of readings",
@@ -1257,7 +1271,10 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
 
         ra = HargreavesModel.extraterrestrial_radiation(now.timetuple().tm_yday, self._env.latitude)
         measured_solar = _read_float(self._hass, self._env.net_radiation_sensor)
-        solar = _read_solar_mj(self._hass, self._env.net_radiation_sensor)
+        # The day's energy, not the current flux scaled to a day: an evening
+        # reading treated as a daily average understates the radiation by a
+        # factor of several, and every number downstream inherits it.
+        solar = self._solar_day.energy_mj()
         if solar is None:
             solar = solar_radiation_from_range(ra, tmax_c=tmax, tmin_c=tmin)
 
@@ -1265,6 +1282,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         net_rad = net_radiation_mj(solar_mj=solar, ra_mj=ra, tmax_c=tmax, tmin_c=tmin, rh_pct=rh)
 
         self._last_inputs = {
+            "status": "computing",
             "measured_temperature_c": round(temp_c, 2),
             "measured_humidity_pct": round(rh, 1),
             "measured_wind_raw": round(wind_raw, 2),
@@ -1275,7 +1293,8 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             "diurnal_window_hours": self._diurnal.coverage_h,
             "derived_wind_2m_m_s": round(wind_2m, 2),
             "derived_solar_mj": round(solar, 2),
-            "solar_is_measured": measured_solar is not None,
+            "solar_is_measured": self._solar_day.energy_mj() is not None,
+            "solar_window_hours": self._solar_day.coverage_h,
             "derived_extraterrestrial_mj": round(ra, 2),
             "derived_net_radiation_mj": round(net_rad, 2),
         }
@@ -1341,6 +1360,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
 
         deficit = self._model.step(VWCReading(vwc=vwc))
         self._last_inputs = {
+            "status": "computing",
             "measured_soil_moisture_raw": round(raw, 3),
             "derived_soil_moisture_fraction": round(vwc, 3),
             "derived_deficit_mm": round(deficit.value_mm, 2),
@@ -1430,7 +1450,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         self._model.step(ETStep(dt_h=dt_h, temp_c=t_median, rain_mm=rain_delta))
 
     async def _bootstrap_diurnal_range(self) -> None:
-        """Fill the diurnal window from recorder history, so the choice is informed.
+        """Fill the daily windows from recorder history, so the choice is informed.
 
         Without it the window starts empty at every restart and the site is
         judged, or left warming up, on no data at all. The thermometer almost
@@ -1452,10 +1472,11 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
 
         now = datetime.now(UTC)
         start = now - timedelta(hours=26)
+        wanted = [self._temp_sensor]
+        if self._env.net_radiation_sensor:
+            wanted.append(self._env.net_radiation_sensor)
         try:
-            history = await instance.async_add_executor_job(
-                get_significant_states, self._hass, start, now, [self._temp_sensor]
-            )
+            history = await instance.async_add_executor_job(get_significant_states, self._hass, start, now, wanted)
         except Exception as exc:
             _LOGGER.debug("Diurnal range bootstrap skipped: %s", exc)
             return
@@ -1467,11 +1488,19 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 continue
             self._diurnal.observe(state.last_changed.timestamp() / 3600.0, value)
             seen += 1
+        for state in (history or {}).get(self._env.net_radiation_sensor or "", []):
+            try:
+                watts = float(state.state)
+            except (ValueError, TypeError):
+                continue
+            self._solar_day.observe(state.last_changed.timestamp() / 3600.0, watts)
+
         if seen:
             _LOGGER.debug(
-                "Diurnal range bootstrapped from %d readings — %d hours covered",
+                "Diurnal range bootstrapped from %d readings — %d hours covered; solar window %d hours",
                 seen,
                 self._diurnal.coverage_h,
+                self._solar_day.coverage_h,
             )
 
     async def _backfill_from_recorder(self) -> None:

@@ -782,6 +782,58 @@ class VWCPerZoneModel(VWCSystemModel):
         return ReferenceFrame.VWC_PER_ZONE
 
 
+class DailySolarEnergy:
+    """The day's solar energy [MJ/m2/day], accumulated from a flux reading.
+
+    A pyranometer reports **power** — watts per square metre, right now. FAO-56
+    works in the day's **energy**, and the two are not the same number in
+    different units: taking an instantaneous 66 W/m2 at six in the evening and
+    scaling it to a day gives 5.7 MJ, where the day actually delivered four
+    times that. Everything downstream inherits the error, and the only symptom
+    is a garden watered less than it needs.
+
+    So the flux is integrated over a rolling 24 hours, in the same hourly
+    buckets the diurnal range uses: each bucket holds the mean power seen in
+    that hour, and the day's energy is their sum times one hour each. Night
+    hours contribute zero and are still needed — they are what makes the average
+    a day's average rather than a daytime one.
+    """
+
+    #: Hours of coverage below which the total understates the day and is not
+    #: worth reporting; the caller estimates from the diurnal range instead.
+    MIN_COVERAGE_H: ClassVar[int] = 20
+
+    def __init__(self, window_h: int = 24) -> None:
+        """Accumulate over the last ``window_h`` hours."""
+        self._window_h = window_h
+        self._buckets: dict[int, tuple[float, int]] = {}
+
+    def observe(self, hours: float, watts_m2: float) -> None:
+        """Record an instantaneous flux [W/m2] seen at ``hours``."""
+        index = int(hours)
+        total, count = self._buckets.get(index, (0.0, 0))
+        self._buckets[index] = (total + max(0.0, watts_m2), count + 1)
+        cutoff = index - self._window_h + 1
+        for stale in [k for k in self._buckets if k < cutoff]:
+            del self._buckets[stale]
+
+    @property
+    def coverage_h(self) -> int:
+        """How many distinct hours the window holds."""
+        return len(self._buckets)
+
+    def energy_mj(self) -> float | None:
+        """The day's energy [MJ/m2/day], or ``None`` while the window is too thin.
+
+        Each hour contributes its mean power for one hour: W/m2 x 3600 s is
+        joules per square metre, and a million of those is a megajoule.
+        """
+        if self.coverage_h < self.MIN_COVERAGE_H:
+            return None
+        mean_w = sum(total / count for total, count in self._buckets.values())
+        return mean_w * 3600.0 / 1_000_000.0
+
+
 # ── Net radiation: computed, never asked for ───────────────────────────────
 #
 # FAO-56 does not expect net radiation to be measured. Rn is a *balance* —

@@ -611,3 +611,68 @@ class TestNetRadiation:
         ra = self._ra()
         estimated = solar_radiation_from_range(ra, tmax_c=31.0, tmin_c=19.0)
         assert 0.4 * ra < estimated < 0.85 * ra
+
+
+class TestDailySolarEnergy:
+    """A pyranometer reports power; the equations need the day's energy.
+
+    Treating one as the other is not a unit slip, it is a different quantity:
+    an evening reading scaled to a day understates the radiation several-fold,
+    and every number downstream inherits it — ending in a garden watered a
+    fraction of what it needs, with nothing to show for it.
+    """
+
+    def test_a_thin_window_refuses_to_answer(self):
+        from never_dry.water_balance_model import DailySolarEnergy
+
+        acc = DailySolarEnergy()
+        for h in range(5):
+            acc.observe(float(h), 800.0)
+        assert acc.energy_mj() is None
+
+    def test_a_full_day_sums_to_a_plausible_summer_total(self):
+        """A clear August day at mid-latitude delivers roughly 20-30 MJ/m2."""
+        from never_dry.water_balance_model import DailySolarEnergy
+
+        acc = DailySolarEnergy()
+        profile = [0, 0, 0, 0, 0, 20, 120, 300, 500, 680, 810, 880]
+        profile += [900, 860, 760, 600, 400, 200, 60, 5, 0, 0, 0, 0]
+        for h, watts in enumerate(profile):
+            acc.observe(float(h), float(watts))
+
+        total = acc.energy_mj()
+        assert 20.0 < total < 30.0
+
+    def test_night_hours_count_as_zero_and_are_needed(self):
+        """Dropping them would make the average a daytime average, inflating the day."""
+        from never_dry.water_balance_model import DailySolarEnergy
+
+        with_night = DailySolarEnergy()
+        for h in range(24):
+            with_night.observe(float(h), 900.0 if 6 <= h < 18 else 0.0)
+
+        assert with_night.energy_mj() == pytest.approx(900.0 * 12 * 3600 / 1e6, rel=1e-6)
+
+    def test_repeated_readings_in_an_hour_average_rather_than_add(self):
+        """The station reports every minute; adding them would multiply the day by sixty."""
+        from never_dry.water_balance_model import DailySolarEnergy
+
+        acc = DailySolarEnergy()
+        for h in range(24):
+            for _ in range(60):
+                acc.observe(h + 0.5, 500.0)
+        assert acc.energy_mj() == pytest.approx(500.0 * 24 * 3600 / 1e6, rel=1e-6)
+
+    def test_an_evening_reading_alone_is_not_mistaken_for_a_day(self):
+        """The defect this class exists to remove, stated as a test."""
+        from never_dry.water_balance_model import W_M2_TO_MJ_DAY, DailySolarEnergy
+
+        naive = 65.9 * W_M2_TO_MJ_DAY
+
+        acc = DailySolarEnergy()
+        profile = [0, 0, 0, 0, 0, 20, 120, 300, 500, 680, 810, 880]
+        profile += [900, 860, 760, 600, 400, 200, 66, 5, 0, 0, 0, 0]
+        for h, watts in enumerate(profile):
+            acc.observe(float(h), float(watts))
+
+        assert acc.energy_mj() > 3 * naive
