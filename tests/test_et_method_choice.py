@@ -32,6 +32,22 @@ from never_dry.const import (
 BARE_SITE = {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r"}
 
 
+def _fill_diurnal_window(hub, low=14.0, high=26.0):
+    """Give the hub a full day of readings, anchored to the clock it actually reads.
+
+    Anchoring matters: the hub observes at the real current hour, and the window
+    prunes anything older than 24 of them. A test that observes at hours 0..23
+    has its whole window discarded on the first real reading, and then exercises
+    the warm-up fallback while appearing to test the tier — which is what this
+    file did until the derived values were asserted and turned up empty.
+    """
+    from datetime import datetime
+
+    now_h = datetime.now().timestamp() / 3600.0
+    for offset in range(24):
+        hub._diurnal.observe(now_h - offset, low if offset % 2 else high)
+
+
 class TestAutomatic:
     """``auto`` is the promise to pick what the sensors allow, so it never fails."""
 
@@ -210,10 +226,9 @@ class TestEveryOfferedMethodCanActuallyRun:
                 continue
             hub = self._hub(hass_mock, method, **self.SENSORS_FOR[method])
             assert isinstance(hub._model, model_by_id(method)), f"{method} degraded instead of running"
-            # A day of readings, so the tiers that need the diurnal range have one.
-            for hour in range(24):
-                hub._diurnal.observe(float(hour), 16.0 + (hour % 12))
+            _fill_diurnal_window(hub)
             hub._on_sensor_change(MagicMock())  # must not raise
+            assert hub._last_inputs, f"{method} never built a reading — it ran the warm-up fallback"
 
     def test_a_tier_that_needs_the_daily_range_waits_instead_of_guessing(self, hass_mock):
         """Before the window fills there is no honest reading, so the deficit freezes.
@@ -342,3 +357,70 @@ class TestTheRateEntityAgreesWithTheModel:
         entity = ETSensor(hass_mock, cfg, hub=hub)
 
         assert entity.extra_state_attributes["et_method"] == hub.active_method
+
+
+class TestWhatTheModelWasFed:
+    """Measured and derived, published side by side so the estimate is checkable.
+
+    Every richer tier works out more than it reads: a daily maximum from a
+    stream of readings, a radiation balance from a pyranometer and some
+    astronomy, a wind speed corrected to a height nobody measured at. None of it
+    is visible in the deficit, and a derived value that is quietly wrong looks
+    exactly like one that is right.
+    """
+
+    def _fed_hub(self, hass_mock, method, **cfg):
+        from unittest.mock import MagicMock
+
+        from never_dry.sensor import DrynessIndexSensor
+
+        hub = DrynessIndexSensor(
+            hass_mock,
+            {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r", CONF_ET_METHOD: method, **cfg},
+        )
+        hass_mock.states.get = MagicMock(return_value=MagicMock(state="24.0"))
+        _fill_diurnal_window(hub)
+        hub._on_sensor_change(MagicMock())
+        return hub
+
+    def test_a_derived_maximum_is_shown_next_to_the_reading_it_came_from(self, hass_mock):
+        hub = self._fed_hub(hass_mock, "hargreaves")
+        fed = hub._last_inputs
+
+        assert fed["measured_temperature_c"] == 24.0
+        assert fed["derived_temp_max_c"] == 26.0
+        assert fed["derived_temp_min_c"] == 14.0
+        assert fed["derived_diurnal_range_c"] == 12.0
+        assert fed["diurnal_window_hours"] >= 24
+
+    def test_the_radiation_balance_shows_its_ingredients(self, hass_mock):
+        """Rn is three steps from anything a user can see; each step is published."""
+        hub = self._fed_hub(
+            hass_mock,
+            "penman_monteith",
+            **{CONF_HUMIDITY_SENSOR: "sensor.h", CONF_WIND_SPEED_SENSOR: "sensor.w"},
+        )
+        fed = hub._last_inputs
+
+        assert "derived_extraterrestrial_mj" in fed
+        assert "derived_solar_mj" in fed
+        assert "derived_net_radiation_mj" in fed
+        assert "derived_wind_2m_m_s" in fed
+
+    def test_it_says_whether_the_radiation_was_measured_or_estimated(self, hass_mock):
+        """The same number means different things depending on where it came from."""
+        hub = self._fed_hub(
+            hass_mock,
+            "penman_monteith",
+            **{CONF_HUMIDITY_SENSOR: "sensor.h", CONF_WIND_SPEED_SENSOR: "sensor.w"},
+        )
+        assert hub._last_inputs["solar_is_measured"] is False
+
+    def test_the_entity_carries_them(self, hass_mock):
+        from never_dry.sensor import WaterBalanceMethodSensor
+
+        hub = self._fed_hub(hass_mock, "hargreaves")
+        attrs = WaterBalanceMethodSensor(hub).extra_state_attributes
+
+        assert attrs["derived_diurnal_range_c"] == 12.0
+        assert "et_rate_mm_h" in attrs

@@ -823,6 +823,12 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         self._configured_method = config.get(CONF_ET_METHOD, DEFAULT_ET_METHOD)
         self._method_reason = ""
         self._last_et_rate = 0.0
+        # What the model was last fed, split into what came from a sensor and
+        # what the integration worked out. Kept so the answer can be checked
+        # rather than trusted: a derived maximum that looks wrong, or a radiation
+        # balance that does not match the pyranometer, is visible here and
+        # nowhere else.
+        self._last_inputs: dict = {}
         self._model: WaterBalanceModel = ETModel()
         self._select_model()
         # None = baseline unknown (fresh boot): the first reading fixes the
@@ -1185,6 +1191,13 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 # look like a garden that never dries out.
                 return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
             tmin, tmax = extremes
+            self._last_inputs = {
+                "measured_temperature_c": round(temp_c, 2),
+                "derived_temp_max_c": round(tmax, 2),
+                "derived_temp_min_c": round(tmin, 2),
+                "derived_diurnal_range_c": round(tmax - tmin, 2),
+                "diurnal_window_hours": self._diurnal.coverage_h,
+            }
             return HargreavesStep(
                 dt_h=dt_h,
                 tmax_c=tmax,
@@ -1192,6 +1205,10 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 day_of_year=now.timetuple().tm_yday,
                 rain_mm=rain_mm,
             )
+        self._last_inputs = {
+            "measured_temperature_c": round(temp_c, 2),
+            "diurnal_window_hours": self._diurnal.coverage_h,
+        }
         return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
 
     def _build_penman_reading(self, dt_h: float, temp_c: float, rain_mm: float, now: datetime) -> ModelInput | None:
@@ -1220,16 +1237,35 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
 
         ra = HargreavesModel.extraterrestrial_radiation(now.timetuple().tm_yday, self._env.latitude)
+        measured_solar = _read_float(self._hass, self._env.net_radiation_sensor)
         solar = _read_solar_mj(self._hass, self._env.net_radiation_sensor)
         if solar is None:
             solar = solar_radiation_from_range(ra, tmax_c=tmax, tmin_c=tmin)
 
+        wind_2m = wind_at_2m(_wind_to_m_s(self._hass, self._env.wind_speed_sensor, wind_raw), self._anemometer_h)
+        net_rad = net_radiation_mj(solar_mj=solar, ra_mj=ra, tmax_c=tmax, tmin_c=tmin, rh_pct=rh)
+
+        self._last_inputs = {
+            "measured_temperature_c": round(temp_c, 2),
+            "measured_humidity_pct": round(rh, 1),
+            "measured_wind_raw": round(wind_raw, 2),
+            "measured_solar_w_m2": round(measured_solar, 1) if measured_solar is not None else None,
+            "derived_temp_max_c": round(tmax, 2),
+            "derived_temp_min_c": round(tmin, 2),
+            "derived_diurnal_range_c": round(tmax - tmin, 2),
+            "diurnal_window_hours": self._diurnal.coverage_h,
+            "derived_wind_2m_m_s": round(wind_2m, 2),
+            "derived_solar_mj": round(solar, 2),
+            "solar_is_measured": measured_solar is not None,
+            "derived_extraterrestrial_mj": round(ra, 2),
+            "derived_net_radiation_mj": round(net_rad, 2),
+        }
         return PenmanStep(
             dt_h=dt_h,
             temp_c=temp_c,
             rh_pct=rh,
-            wind_m_s=wind_at_2m(_wind_to_m_s(self._hass, self._env.wind_speed_sensor, wind_raw), self._anemometer_h),
-            net_radiation_mj=net_radiation_mj(solar_mj=solar, ra_mj=ra, tmax_c=tmax, tmin_c=tmin, rh_pct=rh),
+            wind_m_s=wind_2m,
+            net_radiation_mj=net_rad,
             rain_mm=rain_mm,
         )
 
@@ -1284,7 +1320,12 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 vwc,
             )
 
-        self._model.step(VWCReading(vwc=vwc))
+        deficit = self._model.step(VWCReading(vwc=vwc))
+        self._last_inputs = {
+            "measured_soil_moisture_raw": round(raw, 3),
+            "derived_soil_moisture_fraction": round(vwc, 3),
+            "derived_deficit_mm": round(deficit.value_mm, 2),
+        }
 
     def _compute_rain_delta(self) -> float:
         """Compute rain increment since last reading.
@@ -2908,6 +2949,12 @@ class WaterBalanceMethodSensor(SensorEntity):
             "reason": self._hub._method_reason,
             "reference_frame": self._hub.reference_frame.value,
             "declared_sensors": sorted(k.value for k in self._hub.environment.declared_sensors),
+            "et_rate_mm_h": round(self._hub.current_et_rate, 4),
+            # Everything below is the last reading the model was given, split
+            # into measured and derived. It is the only place the two can be
+            # compared, which is what makes the estimate checkable instead of
+            # merely believable.
+            **self._hub._last_inputs,
         }
 
 
