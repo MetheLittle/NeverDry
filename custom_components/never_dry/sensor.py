@@ -1189,6 +1189,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 # Warming up: the tier falls back to the temperature-only rate
                 # rather than freezing, because a fresh install would otherwise
                 # look like a garden that never dries out.
+                self._last_inputs = self._warming_up_inputs(temp_c)
                 return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
             tmin, tmax = extremes
             self._last_inputs = {
@@ -1211,6 +1212,19 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         }
         return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
 
+    def _warming_up_inputs(self, temp_c: float) -> dict:
+        """What to publish while a tier cannot yet compute its own rate.
+
+        Saying "warming up, N hours of 24" is the difference between a user
+        seeing the method work and a user seeing nothing and assuming it does
+        not.
+        """
+        return {
+            "measured_temperature_c": round(temp_c, 2),
+            "diurnal_window_hours": self._diurnal.coverage_h,
+            "warming_up_because": f"the daily range needs {DiurnalRange.MIN_COVERAGE_H} hours of readings",
+        }
+
     def _build_penman_reading(self, dt_h: float, temp_c: float, rain_mm: float, now: datetime) -> ModelInput | None:
         """The full-weather reading, with the net radiation computed rather than read.
 
@@ -1226,6 +1240,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         """
         extremes = self._diurnal.extremes()
         if extremes is None:
+            self._last_inputs = self._warming_up_inputs(temp_c)
             return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
         tmin, tmax = extremes
 
@@ -1234,6 +1249,10 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         if rh is None or wind_raw is None:
             # A sensor unavailable this tick is not a reason to stop watering:
             # fall back for this step and pick the richer reading up on the next.
+            self._last_inputs = {
+                **self._warming_up_inputs(temp_c),
+                "warming_up_because": "a required sensor was unreadable this tick",
+            }
             return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
 
         ra = HargreavesModel.extraterrestrial_radiation(now.timetuple().tm_yday, self._env.latitude)
@@ -2928,6 +2947,7 @@ class WaterBalanceMethodSensor(SensorEntity):
         from homeassistant.const import EntityCategory
 
         self._hub = hub
+        self._hass = hub.hass if hasattr(hub, "hass") else hub._hass
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_unique_id = "water_balance_method"
         # Only the methods that can run: an option the sensor can never report
@@ -2935,6 +2955,21 @@ class WaterBalanceMethodSensor(SensorEntity):
         self._attr_options = [m.method_id for m in MODEL_CATALOGUE if m.input_type in RUNNABLE_INPUTS]
         if device_info:
             self._attr_device_info = device_info
+
+    async def async_added_to_hass(self) -> None:
+        """Follow the hub, or the attributes freeze at whatever startup found.
+
+        This entity does not poll and has nothing of its own to react to, so
+        without a subscription it writes once — publishing an empty set of model
+        inputs forever, because at startup no reading has been built yet. The hub
+        writes its own state on every tick; this rides on that.
+        """
+        self.async_on_remove(async_track_state_change_event(self._hass, [self._hub.entity_id], self._on_hub_change))
+
+    @callback
+    def _on_hub_change(self, _event) -> None:
+        """Republish: the method rarely changes, the inputs change every tick."""
+        self.async_write_ha_state()
 
     @property
     def native_value(self) -> str:
