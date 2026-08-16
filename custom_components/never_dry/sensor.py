@@ -3098,6 +3098,7 @@ class WaterBalanceMethodSensor(SensorEntity):
         writes its own state on every tick; this rides on that.
         """
         self.async_on_remove(self._hub.register_input_listener(self._republish))
+        self.async_write_ha_state()
 
     @callback
     def _republish(self) -> None:
@@ -3169,8 +3170,15 @@ class ModelInputSensor(SensorEntity):
             self._attr_device_info = device_info
 
     async def async_added_to_hass(self) -> None:
-        """Follow the hub's inputs directly, not its state."""
+        """Follow the hub's inputs directly, not its state.
+
+        And republish once on the way in: entities are added concurrently, so
+        whether the hub has already computed by the time this runs is a race.
+        Losing it left the entity reading unknown until the next tick, which is
+        the failure this whole path exists to remove.
+        """
         self.async_on_remove(self._hub.register_input_listener(self._republish))
+        self.async_write_ha_state()
 
     @callback
     def _republish(self) -> None:
