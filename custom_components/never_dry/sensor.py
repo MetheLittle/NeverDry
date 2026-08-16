@@ -463,8 +463,8 @@ def _create_entities(
     # In VWC mode the ET model is bypassed entirely — an "ET Hourly
     # Estimate" entity that keeps updating from temperature reads as if
     # the model were still active (tester report, 2026-07-18).
-    if not config.get(CONF_VWC_SENSOR):
-        entities.append(ETSensor(hass, config, hub_device))
+    if di_sensor.reference_frame is ReferenceFrame.ET:
+        entities.append(ETSensor(hass, config, hub_device, hub=di_sensor))
     entities.append(di_sensor)
     entities.append(WaterBalanceMethodSensor(di_sensor, hub_device))
 
@@ -688,9 +688,17 @@ async def async_setup_entry(
 
 
 class ETSensor(SensorEntity):
-    """Instantaneous evapotranspiration estimate [mm/h].
+    """The reference evapotranspiration rate [mm/h] the running model produces.
 
-    Uses a simplified linear model: ET_h = max(0, alpha * (T - T_base) / 24)
+    It used to compute the simple temperature formula itself, which was true
+    while that was the only model. With four of them it became a second opinion:
+    the entity published 0.24 mm/h while the model integrating the deficit was
+    producing 0.22 — a number nobody was using, sitting on the device next to the
+    ones that mattered.
+
+    So it mirrors the hub rather than calculating. This is the same rate every
+    zone scales by its Kc, which is what makes it the honest thing to publish
+    under this name.
     """
 
     _attr_has_entity_name = True
@@ -704,8 +712,20 @@ class ETSensor(SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:sun-thermometer"
 
-    def __init__(self, hass: HomeAssistant, config: ConfigType, device_info: DeviceInfo | None = None) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config: ConfigType,
+        device_info: DeviceInfo | None = None,
+        hub: DrynessIndexSensor | None = None,
+    ) -> None:
+        """Mirror ``hub``'s rate; without one, fall back to computing the simple formula.
+
+        The fallback exists for the tests that build this entity alone. In the
+        integration a hub is always passed.
+        """
         self._hass = hass
+        self._hub = hub
         self._temp_sensor = config[CONF_TEMP_SENSOR]
         self._alpha = config.get(CONF_ALPHA, DEFAULT_ALPHA)
         self._t_base = config.get(CONF_T_BASE, DEFAULT_T_BASE)
@@ -733,7 +753,15 @@ class ETSensor(SensorEntity):
 
     @property
     def native_value(self) -> float:
+        """The hub's last computed rate, or the simple formula when standing alone."""
+        if self._hub is not None:
+            return round(self._hub.current_et_rate, 4)
         return round(self._value, 4)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Which method produced this rate — the same question the deficit raises."""
+        return {"et_method": self._hub.active_method} if self._hub is not None else {}
 
 
 # ══════════════════════════════════════════════════════════
@@ -794,6 +822,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         # what the installation declared, which is the capability match.
         self._configured_method = config.get(CONF_ET_METHOD, DEFAULT_ET_METHOD)
         self._method_reason = ""
+        self._last_et_rate = 0.0
         self._model: WaterBalanceModel = ETModel()
         self._select_model()
         # None = baseline unknown (fresh boot): the first reading fixes the
@@ -894,6 +923,11 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             )
         else:
             self._method_reason = "automatic: the best method the declared sensors support"
+
+    @property
+    def current_et_rate(self) -> float:
+        """The reference rate [mm/h] most recently broadcast to the zones."""
+        return self._last_et_rate
 
     @property
     def active_method(self) -> str:
@@ -1201,6 +1235,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
 
     def _broadcast_to_zones(self, dt_h: float, et_h: float, rain: float) -> None:
         """Notify all registered zone sensors with ET/rain data."""
+        self._last_et_rate = et_h
         for listener in self._zone_listeners:
             listener(dt_h, et_h, rain)
 

@@ -312,3 +312,33 @@ class TestTheUserCanSeeWhichModelRuns:
         assert attrs["reason"]
         assert attrs["reference_frame"] == "et"
         assert "temperature" in attrs["declared_sensors"]
+
+
+class TestTheRateEntityAgreesWithTheModel:
+    """One rate, published once. A second opinion on the same device is a bug.
+
+    The entity computed the simple formula itself, which was true while that was
+    the only model. Running Penman-Monteith it published 0.24 mm/h next to a
+    deficit being integrated at 0.22 — a number nobody was using, on the device
+    where the ones that matter live.
+    """
+
+    def test_it_reports_the_rate_the_hub_broadcast(self, hass_mock):
+        from never_dry.sensor import DrynessIndexSensor, ETSensor
+
+        cfg = {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r"}
+        hub = DrynessIndexSensor(hass_mock, cfg)
+        entity = ETSensor(hass_mock, cfg, hub=hub)
+
+        hub._broadcast_to_zones(1.0, 0.1234, 0.0)
+
+        assert entity.native_value == 0.1234
+
+    def test_it_says_which_method_produced_the_rate(self, hass_mock):
+        from never_dry.sensor import DrynessIndexSensor, ETSensor
+
+        cfg = {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r"}
+        hub = DrynessIndexSensor(hass_mock, cfg)
+        entity = ETSensor(hass_mock, cfg, hub=hub)
+
+        assert entity.extra_state_attributes["et_method"] == hub.active_method
