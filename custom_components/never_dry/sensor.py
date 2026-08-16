@@ -120,6 +120,8 @@ from .services import async_setup_services
 from .unit_convert import LPM_TO_GPH, LPM_TO_LPH
 from .valve_fsm import FailureKind, ValveState
 from .water_balance_model import (
+    MODEL_CATALOGUE,
+    RUNNABLE_INPUTS,
     ETModel,
     ETStep,
     ReferenceFrame,
@@ -2586,9 +2588,13 @@ class WaterBalanceMethodSensor(SensorEntity):
     """
 
     _attr_has_entity_name = True
-    _attr_name = "Water balance method"
     _attr_icon = "mdi:function-variant"
     _attr_should_poll = False
+    # An enum, not free text: the state is an identifier, and the frontend can
+    # only translate it — into "Simple (temperature only)" rather than
+    # "et_simple" — if the sensor declares the set it draws from.
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_translation_key = "water_balance_method"
 
     def __init__(self, hub: DrynessIndexSensor, device_info: DeviceInfo | None = None) -> None:
         """Mirror the method of ``hub``, on the hub's own device."""
@@ -2597,6 +2603,9 @@ class WaterBalanceMethodSensor(SensorEntity):
         self._hub = hub
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_unique_id = "water_balance_method"
+        # Only the methods that can run: an option the sensor can never report
+        # would be a promise in the dropdown of a state that never arrives.
+        self._attr_options = [m.method_id for m in MODEL_CATALOGUE if m.input_type in RUNNABLE_INPUTS]
         if device_info:
             self._attr_device_info = device_info
 

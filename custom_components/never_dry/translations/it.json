@@ -28,7 +28,7 @@
           "humidity_sensor": "Facoltativo. Insieme a vento e radiazione sblocca Penman-Monteith.",
           "wind_speed_sensor": "Facoltativo. Insieme a umidità e radiazione sblocca Penman-Monteith.",
           "net_radiation_sensor": "Facoltativo. La lettura di un piranometro in W/m2. La radiazione netta che usa la FAO-56 viene calcolata da questa, quindi non ti viene chiesta.",
-          "et_method": "Lascia Automatico a meno che tu non voglia fissare un metodo. Un metodo i cui sensori non hai dichiarato viene rifiutato, e l'errore dice quale manca."
+          "et_method": "Lascia Automatico a meno che tu non voglia fissare un metodo. Un metodo i cui sensori non hai dichiarato viene rifiutato, e l'errore dice quale manca. Il metodo effettivamente in uso è mostrato dal sensore *Metodo di bilancio idrico* sul dispositivo NeverDry."
         }
       },
       "zone": {
@@ -163,7 +163,7 @@
           "humidity_sensor": "Facoltativo. Insieme a vento e radiazione sblocca Penman-Monteith.",
           "wind_speed_sensor": "Facoltativo. Insieme a umidità e radiazione sblocca Penman-Monteith.",
           "net_radiation_sensor": "Facoltativo. La lettura di un piranometro in W/m2. La radiazione netta che usa la FAO-56 viene calcolata da questa, quindi non ti viene chiesta.",
-          "et_method": "Lascia Automatico a meno che tu non voglia fissare un metodo. Un metodo i cui sensori non hai dichiarato viene rifiutato, e l'errore dice quale manca."
+          "et_method": "Lascia Automatico a meno che tu non voglia fissare un metodo. Un metodo i cui sensori non hai dichiarato viene rifiutato, e l'errore dice quale manca. Il metodo effettivamente in uso è mostrato dal sensore *Metodo di bilancio idrico* sul dispositivo NeverDry."
         }
       },
       "add_zone": {
@@ -374,7 +374,11 @@
   "entity": {
     "sensor": {
       "water_balance_method": {
-        "name": "Metodo di bilancio idrico"
+        "name": "Metodo di bilancio idrico",
+        "state": {
+          "et_simple": "Semplice (solo temperatura)",
+          "vwc_system": "Sonda di umidità del suolo"
+        }
       }
     }
   }

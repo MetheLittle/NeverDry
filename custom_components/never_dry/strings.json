@@ -28,7 +28,7 @@
           "humidity_sensor": "Optional. Unlocks Penman-Monteith together with wind and radiation.",
           "wind_speed_sensor": "Optional. Unlocks Penman-Monteith together with humidity and radiation.",
           "net_radiation_sensor": "Optional. A pyranometer reading in W/m2. The net radiation FAO-56 uses is computed from it, so it is not asked for.",
-          "et_method": "Leave on Automatic unless you want to pin one method. A method whose sensors you have not declared is refused, and the error says which one is missing."
+          "et_method": "Leave on Automatic unless you want to pin one method. A method whose sensors you have not declared is refused, and the error says which one is missing. The method actually in use is shown by the *Water balance method* sensor on the NeverDry device."
         }
       },
       "zone": {
@@ -159,7 +159,7 @@
           "humidity_sensor": "Optional. Unlocks Penman-Monteith together with wind and radiation.",
           "wind_speed_sensor": "Optional. Unlocks Penman-Monteith together with humidity and radiation.",
           "net_radiation_sensor": "Optional. A pyranometer reading in W/m2. The net radiation FAO-56 uses is computed from it, so it is not asked for.",
-          "et_method": "Leave on Automatic unless you want to pin one method. A method whose sensors you have not declared is refused, and the error says which one is missing."
+          "et_method": "Leave on Automatic unless you want to pin one method. A method whose sensors you have not declared is refused, and the error says which one is missing. The method actually in use is shown by the *Water balance method* sensor on the NeverDry device."
         }
       },
       "add_zone": {
@@ -370,7 +370,11 @@
   "entity": {
     "sensor": {
       "water_balance_method": {
-        "name": "Water balance method"
+        "name": "Water balance method",
+        "state": {
+          "et_simple": "Simple (temperature only)",
+          "vwc_system": "Soil moisture probe"
+        }
       }
     }
   }

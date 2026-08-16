@@ -53,6 +53,10 @@ def _create_ha_stubs():
     class SensorDeviceClass:
         AREA = "area"
         DURATION = "duration"
+        # Enum sensors carry an identifier as their state and let the frontend
+        # translate it. Present in Home Assistant since 2022.10; the stub has to
+        # mirror it or the entity that reports the active model cannot load.
+        ENUM = "enum"
         PRECIPITATION = "precipitation"
         PRECIPITATION_INTENSITY = "precipitation_intensity"
         TIMESTAMP = "timestamp"
