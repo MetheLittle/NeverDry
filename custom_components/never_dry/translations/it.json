@@ -11,7 +11,13 @@
           "alpha": "Coefficiente ET (α)",
           "t_base": "Temperatura di base",
           "d_max": "Limite massimo del deficit",
-          "vwc_sensor": "Sensore di umidità del suolo (opzionale)"
+          "vwc_sensor": "Sensore di umidità del suolo (opzionale)",
+          "humidity_sensor": "Sensore di umidità relativa",
+          "wind_speed_sensor": "Sensore di velocità del vento",
+          "net_radiation_sensor": "Sensore di radiazione solare/netta",
+          "temp_max_sensor": "Sensore di temperatura massima giornaliera",
+          "temp_min_sensor": "Sensore di temperatura minima giornaliera",
+          "et_method": "Metodo di evapotraspirazione"
         },
         "data_description": {
           "temperature_sensor": "Sensore di temperatura esterna in °C",
@@ -20,7 +26,13 @@
           "alpha": "Coefficiente di evapotraspirazione. Inizia con 0.22, regola dopo aver osservato il tuo giardino per una settimana",
           "t_base": "Temperatura al di sotto della quale l'evapotraspirazione è zero (piante a riposo)",
           "d_max": "Limite superiore per l'indice di deficit",
-          "vwc_sensor": "Se impostato, il deficit viene calcolato direttamente dall'umidità del suolo invece che dal modello ET"
+          "vwc_sensor": "Se impostato, il deficit viene calcolato direttamente dall'umidità del suolo invece che dal modello ET",
+          "humidity_sensor": "Facoltativo. Insieme a vento e radiazione sblocca Penman-Monteith.",
+          "wind_speed_sensor": "Facoltativo. Insieme a umidità e radiazione sblocca Penman-Monteith.",
+          "net_radiation_sensor": "Facoltativo. Insieme a umidità e vento sblocca Penman-Monteith.",
+          "temp_max_sensor": "Facoltativo. Con la minima giornaliera sblocca Hargreaves-Samani.",
+          "temp_min_sensor": "Facoltativo. Con la massima giornaliera sblocca Hargreaves-Samani.",
+          "et_method": "Lascia Automatico a meno che tu non voglia fissare un metodo. Un metodo i cui sensori non hai dichiarato viene rifiutato, e l'errore dice quale manca."
         }
       },
       "zone": {
@@ -114,7 +126,9 @@
       "zone_already_exists": "Esiste già una zona con questo nome",
       "efficiency_required": "Inserisci un'efficienza: il tipo di impianto è impostato su Personalizzato, che prende il valore da quel campo",
       "kc_required": "Inserisci un Kc: la famiglia di piante è impostata su Personalizzato, che prende il valore da quel campo",
-      "microclimate_factor_required": "Inserisci un fattore microclima: l'esposizione è impostata su Personalizzato, che prende il valore da quel campo"
+      "microclimate_factor_required": "Inserisci un fattore microclima: l'esposizione è impostata su Personalizzato, che prende il valore da quel campo",
+      "et_method_missing_sensors": "Questo metodo richiede sensori che l'installazione non ha dichiarato. Indica i sensori richiesti, oppure lascia il metodo su Automatico.",
+      "et_method_unknown": "Metodo di evapotraspirazione sconosciuto."
     },
     "abort": {
       "already_configured": "NeverDry è già configurato"
@@ -143,7 +157,21 @@
           "vwc_sensor": "Sensore di umidità del suolo (opzionale)",
           "alpha": "Coefficiente ET (α)",
           "t_base": "Temperatura di base",
-          "d_max": "Limite massimo del deficit"
+          "d_max": "Limite massimo del deficit",
+          "humidity_sensor": "Sensore di umidità relativa",
+          "wind_speed_sensor": "Sensore di velocità del vento",
+          "net_radiation_sensor": "Sensore di radiazione solare/netta",
+          "temp_max_sensor": "Sensore di temperatura massima giornaliera",
+          "temp_min_sensor": "Sensore di temperatura minima giornaliera",
+          "et_method": "Metodo di evapotraspirazione"
+        },
+        "data_description": {
+          "humidity_sensor": "Facoltativo. Insieme a vento e radiazione sblocca Penman-Monteith.",
+          "wind_speed_sensor": "Facoltativo. Insieme a umidità e radiazione sblocca Penman-Monteith.",
+          "net_radiation_sensor": "Facoltativo. Insieme a umidità e vento sblocca Penman-Monteith.",
+          "temp_max_sensor": "Facoltativo. Con la minima giornaliera sblocca Hargreaves-Samani.",
+          "temp_min_sensor": "Facoltativo. Con la massima giornaliera sblocca Hargreaves-Samani.",
+          "et_method": "Lascia Automatico a meno che tu non voglia fissare un metodo. Un metodo i cui sensori non hai dichiarato viene rifiutato, e l'errore dice quale manca."
         }
       },
       "add_zone": {
@@ -277,7 +305,9 @@
     "error": {
       "efficiency_required": "Inserisci un'efficienza: il tipo di impianto è impostato su Personalizzato, che prende il valore da quel campo",
       "kc_required": "Inserisci un Kc: la famiglia di piante è impostata su Personalizzato, che prende il valore da quel campo",
-      "microclimate_factor_required": "Inserisci un fattore microclima: l'esposizione è impostata su Personalizzato, che prende il valore da quel campo"
+      "microclimate_factor_required": "Inserisci un fattore microclima: l'esposizione è impostata su Personalizzato, che prende il valore da quel campo",
+      "et_method_missing_sensors": "Questo metodo richiede sensori che l'installazione non ha dichiarato. Indica i sensori richiesti, oppure lascia il metodo su Automatico.",
+      "et_method_unknown": "Metodo di evapotraspirazione sconosciuto."
     },
     "abort": {
       "no_zones": "Nessuna zona configurata"
@@ -337,6 +367,15 @@
         "windy": "Ventoso / esposto (×1.15)",
         "reflected_heat": "Calore riflesso — pavimentazione, muro a sud (×1.20)",
         "custom": "Personalizzato (imposta il fattore sotto)"
+      }
+    },
+    "et_method": {
+      "options": {
+        "auto": "Automatico — il metodo migliore che i miei sensori permettono",
+        "et_simple": "Semplice (solo temperatura)",
+        "hargreaves": "Hargreaves-Samani (temperatura max/min giornaliera)",
+        "penman_monteith": "Penman-Monteith (FAO-56, meteo completo)",
+        "vwc_system": "Sonda di umidità del suolo"
       }
     }
   }

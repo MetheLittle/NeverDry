@@ -9,6 +9,37 @@ CONF_RAIN_SENSOR = "rain_sensor"
 CONF_VWC_SENSOR = "vwc_sensor"
 CONF_RAIN_SENSOR_TYPE = "rain_sensor_type"
 
+# Optional inputs that unlock the richer evapotranspiration methods. All
+# optional by design: a site declares what it has, and the models it may choose
+# follow from that (Environment.declared_sensors >= model.required_sensors).
+# Declaring none of these leaves the integration exactly as it was.
+CONF_HUMIDITY_SENSOR = "humidity_sensor"
+CONF_WIND_SPEED_SENSOR = "wind_speed_sensor"
+CONF_NET_RADIATION_SENSOR = "net_radiation_sensor"
+CONF_TEMP_MAX_SENSOR = "temp_max_sensor"
+CONF_TEMP_MIN_SENSOR = "temp_min_sensor"
+
+# Which water-balance method to run. ``auto`` is not a method: it means "the
+# best one my sensors support", which is what every existing installation has
+# been doing implicitly. Stored as the model's own identifier otherwise, so the
+# class can move without invalidating the choice.
+CONF_ET_METHOD = "et_method"
+ET_METHOD_AUTO = "auto"
+DEFAULT_ET_METHOD = ET_METHOD_AUTO
+
+# The dropdown's options, richest first, mirroring
+# ``water_balance_model.MODEL_CATALOGUE``. Duplicated here on purpose: the form
+# must offer them without importing the model module, and a static list is what
+# the translation guard can check its labels against. The two are asserted equal
+# in tests/test_water_balance_model.py, so the mirror cannot drift.
+ET_METHOD_OPTIONS = (
+    ET_METHOD_AUTO,
+    "vwc_system",
+    "penman_monteith",
+    "hargreaves",
+    "et_simple",
+)
+
 # Rain sensor types
 RAIN_TYPE_EVENT = "event"  # mm per event (tipping bucket pulse)
 RAIN_TYPE_DAILY_TOTAL = "daily_total"  # cumulative mm since midnight

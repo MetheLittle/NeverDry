@@ -22,11 +22,17 @@ from . import zone_device_identifier
 from .const import (
     CONF_ALPHA,
     CONF_D_MAX,
+    CONF_ET_METHOD,
+    CONF_HUMIDITY_SENSOR,
+    CONF_NET_RADIATION_SENSOR,
     CONF_RAIN_SENSOR,
     CONF_RAIN_SENSOR_TYPE,
     CONF_T_BASE,
+    CONF_TEMP_MAX_SENSOR,
+    CONF_TEMP_MIN_SENSOR,
     CONF_TEMP_SENSOR,
     CONF_VWC_SENSOR,
+    CONF_WIND_SPEED_SENSOR,
     CONF_ZONE_AREA,
     CONF_ZONE_DELIVERY_MODE,
     CONF_ZONE_DELIVERY_TIMEOUT,
@@ -50,6 +56,7 @@ from .const import (
     DEFAULT_D_MAX,
     DEFAULT_DELIVERY_MODE,
     DEFAULT_DELIVERY_TIMEOUT_S,
+    DEFAULT_ET_METHOD,
     DEFAULT_EXPOSURE,
     DEFAULT_IRRIGATION_MODE,
     DEFAULT_IRRIGATION_TIME,
@@ -60,6 +67,8 @@ from .const import (
     DELIVERY_MODE_FLOW_METER,
     DELIVERY_MODE_VOLUME_PRESET,
     DOMAIN,
+    ET_METHOD_AUTO,
+    ET_METHOD_OPTIONS,
     EXPOSURES,
     IRRIGATION_MODE_MANUAL,
     IRRIGATION_MODE_REACTIVE,
@@ -81,6 +90,7 @@ from .const import (
     UNUSUAL_FLOW_MAX_LPM,
     UNUSUAL_FLOW_MIN_LPM,
 )
+from .environment import Environment
 from .unit_convert import (
     LPM_TO_GPH,
     LPM_TO_GPM,
@@ -91,6 +101,7 @@ from .unit_convert import (
     sensors_input_to_metric,
     zone_input_to_metric,
 )
+from .water_balance_model import model_by_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -110,6 +121,86 @@ def _is_imperial(hass) -> bool:
     from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
 
     return hass.config.units is US_CUSTOMARY_SYSTEM
+
+
+#: The optional bindings that unlock the richer ET methods, with the device
+#: class that makes the entity picker useful. Declared once and rendered into
+#: both forms: setup and options must offer the same vocabulary, or a site
+#: could declare a sensor it can never edit.
+_EXTRA_SENSORS: tuple[tuple[str, str | None], ...] = (
+    (CONF_HUMIDITY_SENSOR, "humidity"),
+    (CONF_WIND_SPEED_SENSOR, "wind_speed"),
+    (CONF_NET_RADIATION_SENSOR, "irradiance"),
+    (CONF_TEMP_MAX_SENSOR, "temperature"),
+    (CONF_TEMP_MIN_SENSOR, "temperature"),
+)
+
+
+def _extra_sensor_fields(current: dict | None = None) -> dict:
+    """Entity pickers for the optional inputs, pre-filled when editing."""
+    fields = {}
+    for key, device_class in _EXTRA_SENSORS:
+        marker = (
+            vol.Optional(key, description={"suggested_value": current.get(key)})
+            if current is not None
+            else vol.Optional(key)
+        )
+        config = selector.EntitySelectorConfig(domain="sensor")
+        if device_class:
+            config = selector.EntitySelectorConfig(domain="sensor", device_class=device_class)
+        fields[marker] = selector.EntitySelector(config)
+    return fields
+
+
+def _et_method_field(current: dict | None = None) -> dict:
+    """The method dropdown, offering every method rather than only the usable ones.
+
+    Deliberately not filtered to what the site currently satisfies. The form does
+    not react to what you type, so a list narrowed at render time would go stale
+    the moment a sensor is picked in the same submission — and a user who cannot
+    see Penman-Monteith has no way to learn which sensor unlocks it. The choice
+    is validated on submit instead, and the error names the missing sensors.
+    """
+    stored = (current or {}).get(CONF_ET_METHOD, DEFAULT_ET_METHOD)
+    return {
+        vol.Optional(CONF_ET_METHOD, default=stored): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=ET_METHOD_OPTIONS,
+                translation_key="et_method",
+                mode="dropdown",
+            )
+        )
+    }
+
+
+def _et_method_error(user_input: dict) -> str | None:
+    """Reject a method the declared sensors cannot support, naming what is missing.
+
+    The same rule the integration runs on decides the form's answer: an
+    :class:`~.environment.Environment` is built from what was just submitted and
+    asked whether it satisfies the model. Duplicating the check in a form-shaped
+    variant is how the two would drift, and the drift would only show up as a
+    model silently degrading after setup.
+
+    ``auto`` is always valid: it *is* the promise to pick what the sensors allow.
+    """
+    method = user_input.get(CONF_ET_METHOD, DEFAULT_ET_METHOD)
+    if method == ET_METHOD_AUTO:
+        return None
+    model = model_by_id(method)
+    if model is None:
+        return "et_method_unknown"
+    env = Environment(
+        temperature_sensor=user_input.get(CONF_TEMP_SENSOR) or "",
+        rain_sensor=user_input.get(CONF_RAIN_SENSOR) or "",
+        soil_moisture_sensor=user_input.get(CONF_VWC_SENSOR),
+        humidity_sensor=user_input.get(CONF_HUMIDITY_SENSOR),
+        wind_speed_sensor=user_input.get(CONF_WIND_SPEED_SENSOR),
+        net_radiation_sensor=user_input.get(CONF_NET_RADIATION_SENSOR),
+        temp_max_sensor=user_input.get(CONF_TEMP_MAX_SENSOR),
+        temp_min_sensor=user_input.get(CONF_TEMP_MIN_SENSOR),
+    )
+    return None if env.satisfies(model.required_sensors) else "et_method_missing_sensors"
 
 
 def _sensors_schema(is_imperial: bool) -> vol.Schema:
@@ -160,6 +251,8 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
                 )
             ),
             vol.Optional(CONF_VWC_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+            **_extra_sensor_fields(),
+            **_et_method_field(),
         }
     )
 
@@ -224,6 +317,8 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
                     unit_of_measurement=d_unit,
                 )
             ),
+            **_extra_sensor_fields(current),
+            **_et_method_field(current),
         }
     )
 
@@ -576,13 +671,18 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
         """Step 1: Select sensors and ET model parameters."""
         imperial = _is_imperial(self.hass)
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._data = _sensors_input_to_metric(user_input, imperial)
-            return await self.async_step_zone()
+            if error := _et_method_error(user_input):
+                errors[CONF_ET_METHOD] = error
+            else:
+                self._data = _sensors_input_to_metric(user_input, imperial)
+                return await self.async_step_zone()
 
         return self.async_show_form(
             step_id="user",
             data_schema=_sensors_schema(imperial),
+            errors=errors,
         )
 
     async def async_step_zone(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
@@ -709,23 +809,32 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
     ) -> config_entries.ConfigFlowResult:
         """Edit ET model parameters."""
         imperial = _is_imperial(self.hass)
+        errors: dict[str, str] = {}
         if user_input is not None:
-            user_input = _sensors_input_to_metric(user_input, imperial)
-            new_data = {**self._config_entry.data, **user_input}
-            # An optional entity field cleared by the user is simply absent
-            # from user_input — the merge above would silently keep the old
-            # value, so drop it explicitly.
-            if CONF_VWC_SENSOR not in user_input:
-                new_data.pop(CONF_VWC_SENSOR, None)
-            if new_data != dict(self._config_entry.data):
-                changed = [k for k in new_data if new_data[k] != self._config_entry.data.get(k)]
-                _LOGGER.debug("Config updated via model_params — changed keys: %s", changed)
-                self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
-            return self.async_create_entry(data={})
+            if error := _et_method_error(user_input):
+                errors[CONF_ET_METHOD] = error
+            else:
+                user_input = _sensors_input_to_metric(user_input, imperial)
+                new_data = {**self._config_entry.data, **user_input}
+                # An optional entity field cleared by the user is simply absent
+                # from user_input — the merge above would silently keep the old
+                # value, so drop it explicitly. Every optional binding needs
+                # this, not just the probe: a method stays available on a sensor
+                # the user believes they removed, which is worse than the method
+                # disappearing, because the number keeps looking authoritative.
+                for key in (CONF_VWC_SENSOR, *(k for k, _ in _EXTRA_SENSORS)):
+                    if key not in user_input:
+                        new_data.pop(key, None)
+                if new_data != dict(self._config_entry.data):
+                    changed = [k for k in new_data if new_data[k] != self._config_entry.data.get(k)]
+                    _LOGGER.debug("Config updated via model_params — changed keys: %s", changed)
+                    self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
+                return self.async_create_entry(data={})
 
         return self.async_show_form(
             step_id="model_params",
             data_schema=_model_params_schema(imperial, self._config_entry.data),
+            errors=errors,
         )
 
     async def async_step_add_zone(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:

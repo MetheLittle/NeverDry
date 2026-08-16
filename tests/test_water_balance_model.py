@@ -372,3 +372,18 @@ class TestRestore:
     def test_a_negative_stored_value_is_refused(self):
         model = ETModel()
         assert model.restore(-3.0).value_mm == 0.0
+
+
+def test_the_form_options_mirror_the_catalogue():
+    """`const.ET_METHOD_OPTIONS` is a copy, so it needs a guard, not a comment.
+
+    The form cannot import the model module (the translation guard resolves the
+    dropdown statically), so the identifiers are written twice. This is the test
+    that makes the duplication safe: add a model and forget the constant, and
+    the method is unreachable from the UI with nothing else complaining.
+    """
+    from never_dry.const import ET_METHOD_AUTO, ET_METHOD_OPTIONS
+    from never_dry.water_balance_model import MODEL_CATALOGUE
+
+    expected = (ET_METHOD_AUTO, *(m.method_id for m in MODEL_CATALOGUE))
+    assert tuple(ET_METHOD_OPTIONS) == expected

@@ -11,7 +11,13 @@
           "alpha": "ET coefficient (α)",
           "t_base": "Base temperature",
           "d_max": "Maximum deficit cap",
-          "vwc_sensor": "Soil moisture sensor (optional)"
+          "vwc_sensor": "Soil moisture sensor (optional)",
+          "humidity_sensor": "Relative humidity sensor",
+          "wind_speed_sensor": "Wind speed sensor",
+          "net_radiation_sensor": "Solar/net radiation sensor",
+          "temp_max_sensor": "Daily maximum temperature sensor",
+          "temp_min_sensor": "Daily minimum temperature sensor",
+          "et_method": "Evapotranspiration method"
         },
         "data_description": {
           "temperature_sensor": "Outdoor temperature sensor in °C",
@@ -20,7 +26,13 @@
           "alpha": "Evapotranspiration coefficient. Start with 0.22, adjust after observing your garden for a week",
           "t_base": "Temperature below which evapotranspiration is zero (plants dormant)",
           "d_max": "Upper limit for the deficit index",
-          "vwc_sensor": "If set, deficit is calculated directly from soil moisture instead of the ET model"
+          "vwc_sensor": "If set, deficit is calculated directly from soil moisture instead of the ET model",
+          "humidity_sensor": "Optional. Unlocks Penman-Monteith together with wind and radiation.",
+          "wind_speed_sensor": "Optional. Unlocks Penman-Monteith together with humidity and radiation.",
+          "net_radiation_sensor": "Optional. Unlocks Penman-Monteith together with humidity and wind.",
+          "temp_max_sensor": "Optional. With the daily minimum, unlocks Hargreaves-Samani.",
+          "temp_min_sensor": "Optional. With the daily maximum, unlocks Hargreaves-Samani.",
+          "et_method": "Leave on Automatic unless you want to pin one method. A method whose sensors you have not declared is refused, and the error says which one is missing."
         }
       },
       "zone": {
@@ -114,7 +126,9 @@
       "zone_already_exists": "A zone with this name already exists",
       "efficiency_required": "Choose an efficiency: the system type is set to Custom, which takes its value from that field",
       "kc_required": "Choose a Kc: the plant family is set to Custom, which takes its value from that field",
-      "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field"
+      "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field",
+      "et_method_missing_sensors": "That method needs sensors this installation has not declared. Pick the sensors it requires, or leave the method on Automatic.",
+      "et_method_unknown": "Unknown evapotranspiration method."
     },
     "abort": {
       "already_configured": "NeverDry is already configured"
@@ -139,7 +153,21 @@
         "data": {
           "alpha": "ET coefficient (α)",
           "t_base": "Base temperature",
-          "d_max": "Maximum deficit cap"
+          "d_max": "Maximum deficit cap",
+          "humidity_sensor": "Relative humidity sensor",
+          "wind_speed_sensor": "Wind speed sensor",
+          "net_radiation_sensor": "Solar/net radiation sensor",
+          "temp_max_sensor": "Daily maximum temperature sensor",
+          "temp_min_sensor": "Daily minimum temperature sensor",
+          "et_method": "Evapotranspiration method"
+        },
+        "data_description": {
+          "humidity_sensor": "Optional. Unlocks Penman-Monteith together with wind and radiation.",
+          "wind_speed_sensor": "Optional. Unlocks Penman-Monteith together with humidity and radiation.",
+          "net_radiation_sensor": "Optional. Unlocks Penman-Monteith together with humidity and wind.",
+          "temp_max_sensor": "Optional. With the daily minimum, unlocks Hargreaves-Samani.",
+          "temp_min_sensor": "Optional. With the daily maximum, unlocks Hargreaves-Samani.",
+          "et_method": "Leave on Automatic unless you want to pin one method. A method whose sensors you have not declared is refused, and the error says which one is missing."
         }
       },
       "add_zone": {
@@ -273,7 +301,9 @@
     "error": {
       "efficiency_required": "Choose an efficiency: the system type is set to Custom, which takes its value from that field",
       "kc_required": "Choose a Kc: the plant family is set to Custom, which takes its value from that field",
-      "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field"
+      "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field",
+      "et_method_missing_sensors": "That method needs sensors this installation has not declared. Pick the sensors it requires, or leave the method on Automatic.",
+      "et_method_unknown": "Unknown evapotranspiration method."
     },
     "abort": {
       "no_zones": "No zones configured"
@@ -333,6 +363,15 @@
         "windy": "Windy / exposed (×1.15)",
         "reflected_heat": "Reflected heat — paving, south-facing wall (×1.20)",
         "custom": "Custom (set the factor below)"
+      }
+    },
+    "et_method": {
+      "options": {
+        "auto": "Automatic — the best method my sensors support",
+        "et_simple": "Simple (temperature only)",
+        "hargreaves": "Hargreaves-Samani (daily max/min temperature)",
+        "penman_monteith": "Penman-Monteith (FAO-56, full weather)",
+        "vwc_system": "Soil moisture probe"
       }
     }
   }
