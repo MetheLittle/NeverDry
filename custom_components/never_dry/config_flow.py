@@ -165,7 +165,9 @@ def _et_method_field(current: dict | None = None) -> dict:
     return {
         vol.Optional(CONF_ET_METHOD, default=stored): selector.SelectSelector(
             selector.SelectSelectorConfig(
-                options=ET_METHOD_OPTIONS,
+                # A list, not the tuple in const: Home Assistant validates this
+                # field with voluptuous, which refuses a tuple outright.
+                options=list(ET_METHOD_OPTIONS),
                 translation_key="et_method",
                 mode="dropdown",
             )
