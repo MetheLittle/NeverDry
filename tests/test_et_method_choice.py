@@ -211,3 +211,50 @@ class TestEveryOfferedMethodCanActuallyRun:
 
         assert isinstance(hub._model, ETModel)
         hub._on_sensor_change(MagicMock())  # must not raise
+
+
+class TestTheUserCanSeeWhichModelRuns:
+    """Reading a deficit without knowing how it was computed is reading blind.
+
+    The number means different things depending on its origin — estimated from
+    temperature, computed from a full weather station, measured by a probe — so
+    the method is not a diagnostic detail, it is the unit the number is in.
+
+    And two behaviours make the configuration the wrong place to look: ``auto``
+    has to resolve to something, and a stored choice whose sensors are gone
+    degrades to what the site can still support. Both are cases where what runs
+    is not what is written down.
+    """
+
+    def _hub(self, hass, **cfg):
+        from never_dry.sensor import DrynessIndexSensor
+
+        return DrynessIndexSensor(hass, {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r", **cfg})
+
+    def test_automatic_reports_what_it_resolved_to(self, hass_mock):
+        hub = self._hub(hass_mock, **{CONF_ET_METHOD: "auto"})
+        assert hub.active_method == "et_simple"
+        assert hub.extra_state_attributes["et_method"] == "et_simple"
+        assert hub.extra_state_attributes["et_method_configured"] == "auto"
+
+    def test_a_probe_site_reports_the_probe_model(self, hass_mock):
+        hub = self._hub(hass_mock, **{CONF_VWC_SENSOR: "sensor.soil"})
+        assert hub.active_method == "vwc_system"
+
+    def test_the_two_differ_when_a_choice_had_to_degrade(self, hass_mock):
+        """The case that is invisible without this: asked for one thing, running another."""
+        hub = self._hub(hass_mock, **{CONF_ET_METHOD: "penman_monteith"})
+        assert hub.extra_state_attributes["et_method_configured"] == "penman_monteith"
+        assert hub.active_method == "et_simple"
+
+    def test_the_entity_publishes_it_with_the_reason(self, hass_mock):
+        from never_dry.sensor import WaterBalanceMethodSensor
+
+        hub = self._hub(hass_mock, **{CONF_ET_METHOD: "auto"})
+        entity = WaterBalanceMethodSensor(hub)
+
+        assert entity.native_value == "et_simple"
+        attrs = entity.extra_state_attributes
+        assert attrs["configured"] == "auto"
+        assert attrs["reference_frame"] == "et"
+        assert "temperature" in attrs["declared_sensors"]

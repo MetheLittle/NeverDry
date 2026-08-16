@@ -396,6 +396,7 @@ def _create_entities(
     if not config.get(CONF_VWC_SENSOR):
         entities.append(ETSensor(hass, config, hub_device))
     entities.append(di_sensor)
+    entities.append(WaterBalanceMethodSensor(di_sensor, hub_device))
 
     zone_sensors: list[IrrigationZoneSensor] = []
     for zone_conf in config.get(CONF_ZONES, []):
@@ -721,7 +722,8 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         # supplies readings and publishes the answer; which physics turns one
         # into the other is the model's business, and it is chosen once — by
         # what the installation declared, which is the capability match.
-        method = config.get(CONF_ET_METHOD, DEFAULT_ET_METHOD)
+        self._configured_method = config.get(CONF_ET_METHOD, DEFAULT_ET_METHOD)
+        method = self._configured_method
         self._model: WaterBalanceModel = build_model(
             self._env,
             method_id=None if method == ET_METHOD_AUTO else method,
@@ -774,6 +776,17 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
     def reference_frame(self) -> ReferenceFrame:
         """The frame this hub's deficit is defined against — the model decides it."""
         return self._model.reference_frame
+
+    @property
+    def active_method(self) -> str:
+        """The identifier of the method actually running.
+
+        Not the one configured: ``auto`` has to resolve to something, and a
+        stored choice whose sensors are gone degrades rather than fails. Those
+        are the two cases where asking the configuration gives the wrong answer,
+        and they are exactly the cases a user needs to see.
+        """
+        return type(self._model).method_id
 
     # ── Delegation to the site (Environment) ────────────────────────────────
     #
@@ -852,6 +865,12 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         attrs: dict = {
             "yearly_rain_mm": round(self._yearly_rain, 2),
             "yearly_rain_year": self._yearly_rain_year,
+            # Which physics is actually running. Published because the choice can
+            # differ from what was asked for — `auto` resolves it, and a stored
+            # choice the site no longer supports degrades — and a user who cannot
+            # see the answer is reading a number without knowing how it was made.
+            "et_method": self.active_method,
+            "et_method_configured": self._configured_method,
         }
         if self._last_rain is not None:
             attrs["rain_baseline_mm"] = round(self._last_rain, 2)
@@ -2547,6 +2566,53 @@ class ZoneKcSensor(_ZoneTextSensor):
 #  ZoneLinkedSensor — mirrors an external HA entity inside
 #  the NeverDry zone device (valve, battery, flow meter)
 # ══════════════════════════════════════════════════════════
+
+
+class WaterBalanceMethodSensor(SensorEntity):
+    """Which water-balance method is running, as an entity rather than an attribute.
+
+    An attribute would technically answer the question, but only for someone who
+    already knows to look for it. This is the one fact a user needs in order to
+    read every other number the integration publishes: a deficit means something
+    different depending on whether it was estimated from temperature, computed
+    from a full weather station, or measured by a probe.
+
+    It also makes two invisible behaviours visible. ``auto`` has to resolve to
+    something, and a stored choice whose sensors have gone degrades to what the
+    site can still support — in both cases what runs is not what is written in
+    the configuration, and until now nothing said so.
+
+    Diagnostic by category: it describes the installation, not the garden.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Water balance method"
+    _attr_icon = "mdi:function-variant"
+    _attr_should_poll = False
+
+    def __init__(self, hub: DrynessIndexSensor, device_info: DeviceInfo | None = None) -> None:
+        """Mirror the method of ``hub``, on the hub's own device."""
+        from homeassistant.const import EntityCategory
+
+        self._hub = hub
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_unique_id = "water_balance_method"
+        if device_info:
+            self._attr_device_info = device_info
+
+    @property
+    def native_value(self) -> str:
+        """The identifier of the method actually running."""
+        return self._hub.active_method
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """What was asked for, and what the site can feed — the *why* of the answer."""
+        return {
+            "configured": self._hub._configured_method,
+            "reference_frame": self._hub.reference_frame.value,
+            "declared_sensors": sorted(k.value for k in self._hub.environment.declared_sensors),
+        }
 
 
 class ZoneLinkedSensor(SensorEntity):

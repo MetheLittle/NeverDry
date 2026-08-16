@@ -370,5 +370,12 @@
         "vwc_system": "Sonda di umidità del suolo"
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "water_balance_method": {
+        "name": "Metodo di bilancio idrico"
+      }
+    }
   }
 }

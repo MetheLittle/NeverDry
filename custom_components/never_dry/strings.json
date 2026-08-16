@@ -366,5 +366,12 @@
         "vwc_system": "Soil moisture probe"
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "water_balance_method": {
+        "name": "Water balance method"
+      }
+    }
   }
 }
