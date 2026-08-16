@@ -454,3 +454,75 @@ class TestTheMethodEntityStaysAlive:
         entity = WaterBalanceMethodSensor(hub)
 
         assert not hasattr(entity, "_hass")
+
+
+def _install_registry(monkeypatch, registry):
+    """Put a fake entity registry where the production import will find it.
+
+    The function imports the attribute from ``homeassistant.helpers``, so
+    patching ``sys.modules`` alone does nothing — the import succeeds against the
+    package and quietly returns the real (absent) one, and the cleanup silently
+    does not run. Which is also how it would fail in production.
+    """
+    import sys
+    from types import SimpleNamespace
+
+    fake = SimpleNamespace(async_get=lambda _hass: registry)
+    monkeypatch.setattr(sys.modules["homeassistant.helpers"], "entity_registry", fake, raising=False)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers.entity_registry", fake)
+
+
+class TestSwitchingMethodLeavesNothingBehind:
+    """The derived entities depend on the method, so changing it changes the set.
+
+    Home Assistant keeps an entity that stops being created — it survives in the
+    registry and reads unavailable for ever. Six dead rows in the diagnostic
+    group teach people to stop reading the group, which is the problem the set
+    was narrowed to avoid, moved one step along.
+    """
+
+    def _registry_with(self, unique_ids, entry_id="entry1"):
+        from types import SimpleNamespace
+
+        removed = []
+        entities = {
+            uid: SimpleNamespace(unique_id=uid, entity_id=f"sensor.{uid}", config_entry_id=entry_id)
+            for uid in unique_ids
+        }
+        return SimpleNamespace(
+            entities=entities,
+            async_remove=lambda entity_id: removed.append(entity_id),
+        ), removed
+
+    def test_a_quantity_the_new_method_does_not_compute_is_forgotten(self, hass_mock, monkeypatch):
+        from types import SimpleNamespace
+
+        from never_dry import sensor as sensor_mod
+
+        registry, removed = self._registry_with(
+            ["entry1_model_input_derived_solar_mj", "entry1_model_input_derived_diurnal_range_c"]
+        )
+        _install_registry(monkeypatch, registry)
+
+        kept = SimpleNamespace(_attr_unique_id="entry1_model_input_derived_diurnal_range_c")
+        sensor_mod._drop_stale_model_inputs(hass_mock, "entry1", [kept])
+
+        assert removed == ["sensor.entry1_model_input_derived_solar_mj"]
+
+    def test_entities_of_other_entries_and_other_kinds_are_untouched(self, hass_mock, monkeypatch):
+        """A zone sensor removed by accident takes its history with it."""
+        from types import SimpleNamespace
+
+        from never_dry import sensor as sensor_mod
+
+        registry, removed = self._registry_with(["entry1_zone_deficit_orto", "entry1_model_input_derived_solar_mj"])
+        registry.entities["other"] = SimpleNamespace(
+            unique_id="entry2_model_input_derived_solar_mj",
+            entity_id="sensor.other",
+            config_entry_id="entry2",
+        )
+        _install_registry(monkeypatch, registry)
+
+        sensor_mod._drop_stale_model_inputs(hass_mock, "entry1", [])
+
+        assert removed == ["sensor.entry1_model_input_derived_solar_mj"]

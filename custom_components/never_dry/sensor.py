@@ -561,7 +561,42 @@ def _create_entities(
     for entity in entities:
         entity._attr_unique_id = f"{entry_id}_{entity._attr_unique_id}"
 
+    _drop_stale_model_inputs(hass, entry_id, entities)
+
     return entities, di_sensor, zone_sensors
+
+
+def _drop_stale_model_inputs(hass: HomeAssistant, entry_id: str, entities: list) -> None:
+    """Forget the derived entities the current method does not produce.
+
+    Which derived quantities exist depends on the method, so changing method
+    changes the set. Home Assistant keeps an entity that stops being created: it
+    survives in the registry and shows as unavailable for ever. Six dead rows in
+    the diagnostic group is exactly the noise that teaches people to stop
+    reading it — the problem this set was narrowed to avoid, moved one step
+    along.
+
+    Only ``model_input_*`` ids are touched, and only for this entry. Everything
+    else in the registry is somebody else's business, and a zone sensor removed
+    by accident would take its history with it.
+    """
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:  # pragma: no cover - Home Assistant is always present in production
+        return
+
+    registry = er.async_get(hass)
+    wanted = {entity._attr_unique_id for entity in entities}
+    marker = f"{entry_id}_model_input_"
+    for entry in list(registry.entities.values()):
+        if entry.config_entry_id != entry_id or not str(entry.unique_id).startswith(marker):
+            continue
+        if entry.unique_id not in wanted:
+            _LOGGER.info(
+                "Removing %s: the running water-balance method no longer computes it",
+                entry.entity_id,
+            )
+            registry.async_remove(entry.entity_id)
 
 
 _HW_DURATION_KEYWORDS = frozenset({"max", "duration", "time", "irrigation", "timer", "delay"})
