@@ -40,6 +40,23 @@ const I18N = {
     waitingForValve: "waiting for first contact",
     unreachableHint: "check the radio link or the batteries",
     valve: "Valve",
+    modelRate: "Reference ET rate",
+    modelMeasured: "Read from sensors",
+    modelDerived: "Worked out by NeverDry",
+    measured_temperature_c: "Temperature",
+    measured_humidity_pct: "Relative humidity",
+    measured_wind_raw: "Wind speed",
+    measured_solar_w_m2: "Solar radiation",
+    measured_soil_moisture_raw: "Soil moisture (raw)",
+    derived_temp_max_c: "Daily maximum",
+    derived_temp_min_c: "Daily minimum",
+    derived_diurnal_range_c: "Diurnal range",
+    derived_solar_mj: "Daily solar energy",
+    derived_extraterrestrial_mj: "Extraterrestrial radiation",
+    derived_net_radiation_mj: "Net radiation",
+    derived_wind_2m_m_s: "Wind at 2 m",
+    derived_soil_moisture_fraction: "Water content",
+    derived_deficit_mm: "Deficit",
     exposure: "Exposure",
     configure: "Configure this zone",
     expDeepShade: "Deep shade",
@@ -69,6 +86,23 @@ const I18N = {
     waitingForValve: "in attesa di risposta",
     unreachableHint: "controlla il collegamento radio o le batterie",
     valve: "Valvola",
+    modelRate: "Tasso ET di riferimento",
+    modelMeasured: "Letti dai sensori",
+    modelDerived: "Calcolati da NeverDry",
+    measured_temperature_c: "Temperatura",
+    measured_humidity_pct: "Umidità relativa",
+    measured_wind_raw: "Velocità del vento",
+    measured_solar_w_m2: "Radiazione solare",
+    measured_soil_moisture_raw: "Umidità del suolo (grezza)",
+    derived_temp_max_c: "Massima giornaliera",
+    derived_temp_min_c: "Minima giornaliera",
+    derived_diurnal_range_c: "Escursione giornaliera",
+    derived_solar_mj: "Energia solare giornaliera",
+    derived_extraterrestrial_mj: "Radiazione extraterrestre",
+    derived_net_radiation_mj: "Radiazione netta",
+    derived_wind_2m_m_s: "Vento a 2 m",
+    derived_soil_moisture_fraction: "Contenuto d'acqua",
+    derived_deficit_mm: "Deficit",
     exposure: "Esposizione",
     configure: "Configura questa zona",
     expDeepShade: "Ombra piena",
@@ -848,6 +882,152 @@ class NeverDryZoneCardEditor extends HTMLElement {
   }
 }
 
+
+/* ==========================================================================
+ * NeverDry Model Card — what the water balance was fed, and what it made of it
+ *
+ * The deficit is one number at the end of a chain: a thermometer becomes a
+ * daily range, a pyranometer becomes a day's energy, that becomes a radiation
+ * balance, and only then an evapotranspiration. Every step is computed, and a
+ * computed value that is quietly wrong looks exactly like one that is right.
+ *
+ * This card exists to make the chain checkable rather than believable, which is
+ * why it separates what was *measured* from what was *derived*. That split is
+ * the whole design: it is how a pyranometer reading treated as a daily energy
+ * was caught here — the measurement was plainly right and the derived value
+ * plainly too small, and no single number would have shown it.
+ * ======================================================================== */
+
+const MODEL_MEASURED = [
+  ["measured_temperature_c", "mdi:thermometer", "°C"],
+  ["measured_humidity_pct", "mdi:water-percent", "%"],
+  ["measured_wind_raw", "mdi:weather-windy", ""],
+  ["measured_solar_w_m2", "mdi:white-balance-sunny", "W/m²"],
+  ["measured_soil_moisture_raw", "mdi:water-outline", ""],
+];
+
+const MODEL_DERIVED = [
+  ["derived_temp_max_c", "mdi:thermometer-high", "°C"],
+  ["derived_temp_min_c", "mdi:thermometer-low", "°C"],
+  ["derived_diurnal_range_c", "mdi:thermometer-lines", "°C"],
+  ["derived_solar_mj", "mdi:solar-power-variant", "MJ/m²"],
+  ["derived_extraterrestrial_mj", "mdi:earth", "MJ/m²"],
+  ["derived_net_radiation_mj", "mdi:sun-angle", "MJ/m²"],
+  ["derived_wind_2m_m_s", "mdi:weather-windy-variant", "m/s"],
+  ["derived_soil_moisture_fraction", "mdi:water-percent", ""],
+  ["derived_deficit_mm", "mdi:water-alert", "mm"],
+];
+
+class NeverDryModelCard extends HTMLElement {
+  static getStubConfig() {
+    return {};
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._built = false;
+  }
+
+  getCardSize() {
+    return 6;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  /**
+   * The method entity, chosen explicitly or found.
+   *
+   * Auto-discovery rather than a required setting: a user adding this card has
+   * one integration and does not know the entity id. With several config
+   * entries the first is a guess, so the setting stays available for that case.
+   */
+  _methodEntity() {
+    const hass = this._hass;
+    if (!hass) return null;
+    if (this._config && this._config.entity) return hass.states[this._config.entity] || null;
+    const id = Object.keys(hass.states).find((e) => e.endsWith("_water_balance_method"));
+    return id ? hass.states[id] : null;
+  }
+
+  _render() {
+    const hass = this._hass;
+    if (!hass) return;
+    if (!this._built) {
+      this.innerHTML = `<ha-card><div class="ndm"></div></ha-card><style>${MODEL_CARD_CSS}</style>`;
+      this._built = true;
+    }
+    const root = this.querySelector(".ndm");
+    const st = this._methodEntity();
+    if (!st) {
+      root.innerHTML = `<div class="ndm-empty">${escapeHtml(t(hass, "noEntities"))}</div>`;
+      return;
+    }
+
+    const a = st.attributes || {};
+    const method = fmtState(hass, st) || st.state;
+    const rate = a.et_rate_mm_h;
+
+    root.innerHTML = `
+      <div class="ndm-head">
+        <ha-icon icon="mdi:function-variant"></ha-icon>
+        <div>
+          <div class="ndm-title">${escapeHtml(method)}</div>
+          <div class="ndm-sub">${escapeHtml(a.reason || "")}</div>
+        </div>
+      </div>
+      ${rate === undefined ? "" : `<div class="ndm-rate"><span>${escapeHtml(t(hass, "modelRate"))}</span><b>${escapeHtml(String(rate))} mm/h</b></div>`}
+      ${a.status && a.warming_up_because ? `<div class="ndm-warn">${escapeHtml(a.warming_up_because)}</div>` : ""}
+      ${this._group(hass, t(hass, "modelMeasured"), MODEL_MEASURED, a, "measured")}
+      ${this._group(hass, t(hass, "modelDerived"), MODEL_DERIVED, a, "derived")}
+    `;
+  }
+
+  /**
+   * One group of rows. Absent keys are skipped rather than shown empty: which
+   * quantities exist depends on the method, and a permanently blank row is how
+   * a reader learns to stop reading the block.
+   */
+  _group(hass, title, spec, attrs, kind) {
+    const rows = spec
+      .filter(([key]) => attrs[key] !== undefined && attrs[key] !== null)
+      .map(
+        ([key, icon, unit]) => `
+        <div class="ndm-row">
+          <ha-icon icon="${icon}"></ha-icon>
+          <span class="ndm-lbl">${escapeHtml(t(hass, key) || key)}</span>
+          <span class="ndm-val">${escapeHtml(String(attrs[key]))}${unit ? " " + escapeHtml(unit) : ""}</span>
+        </div>`
+      )
+      .join("");
+    if (!rows) return "";
+    return `<div class="ndm-group ndm-${kind}"><div class="ndm-group-title">${escapeHtml(title)}</div>${rows}</div>`;
+  }
+}
+
+const MODEL_CARD_CSS = `
+  .ndm { padding:16px; }
+  .ndm-head { display:flex; gap:12px; align-items:flex-start; }
+  .ndm-head ha-icon { color:var(--primary-color); }
+  .ndm-title { font-size:1.15rem; font-weight:600; }
+  .ndm-sub { color:var(--secondary-text-color); font-size:.85rem; margin-top:2px; }
+  .ndm-rate { display:flex; justify-content:space-between; margin:12px 0 4px; padding:8px 10px;
+              background:var(--secondary-background-color); border-radius:8px; }
+  .ndm-warn { margin:8px 0; padding:8px 10px; border-radius:8px; font-size:.85rem;
+              background:rgba(255,166,0,.12); color:var(--warning-color, #ffa600); }
+  .ndm-group { margin-top:14px; }
+  .ndm-group-title { font-size:.78rem; text-transform:uppercase; letter-spacing:.06em;
+                     color:var(--secondary-text-color); margin-bottom:6px; }
+  .ndm-row { display:flex; align-items:center; gap:10px; padding:3px 0; }
+  .ndm-row ha-icon { --mdc-icon-size:18px; color:var(--secondary-text-color); }
+  .ndm-lbl { flex:1; }
+  .ndm-val { font-variant-numeric:tabular-nums; font-weight:500; }
+  .ndm-derived .ndm-row ha-icon { color:var(--primary-color); }
+  .ndm-empty { padding:8px; color:var(--secondary-text-color); }
+`;
+
 // ---- registration -------------------------------------------------------
 
 if (!customElements.get("never-dry-zone-card")) {
@@ -856,6 +1036,9 @@ if (!customElements.get("never-dry-zone-card")) {
 if (!customElements.get("never-dry-zone-card-editor")) {
   customElements.define("never-dry-zone-card-editor", NeverDryZoneCardEditor);
 }
+if (!customElements.get("never-dry-model-card")) {
+  customElements.define("never-dry-model-card", NeverDryModelCard);
+}
 
 window.customCards = window.customCards || [];
 if (!window.customCards.some((c) => c.type === "never-dry-zone-card")) {
@@ -863,6 +1046,16 @@ if (!window.customCards.some((c) => c.type === "never-dry-zone-card")) {
     type: "never-dry-zone-card",
     name: "NeverDry Zone Card",
     description: "All entities of one NeverDry irrigation zone in a clean layout.",
+    preview: false,
+    documentationURL: "https://github.com/never-dry/NeverDry",
+  });
+}
+
+if (!window.customCards.some((c) => c.type === "never-dry-model-card")) {
+  window.customCards.push({
+    type: "never-dry-model-card",
+    name: "NeverDry Model Card",
+    description: "Which water-balance method is running, what it measured and what it worked out.",
     preview: false,
     documentationURL: "https://github.com/never-dry/NeverDry",
   });
