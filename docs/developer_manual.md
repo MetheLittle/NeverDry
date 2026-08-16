@@ -23,11 +23,22 @@
 custom_components/never_dry/
 ├── __init__.py        → Integration setup (YAML + config entry), activity log setup
 ├── const.py           → All constants, defaults, system types, plant families
-├── sensor.py          → compute_kc(), ETSensor, DrynessIndexSensor, IrrigationZoneSensor
-│                        + per-zone stat/linked sensors (deficit, rain, water totals, Kc, …)
+├── sensor.py          → the Home Assistant layer: entities, and the wiring that
+│                        feeds the domain objects below (no water-balance maths of its own)
 ├── controller.py      → IrrigationController (irrigation cycle, services, monitoring mode)
 ├── button.py          → Per-zone buttons: Irrigate, Mark irrigated, Stop, Reset valve
-├── valve_operator.py  → ValveOperator: open/close with confirmation, delivery modes, watchdog
+│
+│   ── the domain, pure: no Home Assistant import, guarded by tests/test_architecture.py
+├── zone.py            → Zone: owns its deficit, turns it into a water demand
+├── water_balance_model.py → the four methods + Deficit, DiurnalRange, DailySolarEnergy,
+│                        net radiation, and the capability match that chooses among them
+├── environment.py     → Environment: the site — declared sensors, latitude, yearly rain
+├── scheduler.py       → Scheduler: when to water, and the serial concurrency policy
+│
+├── driver.py          → Driver/ZoneDriver/MasterDriver: drives the valve (entity adapter,
+│                        confirmed commands, watchdog, hardware timer, leak recovery)
+├── valve_operator.py  → superseded by driver.py; imported by nothing in production,
+│                        kept until the field test of the driver is done
 ├── valve_fsm.py       → Valve finite-state machine (idle → … → maintenance)
 ├── valve_latency.py   → ValveLatencyTracker: adaptive timeout (rolling mean + 3σ)
 ├── valve_notifier.py  → User notifications on valve failures
@@ -66,7 +77,15 @@ For the conceptual domain model behind this layout (System / Zone / Scheduler / 
 
 ## 2. Core formulas and their location
 
-All formulas live in `sensor.py`.
+**The formulas live in `water_balance_model.py`, not in `sensor.py`.** The entity
+layer supplies readings and publishes answers; the physics belongs to the model,
+which is pure and testable without a Home Assistant runtime. A test asserts that
+each formula has exactly one home, so a copy cannot quietly reappear
+(`tests/test_architecture.py::test_formula_has_a_single_home`).
+
+The sections below name the class for each formula. Where one says `ETSensor` or
+`DrynessIndexSensor`, read it as "the entity that *publishes* it" — the
+arithmetic is the model's.
 
 ### 2.1 Hourly evapotranspiration (linear model)
 
@@ -280,6 +299,23 @@ Seasonal anchors (northern hemisphere): day 15 (mid-Jan), 105 (mid-Apr), 196 (mi
 - `reset` service: resets everything
 
 ## 4. Module reference
+
+### The two layers
+
+Since the domain model was wired, the package has a boundary that CI enforces
+(see §8b). `zone`, `water_balance_model`, `environment` and `scheduler` carry
+rules and import no Home Assistant; everything else is the HA-coupled layer.
+`driver.py` is deliberately in the second group: it is an actuator, HA-aware by
+design.
+
+| Module | Layer | Holds |
+|---|---|---|
+| `water_balance_model.py` | domain | The four methods, `Deficit`, `DiurnalRange`, `DailySolarEnergy`, the radiation balance, `build_model` and the capability match |
+| `zone.py` | domain | The zone's deficit and its water demand; `settle` (amount known) vs `mark_irrigated` (outcome known) |
+| `environment.py` | domain | The site: declared sensors, latitude, yearly rain, and the silence judgement |
+| `scheduler.py` | domain | The watering decision and the serial concurrency policy |
+| `driver.py` | HA layer | One actuator: entity adapter, confirmed commands, safety layers |
+| `sensor.py` | HA layer | Entities, and the seam that builds each model's reading |
 
 ### const.py
 

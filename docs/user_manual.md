@@ -210,6 +210,14 @@ When you add the integration, the first screen asks for:
 | **Base temperature (T_base)** | No | Temperature below which ET = 0 (default: 9.0°C) |
 | **Max deficit (D_max)** | No | Upper deficit clamp (default: 100.0 mm). Prevents runaway values during sensor outages. |
 | **VWC sensor** | No | Optional soil moisture sensor (volumetric water content). If provided, the deficit is calculated directly from soil moisture instead of the ET model. |
+| **Relative humidity sensor** | No | Unlocks Penman-Monteith together with wind |
+| **Wind speed sensor** | No | Unlocks Penman-Monteith together with humidity. Any unit — it is converted, including to the 2 m height the equation assumes |
+| **Solar radiation sensor** | No | A pyranometer reading (W/m²). Improves Penman-Monteith; without one the radiation is estimated from the day's temperature swing |
+| **Evapotranspiration method** | No | Leave on **Automatic** unless you want to pin one. A method whose sensors you have not declared is refused, and the error names the missing one |
+
+You are **not** asked for daily maximum and minimum temperature: NeverDry
+observes them from the thermometer you already gave it. Nor for *net* radiation,
+which needs a research instrument — it is computed from the solar reading.
 
 ### Step 2: Add irrigation zones
 
@@ -320,9 +328,33 @@ After setup, check that these entities exist in **Settings → Devices & Service
 
 ## 6. Understanding the sensors
 
+### Water balance method (`sensor.<hub>_water_balance_method`)
+
+Which method is producing the deficit right now — not which one you configured,
+which is a different thing whenever you left the choice on *Automatic*, or when
+a sensor a pinned method needed has gone away.
+
+Its attributes carry the *why*: the reason the method was chosen, what you
+configured, which sensors were counted, and — the part worth looking at — what
+the model was last **fed**, split into values read from sensors and values
+NeverDry worked out. That split is how you check the estimate instead of
+believing it.
+
+Under the NeverDry device, in the **Diagnostic** section. The derived quantities
+also exist as their own entities, so they have history: daily maximum and
+minimum temperature, diurnal range, and — when Penman-Monteith is running —
+daily solar radiation, net radiation and the wind brought to 2 m. Watching one
+of those follow the weather for a week is the honest way to judge it.
+
+There is also a **Model card** you can add to a dashboard, which lays the same
+information out in two columns: read from sensors, and worked out by NeverDry.
+
 ### ET Hourly Estimate (`sensor.et_hourly_estimate`)
 
-Shows the current rate of water loss from the soil in mm/h.
+Shows the current rate of water loss from the soil in mm/h, **as produced by the
+method actually running** — not always the simple temperature formula. On a site
+running Penman-Monteith it follows the sun going down, which a
+temperature-only estimate cannot do.
 
 - **0.00**: temperature is below base (plants dormant, no water loss)
 - **0.05–0.10**: cool day, low water loss
