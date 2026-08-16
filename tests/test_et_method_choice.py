@@ -526,3 +526,31 @@ class TestSwitchingMethodLeavesNothingBehind:
         sensor_mod._drop_stale_model_inputs(hass_mock, "entry1", [])
 
         assert removed == ["sensor.entry1_model_input_derived_solar_mj"]
+
+
+class TestNothingReadsUnknownAfterAStart:
+    """A restart used to leave every derived entity blank for minutes.
+
+    The wait was only until the next temperature change, but an entity that says
+    nothing after a restart is indistinguishable from one that is broken — which
+    is how three separate looks at this device found an empty attribute list and
+    concluded the feature was not working.
+    """
+
+    async def test_the_inputs_are_published_before_any_sensor_moves(self, hass_mock):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from never_dry.sensor import DrynessIndexSensor
+
+        hass_mock.states.get = MagicMock(return_value=MagicMock(state="24.0"))
+        hub = DrynessIndexSensor(hass_mock, {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r"})
+        hub.async_get_last_state = AsyncMock(return_value=None)
+        hub.async_write_ha_state = MagicMock()
+        hub.async_on_remove = lambda _cb: None
+        hub._bootstrap_diurnal_range = AsyncMock()
+        hub._backfill_from_recorder = AsyncMock()
+
+        await hub.async_added_to_hass()
+
+        assert hub._last_inputs.get("status") != "no reading computed since startup"
+        assert "measured_temperature_c" in hub._last_inputs

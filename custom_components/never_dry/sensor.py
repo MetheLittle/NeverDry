@@ -1166,6 +1166,14 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             self._select_model(None if observed is None else observed[1] - observed[0])
         _LOGGER.info("Water balance method: %s — %s", self.active_method, self._method_reason)
 
+        # Compute once now instead of waiting for the first temperature change.
+        # The wait is only a few minutes, but everything derived reads *unknown*
+        # until it passes — and an entity that says nothing after a restart is
+        # indistinguishable from one that is broken. The elapsed time is
+        # effectively zero here, so this publishes the inputs without moving the
+        # water balance.
+        self._on_sensor_change(None)
+
         tracked = [self._temp_sensor, self._rain_sensor]
         if self._vwc_sensor:
             tracked.append(self._vwc_sensor)
