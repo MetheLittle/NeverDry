@@ -600,7 +600,11 @@ class HargreavesModel(ETBalanceModel):
 
     method_id: ClassVar[str] = "hargreaves"
 
-    required_sensors: ClassVar[frozenset[SensorKind]] = frozenset({SensorKind.TEMP_MAX, SensorKind.TEMP_MIN})
+    # Only a thermometer. The daily extremes used to be two more bindings the
+    # user had to build with helpers; they are observed from this same sensor
+    # now (see :class:`DiurnalRange`), so the requirement is the reading, not
+    # the summary of it.
+    required_sensors: ClassVar[frozenset[SensorKind]] = frozenset({SensorKind.TEMPERATURE})
 
     def __init__(
         self,
@@ -741,6 +745,82 @@ class VWCPerZoneModel(VWCSystemModel):
         return ReferenceFrame.VWC_PER_ZONE
 
 
+# ── The diurnal range, observed rather than asked for ──────────────────────
+
+
+class DiurnalRange:
+    """The daily temperature extremes, kept from the readings we already take.
+
+    Hargreaves-Samani needs the day's maximum and minimum, and asking the user
+    for two more entities is asking them to build with helper templates
+    something the integration observes anyway — and inviting the worst version
+    of the mistake, since the same entity in both boxes yields a range of zero,
+    which the formula turns into an evapotranspiration of exactly zero.
+
+    A rolling 24-hour window rather than a calendar day: it is always available
+    once filled, instead of being meaningless until midnight and thin every
+    morning. The cost is that the window straddles two dates, which for a
+    quantity meant to characterise "a day's weather" is the smaller error.
+
+    Storage is bounded by construction — one bucket per hour, each holding that
+    hour's min and max — because the caller observes on every sensor change and
+    an unbounded list of readings would grow without limit.
+    """
+
+    #: How many distinct hours must be present before the extremes are trusted.
+    #: Below this the window is a fragment of a day, and its range understates
+    #: the real one — which would understate the water the garden needs.
+    MIN_COVERAGE_H: ClassVar[int] = 20
+
+    #: A range this small over a full day is not weather; it is a sensor that
+    #: does not see the sky. Reported so the caller can say so rather than
+    #: silently producing an evapotranspiration near zero.
+    IMPLAUSIBLE_RANGE_C: ClassVar[float] = 2.0
+
+    def __init__(self, window_h: int = 24) -> None:
+        """Track extremes over the last ``window_h`` hours."""
+        self._window_h = window_h
+        self._buckets: dict[int, tuple[float, float]] = {}
+
+    def observe(self, hours: float, temp_c: float) -> None:
+        """Record ``temp_c`` seen at ``hours`` (any monotonic hour count)."""
+        index = int(hours)
+        low, high = self._buckets.get(index, (temp_c, temp_c))
+        self._buckets[index] = (min(low, temp_c), max(high, temp_c))
+        cutoff = index - self._window_h + 1
+        for stale in [k for k in self._buckets if k < cutoff]:
+            del self._buckets[stale]
+
+    @property
+    def coverage_h(self) -> int:
+        """How many distinct hours the window currently holds."""
+        return len(self._buckets)
+
+    @property
+    def is_ready(self) -> bool:
+        """Whether the window covers enough of a day to be worth reading."""
+        return self.coverage_h >= self.MIN_COVERAGE_H
+
+    def extremes(self) -> tuple[float, float] | None:
+        """``(tmin, tmax)`` over the window, or ``None`` while it is too thin.
+
+        ``None`` rather than a guess: a partial window's range is systematically
+        too small, and a too-small range reads as an overcast day. The caller
+        freezes the deficit instead, exactly as it does before the temperature
+        buffer has enough readings.
+        """
+        if not self.is_ready:
+            return None
+        lows = [low for low, _ in self._buckets.values()]
+        highs = [high for _, high in self._buckets.values()]
+        return min(lows), max(highs)
+
+    def is_implausible(self) -> bool:
+        """Whether a full window shows a range too small to be real weather."""
+        got = self.extremes()
+        return got is not None and (got[1] - got[0]) < self.IMPLAUSIBLE_RANGE_C
+
+
 # ── The catalogue, and choosing from it ────────────────────────────────────
 #
 # Two halves of one rule live here. The catalogue is what the integration can
@@ -769,7 +849,18 @@ MODEL_CATALOGUE: tuple[type[WaterBalanceModel], ...] = (
 #: and not by the automatic choice, which would otherwise pick the richest
 #: *declared* model and then raise on every reading. Widening this set is the
 #: last step of wiring a tier, not the first.
-RUNNABLE_INPUTS: frozenset[type] = frozenset({ETStep, VWCReading})
+RUNNABLE_INPUTS: frozenset[type] = frozenset({ETStep, HargreavesStep, VWCReading})
+
+#: What the **automatic** choice may pick, which is deliberately narrower than
+#: what may be chosen. Since the diurnal range is observed rather than declared,
+#: Hargreaves-Samani requires exactly what the simple tier requires — so ranking
+#: it higher would switch the method under every existing installation on
+#: upgrade, silently, to physics no garden has run yet. A better estimate is
+#: still a different one, and a different one has to be asked for.
+#:
+#: It joins this tuple when it has been watched in the field, not when it starts
+#: working.
+AUTO_RANKING: tuple[type[WaterBalanceModel], ...] = (VWCSystemModel, ETModel)
 
 #: Fallback when the site declares nothing at all — the model that needs least.
 DEFAULT_METHOD_ID: str = ETModel.method_id
@@ -830,7 +921,10 @@ def build_model(
     offered = models_offered_by(env)
     chosen = model_by_id(method_id) if method_id else None
     if chosen is None or chosen not in offered:
-        chosen = offered[0] if offered else ETModel
+        # No usable choice: fall back along the automatic ranking, which is
+        # narrower than the catalogue on purpose — see :data:`AUTO_RANKING`.
+        automatic = [model for model in AUTO_RANKING if model in offered]
+        chosen = automatic[0] if automatic else ETModel
     if issubclass(chosen, VWCSystemModel):
         return chosen(field_capacity=field_capacity, root_depth=root_depth, d_max=d_max)
     if issubclass(chosen, ETModel):

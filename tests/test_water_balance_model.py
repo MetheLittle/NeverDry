@@ -275,12 +275,39 @@ class TestCapabilityMatch:
         ids = [m.method_id for m in MODEL_CATALOGUE]
         assert len(ids) == len(set(ids))
 
-    def test_a_thermometer_alone_offers_only_the_simple_tier(self):
+    def test_a_thermometer_alone_offers_both_temperature_tiers(self):
+        """Hargreaves needs no more hardware than the simple tier once the daily
+        range is observed rather than declared — which is the whole point of
+        observing it. What separates them is what they know about the sun, not
+        what they read.
+        """
         from never_dry.environment import Environment
-        from never_dry.water_balance_model import ETModel, models_offered_by
+        from never_dry.water_balance_model import ETModel, HargreavesModel, models_offered_by
 
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
-        assert models_offered_by(env) == (ETModel,)
+        assert set(models_offered_by(env)) == {ETModel, HargreavesModel}
+
+    def test_the_automatic_choice_stays_on_the_tier_that_was_already_running(self):
+        """A better estimate is still a different one, and different has to be asked for.
+
+        Hargreaves became available to every existing installation the moment the
+        range stopped being a declared sensor. Ranking it above the simple tier
+        would have switched the physics under every garden on upgrade, silently,
+        to a method none of them had ever run.
+        """
+        from never_dry.environment import Environment
+        from never_dry.water_balance_model import AUTO_RANKING, ETModel, HargreavesModel, build_model
+
+        env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
+        assert isinstance(build_model(env), ETModel)
+        assert HargreavesModel not in AUTO_RANKING
+
+    def test_it_can_still_be_chosen_explicitly(self):
+        from never_dry.environment import Environment
+        from never_dry.water_balance_model import HargreavesModel, build_model
+
+        env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
+        assert isinstance(build_model(env, method_id="hargreaves"), HargreavesModel)
 
     def test_declaring_the_sensors_is_not_enough_while_the_input_cannot_be_built(self):
         """Two conditions, and this is the one that is easy to forget.
@@ -400,3 +427,83 @@ def test_the_form_options_mirror_the_catalogue():
         "the dropdown must offer exactly the methods that run: add a method here "
         "in the change that builds its input, not in the one that writes the class"
     )
+
+
+class TestDiurnalRange:
+    """The daily extremes, observed instead of asked for.
+
+    The direction of error is the whole design. A window that is too thin has a
+    range that is too small, a small range reads as an overcast day, and an
+    overcast day means little water. Being wrong here does not produce a visible
+    mistake — it produces a garden that is watered less than it needs, quietly.
+    So a fragment answers ``None`` rather than its best guess.
+    """
+
+    def _fill(self, tracker, hours, temps):
+        for h, t in zip(hours, temps, strict=True):
+            tracker.observe(h, t)
+
+    def test_a_fragment_of_a_day_refuses_to_answer(self):
+        from never_dry.water_balance_model import DiurnalRange
+
+        tracker = DiurnalRange()
+        self._fill(tracker, range(5), [15.0, 18.0, 22.0, 25.0, 21.0])
+        assert tracker.extremes() is None
+        assert not tracker.is_ready
+
+    def test_a_full_day_reports_its_extremes(self):
+        from never_dry.water_balance_model import DiurnalRange
+
+        tracker = DiurnalRange()
+        temps = [12.0, 11.5, 11.0, 12.0, 14.0, 17.0, 20.0, 23.0, 26.0, 28.0, 30.0, 31.0]
+        temps += [30.5, 29.0, 27.0, 24.0, 21.0, 19.0, 17.0, 16.0, 15.0, 14.0, 13.0, 12.5]
+        self._fill(tracker, range(24), temps)
+        assert tracker.extremes() == (11.0, 31.0)
+
+    def test_several_readings_in_one_hour_widen_that_hour(self):
+        """The bucket keeps the hour's own min and max, not the last value seen."""
+        from never_dry.water_balance_model import DiurnalRange
+
+        tracker = DiurnalRange()
+        for h in range(24):
+            tracker.observe(h, 20.0)
+        tracker.observe(5, 33.0)
+        tracker.observe(5, 8.0)
+        assert tracker.extremes() == (8.0, 33.0)
+
+    def test_yesterday_falls_out_of_the_window(self):
+        """Rolling, not cumulative: a heatwave three days ago is not today's range."""
+        from never_dry.water_balance_model import DiurnalRange
+
+        tracker = DiurnalRange()
+        tracker.observe(0, 40.0)
+        for h in range(1, 30):
+            tracker.observe(h, 20.0)
+        assert tracker.extremes() == (20.0, 20.0)
+
+    def test_storage_stays_bounded_however_often_it_is_observed(self):
+        """The caller observes on every sensor change, which is often."""
+        from never_dry.water_balance_model import DiurnalRange
+
+        tracker = DiurnalRange()
+        for i in range(5000):
+            tracker.observe(i / 60.0, 20.0 + (i % 7))
+        assert tracker.coverage_h <= 24
+
+    def test_a_sensor_that_never_sees_the_sky_is_called_out(self):
+        """An indoor or sheltered probe gives a flat day, and a flat day is not weather."""
+        from never_dry.water_balance_model import DiurnalRange
+
+        tracker = DiurnalRange()
+        for h in range(24):
+            tracker.observe(h, 21.0 + (h % 2) * 0.3)
+        assert tracker.extremes() is not None
+        assert tracker.is_implausible()
+
+    def test_a_real_day_is_not_called_out(self):
+        from never_dry.water_balance_model import DiurnalRange
+
+        tracker = DiurnalRange()
+        for h in range(24):
+            tracker.observe(h, 15.0 + 8.0 * (h % 12) / 12.0)
+        assert not tracker.is_implausible()

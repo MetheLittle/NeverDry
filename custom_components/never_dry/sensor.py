@@ -122,8 +122,12 @@ from .valve_fsm import FailureKind, ValveState
 from .water_balance_model import (
     MODEL_CATALOGUE,
     RUNNABLE_INPUTS,
+    DiurnalRange,
     ETModel,
     ETStep,
+    HargreavesModel,
+    HargreavesStep,
+    ModelInput,
     ReferenceFrame,
     VWCReading,
     WaterBalanceModel,
@@ -748,6 +752,9 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         # value instead of keeping its own drifting per-zone counter. Resets on
         # 1 Jan. See docs/design_water_balance_reference_model.md (D3).
         self._temp_buffer = SensorBuffer(ET_BUFFER_SIZE, valid_range=ET_TEMP_VALID_RANGE)
+        # Observed from the thermometer we already read, so the daily extremes
+        # never have to be asked for as two more entities.
+        self._diurnal = DiurnalRange()
         # One warning per condition, not one per poll: a probe reporting
         # percentages does so at every reading, and an unreadable one likewise.
         self._vwc_percent_warned = False
@@ -981,17 +988,51 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 self.async_write_ha_state()
                 return
 
+            # Every temperature reading also feeds the diurnal range, whether or
+            # not the running tier uses it: switching method must not mean
+            # waiting a day for the window to fill.
+            self._diurnal.observe(now.timestamp() / 3600.0, t_median)
+
             # The reading goes to the model and the model does the physics. The
             # rate is asked for separately because the zones need it: each one
             # integrates the same rate against its own Kc, so the tier the site
             # runs reaches every zone through this broadcast, with no zone
             # needing to know which tier that is.
-            reading = ETStep(dt_h=dt_h, temp_c=t_median, rain_mm=rain_delta)
+            reading = self._build_reading(dt_h, t_median, rain_delta, now)
+            if reading is None:
+                # The running model needs something the site cannot supply yet —
+                # a diurnal range still filling. Freeze rather than guess: a
+                # partial range understates the weather, and understated weather
+                # is a garden watered less than it needs.
+                self.async_write_ha_state()
+                return
             et_h = self._model.et_rate(reading)
             self._model.step(reading)
             self._broadcast_to_zones(dt_h, et_h, rain_delta)
 
         self.async_write_ha_state()
+
+    def _build_reading(self, dt_h: float, temp_c: float, rain_mm: float, now: datetime) -> ModelInput | None:
+        """The reading the *running* model consumes, or ``None`` if not available yet.
+
+        The hub knows how to observe; each model knows what it needs. This is the
+        one place the two meet, and it is deliberately a single function: a model
+        that is offered without an entry here is selectable and not runnable,
+        which is the failure this shape exists to make impossible.
+        """
+        if isinstance(self._model, HargreavesModel):
+            extremes = self._diurnal.extremes()
+            if extremes is None:
+                return None
+            tmin, tmax = extremes
+            return HargreavesStep(
+                dt_h=dt_h,
+                tmax_c=tmax,
+                tmin_c=tmin,
+                day_of_year=now.timetuple().tm_yday,
+                rain_mm=rain_mm,
+            )
+        return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
 
     def _broadcast_to_zones(self, dt_h: float, et_h: float, rain: float) -> None:
         """Notify all registered zone sensors with ET/rain data."""

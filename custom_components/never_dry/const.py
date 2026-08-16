@@ -40,6 +40,7 @@ DEFAULT_ET_METHOD = ET_METHOD_AUTO
 ET_METHOD_OPTIONS = (
     ET_METHOD_AUTO,
     "vwc_system",
+    "hargreaves",
     "et_simple",
 )
 

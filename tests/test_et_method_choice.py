@@ -47,9 +47,9 @@ class TestRefusal:
     """A method whose inputs are missing is refused at the form, not at runtime."""
 
     def test_a_method_that_cannot_run_is_refused_however_the_site_is_equipped(self):
-        """Penman-Monteith and Hargreaves are written and tested, and nothing builds
-        their input yet. They are not in the dropdown; this is the second lock, for
-        an entry edited by hand or restored from a version that offered them.
+        """Penman-Monteith is written and tested, and nothing builds its input
+        yet. It is not in the dropdown; this is the second lock, for an entry
+        edited by hand or restored from a version that offered it.
 
         Refused even with every required sensor declared: the sensors are not what
         is missing, so a "missing sensors" answer would send the user shopping for
@@ -63,7 +63,6 @@ class TestRefusal:
             CONF_NET_RADIATION_SENSOR: "sensor.rad",
         }
         assert _et_method_error(equipped) == "et_method_unknown"
-        assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "hargreaves"}) == "et_method_unknown"
 
     def test_the_probe_model_without_a_probe_is_refused(self):
         assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "vwc_system"}) == "et_method_missing_sensors"
