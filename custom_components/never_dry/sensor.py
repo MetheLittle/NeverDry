@@ -1166,13 +1166,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             self._select_model(None if observed is None else observed[1] - observed[0])
         _LOGGER.info("Water balance method: %s — %s", self.active_method, self._method_reason)
 
-        # Compute once now instead of waiting for the first temperature change.
-        # The wait is only a few minutes, but everything derived reads *unknown*
-        # until it passes — and an entity that says nothing after a restart is
-        # indistinguishable from one that is broken. The elapsed time is
-        # effectively zero here, so this publishes the inputs without moving the
-        # water balance.
-        self._on_sensor_change(None)
+        self._publish_initial_inputs()
 
         tracked = [self._temp_sensor, self._rain_sensor]
         if self._vwc_sensor:
@@ -1291,6 +1285,28 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             "diurnal_window_hours": self._diurnal.coverage_h,
         }
         return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
+
+    def _publish_initial_inputs(self) -> None:
+        """Fill the derived values once at startup, without touching the balance.
+
+        Everything derived reads *unknown* until the first temperature change,
+        and an entity that says nothing after a restart is indistinguishable
+        from one that is broken — which is how three separate looks at this
+        device concluded the feature was not working.
+
+        Deliberately not a full tick: running one would fix the rain baseline
+        earlier than the design intends, and moving rain accounting to make a
+        display look better is the wrong trade. This builds the reading for its
+        inputs and throws it away.
+        """
+        if self.reference_frame is not ReferenceFrame.ET:
+            return
+        raw_state = self._hass.states.get(self._temp_sensor)
+        temp = _to_celsius(raw_state)
+        if temp is None:
+            return
+        with contextlib.suppress(Exception):
+            self._build_reading(0.0, temp, 0.0, datetime.now())
 
     def _warming_up_inputs(self, temp_c: float) -> dict:
         """What to publish while a tier cannot yet compute its own rate.

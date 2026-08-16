@@ -554,3 +554,27 @@ class TestNothingReadsUnknownAfterAStart:
 
         assert hub._last_inputs.get("status") != "no reading computed since startup"
         assert "measured_temperature_c" in hub._last_inputs
+
+    async def test_it_does_not_fix_the_rain_baseline_early(self, hass_mock):
+        """Publishing a display value must not move rain accounting.
+
+        The first real reading is what fixes the baseline, deliberately and
+        without crediting. Running a full tick at startup to populate the
+        entities would take that decision minutes earlier, for the sake of how a
+        dialog looks.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from never_dry.sensor import DrynessIndexSensor
+
+        hass_mock.states.get = MagicMock(return_value=MagicMock(state="24.0"))
+        hub = DrynessIndexSensor(hass_mock, {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r"})
+        hub.async_get_last_state = AsyncMock(return_value=None)
+        hub.async_write_ha_state = MagicMock()
+        hub.async_on_remove = lambda _cb: None
+        hub._bootstrap_diurnal_range = AsyncMock()
+        hub._backfill_from_recorder = AsyncMock()
+
+        await hub.async_added_to_hass()
+
+        assert hub._last_rain is None
