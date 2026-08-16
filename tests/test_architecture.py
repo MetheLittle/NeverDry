@@ -39,10 +39,12 @@ HA_LAYER_MODULES = ("sensor", "controller", "valve_operator", "config_flow", "di
 #: Domain modules the integration actually imports today. Move a name here in
 #: the same commit that wires it — the test below fails in both directions, so
 #: neither a silent wiring nor a stale claim can pass.
-WIRED = {"zone", "water_balance_model", "environment", "scheduler"}
+WIRED = {"zone", "water_balance_model", "environment", "scheduler", "driver"}
 
 #: The counterpart: written, tested, and reached by nothing but the tests.
-INERT = {"driver"}
+#: Empty since the driver was wired — kept because the next scaffold will need
+#: it, and because an empty set is the honest way to say "nothing pending".
+INERT: set[str] = set()
 
 #: Phrase the scaffolds use to announce they are not wired. A module that says
 #: this while being imported is the exact drift these tests exist to catch.

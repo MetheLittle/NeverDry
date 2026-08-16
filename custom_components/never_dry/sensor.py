@@ -507,13 +507,13 @@ def _setup_controller(
 ) -> IrrigationController:
     """Create the irrigation controller and register all services.
 
-    Also builds one :class:`ValveOperator` per zone with a valve and a
+    Also builds one :class:`~.driver.ZoneDriver` per zone with a valve and a
     shared :class:`ValveNotifier`. Smart valves controlled in
-    ``volume_preset`` mode bypass the operator: their entry is omitted
+    ``volume_preset`` mode bypass the driver: their entry is omitted
     from the dict.
     """
+    from .driver import ZoneDriver
     from .valve_notifier import ValveNotifier  # local import: optional path
-    from .valve_operator import ValveOperator
 
     inter_zone_delay = config.get(CONF_INTER_ZONE_DELAY, DEFAULT_INTER_ZONE_DELAY)
 
@@ -526,11 +526,14 @@ def _setup_controller(
         if getattr(zs, "delivery_mode", None) == "volume_preset":
             continue
         hw_entity, hw_mult = _discover_hw_max_duration(hass, zs.valve)
-        op = ValveOperator(
-            hass=hass,
-            switch_entity_id=zs.valve,
-            flow_sensor_entity_id=zs.flow_meter_sensor,
-            zone_name=zs.zone_name,
+        # The delivery loop still lives in the controller, so no delivery
+        # arguments are passed here: this seam is the command layer only —
+        # open, close, and the state the two produce.
+        op = ZoneDriver(
+            hass,
+            zs.valve,
+            flow_meter_sensor=zs.flow_meter_sensor,
+            name=zs.zone_name,
             notifier=notifier,
             # Callable, not snapshot: re-evaluated at every valve open so the
             # watchdog and hardware timer scale with the current deficit.
@@ -1683,7 +1686,7 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         return self._hw_max_duration_payload
 
     def set_operator(self, operator) -> None:
-        """Attach the ValveOperator so FSM state can be exposed in attributes."""
+        """Attach the driver so FSM state can be exposed in attributes."""
         self._operator = operator
 
     @property

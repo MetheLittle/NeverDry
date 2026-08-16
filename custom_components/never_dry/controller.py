@@ -42,10 +42,10 @@ from .const import (
     FLOW_METER_POLL_INTERVAL_S,
     MIN_SERVICE_INTERVAL_S,
 )
+from .driver import Driver, OperationStatus
 from .scheduler import Decision, Scheduler, SkipReason
 from .valve_fsm import ValveState
 from .valve_notifier import NotificationKind, Severity, ValveNotifier
-from .valve_operator import OperationStatus, ValveOperator
 
 MONITORING_INTERVAL = 6 * 3600  # 6 hours in seconds
 AUTO_OPEN_GRACE_S = 3.0  # volume_preset: wait this long for smart-valve auto-open
@@ -66,13 +66,13 @@ class IrrigationController:
         dryness_sensor,
         zone_sensors: list,
         inter_zone_delay: int = DEFAULT_INTER_ZONE_DELAY,
-        valve_operators: dict[str, ValveOperator] | None = None,
+        valve_operators: dict[str, Driver] | None = None,
         notifier: ValveNotifier | None = None,
     ) -> None:
         """Build the irrigation controller.
 
         ``valve_operators`` is a mapping from valve switch entity id to the
-        :class:`ValveOperator` that drives it. When ``None`` the controller
+        :class:`~.driver.Driver` that drives it. When ``None`` the controller
         falls back to direct ``hass.services.async_call`` for switch
         operations (used by the test harness and as a safety net for any
         valve without a dedicated operator).
@@ -81,7 +81,7 @@ class IrrigationController:
         self._dryness = dryness_sensor
         self._zones = {zs.zone_name: zs for zs in zone_sensors}
         self._inter_zone_delay = inter_zone_delay
-        self._valve_operators: dict[str, ValveOperator] = valve_operators or {}
+        self._valve_operators: dict[str, Driver] = valve_operators or {}
         self._notifier = notifier
         # Decides *when* a zone waters; this class only acts on the answer.
         # Serial is what the code has always done — two handlers each
@@ -110,7 +110,7 @@ class IrrigationController:
         # Per-valve safety-close watchdog for external (non-commanded) opens
         self._manual_safety_tasks: dict[str, asyncio.Task] = {}
         # Valves currently being closed by the controller — suppresses spurious
-        # "manual irrigation detected" events while operator.close() is in flight.
+        # "manual irrigation detected" events while the close command is in flight.
         self._controller_closing: set[str] = set()
         # Reverse map: valve_entity_id → zone_name
         self._valve_to_zone: dict[str, str] = {zs.valve: zs.zone_name for zs in zone_sensors if zs.valve}
@@ -139,8 +139,8 @@ class IrrigationController:
         return self._active_valve
 
     @property
-    def valve_operators(self) -> dict[str, ValveOperator]:
-        """Return the mapping of switch entity_id → ValveOperator."""
+    def valve_operators(self) -> dict[str, Driver]:
+        """Return the mapping of switch entity_id → :class:`~.driver.Driver`."""
         return self._valve_operators
 
     @property
@@ -581,7 +581,7 @@ class IrrigationController:
         if operator is None:
             _LOGGER.warning("reset_valve: zone '%s' has no operator (volume_preset mode?)", zone_name)
             return
-        await operator.reset_maintenance()
+        await operator.async_reset_maintenance()
         zone.async_write_ha_state()
         _LOGGER.info("Valve maintenance reset: zone='%s'", zone_name)
 
@@ -898,7 +898,7 @@ class IrrigationController:
           4. Poll for self-close (existing behaviour); on stop or timeout
              we force ``switch.turn_off``.
 
-        Note: this delivery mode bypasses :class:`ValveOperator` on purpose.
+        Note: this delivery mode bypasses the driver on purpose.
         Smart valves with auto-close behaviour drive their own state and
         do not fit the operator's "I command, you obey" semantics.
         """
@@ -911,7 +911,7 @@ class IrrigationController:
             _LOGGER.error("Zone '%s' has no volume_entity configured", zone.zone_name)
             return 0.0
 
-        # Pre-check the switch entity. volume_preset bypasses ValveOperator,
+        # Pre-check the switch entity. volume_preset bypasses the driver,
         # so it also bypasses the operator's pre-check. Do our own here so
         # the user gets the same "unreachable at irrigation time"
         # notification when the smart valve is offline.
@@ -1261,7 +1261,7 @@ class IrrigationController:
     async def _open_valve(self, entity_id: str) -> bool:
         """Open a valve switch. Returns True on success, False on failure.
 
-        Uses the :class:`ValveOperator` when one is registered for the
+        Uses the :class:`~.driver.Driver` when one is registered for the
         entity; otherwise falls back to a direct ``switch.turn_on`` call
         (used for valves without an operator, including the test harness).
         """
@@ -1271,7 +1271,7 @@ class IrrigationController:
         if operator is None:
             await self._hass.services.async_call("switch", "turn_on", {"entity_id": entity_id})
             return True
-        result = await operator.open()
+        result = await operator.async_turn_on()
         if result.status != OperationStatus.OK:
             _LOGGER.error(
                 "Valve open failed for '%s': status=%s detail=%s",
@@ -1294,7 +1294,7 @@ class IrrigationController:
             return True
         self._controller_closing.add(entity_id)
         try:
-            result = await operator.close()
+            result = await operator.async_turn_off()
         finally:
             self._controller_closing.discard(entity_id)
         if self._active_valve == entity_id:
