@@ -377,6 +377,24 @@
           "hargreaves": "Hargreaves-Samani (diurnal range)",
           "penman_monteith": "Penman-Monteith (FAO-56)"
         }
+      },
+      "model_input_derived_diurnal_range_c": {
+        "name": "Diurnal temperature range"
+      },
+      "model_input_derived_temp_max_c": {
+        "name": "Daily maximum temperature"
+      },
+      "model_input_derived_temp_min_c": {
+        "name": "Daily minimum temperature"
+      },
+      "model_input_derived_solar_mj": {
+        "name": "Daily solar radiation"
+      },
+      "model_input_derived_net_radiation_mj": {
+        "name": "Net radiation"
+      },
+      "model_input_derived_wind_2m_m_s": {
+        "name": "Wind speed at 2 m"
       }
     }
   }

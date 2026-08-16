@@ -381,6 +381,24 @@
           "hargreaves": "Hargreaves-Samani (escursione giornaliera)",
           "penman_monteith": "Penman-Monteith (FAO-56)"
         }
+      },
+      "model_input_derived_diurnal_range_c": {
+        "name": "Escursione termica giornaliera"
+      },
+      "model_input_derived_temp_max_c": {
+        "name": "Temperatura massima giornaliera"
+      },
+      "model_input_derived_temp_min_c": {
+        "name": "Temperatura minima giornaliera"
+      },
+      "model_input_derived_solar_mj": {
+        "name": "Radiazione solare giornaliera"
+      },
+      "model_input_derived_net_radiation_mj": {
+        "name": "Radiazione netta"
+      },
+      "model_input_derived_wind_2m_m_s": {
+        "name": "Velocità del vento a 2 m"
       }
     }
   }

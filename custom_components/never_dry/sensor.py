@@ -442,6 +442,26 @@ def _hub_device_info(entry_id: str) -> DeviceInfo:
     )
 
 
+#: Which derived quantities are worth an entity, per running method. Only the
+#: ones that method actually computes: an entity stuck at unknown teaches the
+#: user to ignore the whole diagnostic group.
+_MODEL_INPUT_ENTITIES: dict[str, tuple[tuple[str, str, str, str], ...]] = {
+    "hargreaves": (
+        ("derived_diurnal_range_c", "Diurnal temperature range", "°C", "mdi:thermometer-lines"),
+        ("derived_temp_max_c", "Daily maximum temperature", "°C", "mdi:thermometer-high"),
+        ("derived_temp_min_c", "Daily minimum temperature", "°C", "mdi:thermometer-low"),
+    ),
+    "penman_monteith": (
+        ("derived_diurnal_range_c", "Diurnal temperature range", "°C", "mdi:thermometer-lines"),
+        ("derived_temp_max_c", "Daily maximum temperature", "°C", "mdi:thermometer-high"),
+        ("derived_temp_min_c", "Daily minimum temperature", "°C", "mdi:thermometer-low"),
+        ("derived_solar_mj", "Daily solar radiation", "MJ/m²", "mdi:white-balance-sunny"),
+        ("derived_net_radiation_mj", "Net radiation", "MJ/m²", "mdi:sun-angle"),
+        ("derived_wind_2m_m_s", "Wind speed at 2 m", "m/s", "mdi:weather-windy"),
+    ),
+}
+
+
 def _zone_device_info(entry_id: str, zone_name: str) -> DeviceInfo:
     """Device info for a zone (sensor + buttons grouped together)."""
     slug = zone_name.lower().replace(" ", "_")
@@ -468,6 +488,10 @@ def _create_entities(
         entities.append(ETSensor(hass, config, hub_device, hub=di_sensor))
     entities.append(di_sensor)
     entities.append(WaterBalanceMethodSensor(di_sensor, hub_device))
+    # The derived quantities, as entities so they get history: the way to judge
+    # a computed radiation is to watch it follow the weather for a week.
+    for key, name, unit, icon in _MODEL_INPUT_ENTITIES.get(type(di_sensor._model).method_id, ()):
+        entities.append(ModelInputSensor(di_sensor, key, name, unit, icon, device_info=hub_device))
 
     zone_sensors: list[IrrigationZoneSensor] = []
     for zone_conf in config.get(CONF_ZONES, []):
@@ -3022,6 +3046,63 @@ class WaterBalanceMethodSensor(SensorEntity):
             # merely believable.
             **self._hub._last_inputs,
         }
+
+
+class ModelInputSensor(SensorEntity):
+    """One quantity the model derived, as an entity rather than an attribute.
+
+    Attributes answer "what is it now"; entities also answer "what has it been
+    doing", because Home Assistant records them and draws them. For a derived
+    value that is the whole point: the way to know whether a daily radiation is
+    right is to watch it over a week and see it follow the weather, which an
+    attribute cannot show.
+
+    Diagnostic by category, and only created for the model actually running —
+    an entity that is permanently unknown teaches the user to ignore the group
+    it lives in.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        hub: DrynessIndexSensor,
+        key: str,
+        name: str,
+        unit: str,
+        icon: str,
+        precision: int = 2,
+        device_info: DeviceInfo | None = None,
+    ) -> None:
+        """Publish ``key`` from the hub's last model inputs."""
+        from homeassistant.const import EntityCategory
+
+        self._hub = hub
+        self._key = key
+        self._attr_name = name
+        self._attr_unique_id = f"model_input_{key}"
+        self._attr_native_unit_of_measurement = unit
+        self._attr_icon = icon
+        self._attr_suggested_display_precision = precision
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        if device_info:
+            self._attr_device_info = device_info
+
+    async def async_added_to_hass(self) -> None:
+        """Follow the hub: these change on every tick, and nothing else moves them."""
+        self.async_on_remove(async_track_state_change_event(self.hass, [self._hub.entity_id], self._on_hub_change))
+
+    @callback
+    def _on_hub_change(self, _event) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> float | None:
+        """The value, or ``None`` while the model has not produced one."""
+        value = self._hub._last_inputs.get(self._key)
+        return value if isinstance(value, (int, float)) else None
 
 
 class ZoneLinkedSensor(SensorEntity):
