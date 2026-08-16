@@ -19,7 +19,7 @@
  * localized friendly_name; values via formatEntityState (language + units).
  */
 
-const CARD_VERSION = "0.1.7";
+const CARD_VERSION = "0.1.9";
 
 // Static UI strings that are NOT backed by an entity (everything else is read
 // from the entity's localized friendly_name / formatEntityState, so it follows
@@ -36,6 +36,9 @@ const I18N = {
     irrigateNow: "Irrigate now",
     irrigating: "Irrigating",
     maintenance: "Maintenance",
+    unreachable: "Valve not responding",
+    waitingForValve: "waiting for first contact",
+    unreachableHint: "check the radio link or the batteries",
     valve: "Valve",
     secNext: "Next session",
     secLast: "Last session",
@@ -53,6 +56,9 @@ const I18N = {
     irrigateNow: "Irriga ora",
     irrigating: "In irrigazione",
     maintenance: "Manutenzione",
+    unreachable: "Valvola non raggiungibile",
+    waitingForValve: "in attesa di risposta",
+    unreachableHint: "controlla il collegamento radio o le batterie",
     valve: "Valvola",
     secNext: "Prossima sessione",
     secLast: "Ultima sessione",
@@ -71,6 +77,7 @@ const VALVE_STATE_I18N = {
     req_open: "opening…",
     req_close: "closing…",
     maintenance: "maintenance",
+    unreachable: "not responding",
   },
   it: {
     idle: "ferma",
@@ -80,6 +87,7 @@ const VALVE_STATE_I18N = {
     req_open: "apertura…",
     req_close: "chiusura…",
     maintenance: "manutenzione",
+    unreachable: "non risponde",
   },
 };
 
@@ -106,6 +114,8 @@ function valveMeta(state) {
       return { color: "var(--warning-color, #ffa600)", icon: "mdi:valve" };
     case "maintenance":
       return { color: "var(--error-color, #db4437)", icon: "mdi:wrench-clock" };
+    case "unreachable":
+      return { color: "var(--warning-color, #ffa600)", icon: "mdi:access-point-network-off" };
     default: // idle / closed / unknown
       return { color: "var(--secondary-text-color)", icon: "mdi:valve-closed" };
   }
@@ -497,16 +507,43 @@ class NeverDryZoneCard extends HTMLElement {
     const chips = [];
 
     // Valve state — always shown.
+    //
+    // One exception, and it is the whole reason this is not a one-liner: while
+    // reachability is still unknown, a state machine sitting in `unreachable`
+    // means "we have not heard from this valve yet", not "it is not answering".
+    // Those are the first two minutes after every restart. Rendering the raw
+    // state there paints four amber "not responding" chips next to a warning
+    // area that is deliberately empty — the card contradicting itself, which is
+    // worse than either signal alone.
     const vState = a.valve_fsm_state;
-    const vm = valveMeta(vState);
-    chips.push(this._chip(vm.icon, `${t(hass, "valve")}: ${valveStateLabel(hass, vState)}`, vm.color));
+    const notHeardFromYet = vState === "unreachable" && a.valve_reachable !== false;
+    const vm = notHeardFromYet
+      ? { color: "var(--secondary-text-color)", icon: "mdi:progress-clock" }
+      : valveMeta(vState);
+    const vLabel = notHeardFromYet ? t(hass, "waitingForValve") : valveStateLabel(hass, vState);
+    chips.push(this._chip(vm.icon, `${t(hass, "valve")}: ${vLabel}`, vm.color));
 
     // Irrigating — only when active.
     if (a.irrigating === true) {
       chips.push(this._chip("mdi:sprinkler-variant", t(hass, "irrigating"), "var(--info-color, #2196f3)"));
     }
 
+    // Not responding — amber warning triangle. Deliberately its own chip and
+    // not a shade of the valve-state one: "did not answer" is a radio problem
+    // the user can act on, and it stays true while the valve keeps reporting a
+    // perfectly ordinary "off". Without this the only symptom of a flaky valve
+    // is that pressing Irrigate appears to do nothing for the better part of a
+    // minute, and then the zone is blocked (field, 'Giardino Pino').
+    if (a.valve_reachable === false) {
+      chips.push(
+        this._chip("mdi:alert", `${t(hass, "unreachable")} — ${t(hass, "unreachableHint")}`, "var(--warning-color, #ffa600)"),
+      );
+    }
+
     // Maintenance — only when in maintenance (red, the at-a-glance alarm).
+    // Shown alongside the amber one when both apply: they say different things,
+    // and a zone blocked *because* the valve stopped answering is precisely the
+    // case where the user needs to read both.
     if (a.valve_in_maintenance === true) {
       chips.push(this._chip("mdi:wrench", t(hass, "maintenance"), "var(--error-color, #db4437)"));
     }
