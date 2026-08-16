@@ -2947,7 +2947,6 @@ class WaterBalanceMethodSensor(SensorEntity):
         from homeassistant.const import EntityCategory
 
         self._hub = hub
-        self._hass = hub.hass if hasattr(hub, "hass") else hub._hass
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_unique_id = "water_balance_method"
         # Only the methods that can run: an option the sensor can never report
@@ -2964,7 +2963,10 @@ class WaterBalanceMethodSensor(SensorEntity):
         inputs forever, because at startup no reading has been built yet. The hub
         writes its own state on every tick; this rides on that.
         """
-        self.async_on_remove(async_track_state_change_event(self._hass, [self._hub.entity_id], self._on_hub_change))
+        # ``self.hass``, not a reference captured at construction: Home Assistant
+        # assigns it before this runs, while the hub has none yet — capturing it
+        # early stored ``None`` and the entity came up unavailable.
+        self.async_on_remove(async_track_state_change_event(self.hass, [self._hub.entity_id], self._on_hub_change))
 
     @callback
     def _on_hub_change(self, _event) -> None:

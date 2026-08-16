@@ -424,3 +424,33 @@ class TestWhatTheModelWasFed:
 
         assert attrs["derived_diurnal_range_c"] == 12.0
         assert "et_rate_mm_h" in attrs
+
+
+class TestTheMethodEntityStaysAlive:
+    """It came up `unavailable` on the instance, and the suite had nothing to say.
+
+    The entity subscribes to the hub so its attributes do not freeze at startup.
+    Getting that subscription wrong takes the whole entity down — which is worse
+    than the stale attributes it was meant to fix, and exactly what happened.
+    """
+
+    async def test_it_subscribes_without_raising(self, hass_mock):
+        from never_dry.sensor import DrynessIndexSensor, WaterBalanceMethodSensor
+
+        hub = DrynessIndexSensor(hass_mock, {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r"})
+        hub.entity_id = "sensor.neverdry_dryness_index"
+
+        entity = WaterBalanceMethodSensor(hub)
+        entity.hass = hass_mock
+        entity.async_on_remove = lambda _cb: None
+
+        await entity.async_added_to_hass()
+
+    async def test_it_does_not_capture_hass_before_home_assistant_provides_it(self, hass_mock):
+        """The bug: `hass` was read from the hub at construction, where it is None."""
+        from never_dry.sensor import DrynessIndexSensor, WaterBalanceMethodSensor
+
+        hub = DrynessIndexSensor(hass_mock, {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r"})
+        entity = WaterBalanceMethodSensor(hub)
+
+        assert not hasattr(entity, "_hass")
