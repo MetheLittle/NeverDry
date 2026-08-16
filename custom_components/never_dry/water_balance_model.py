@@ -323,6 +323,11 @@ class WaterBalanceModel(abc.ABC):
     #: reading from scratch (VWC). Subclasses set it as a class attribute.
     is_stateful: ClassVar[bool]
 
+    #: The input DTO :meth:`step` accepts. Declared because the *host* has to
+    #: build it: a model whose input nobody can produce is selectable and not
+    #: runnable, which is worse than absent.
+    input_type: ClassVar[type]
+
     #: Stable identifier for this method, stored in the config entry and shown
     #: in the form. A name, not a class path: the class may move, the user's
     #: choice must not.
@@ -461,6 +466,8 @@ class ETModel(ETBalanceModel):
     ``DrynessIndexSensor``) that the abstraction unifies here.
     """
 
+    input_type: ClassVar[type] = ETStep
+
     method_id: ClassVar[str] = "et_simple"
 
     required_sensors: ClassVar[frozenset[SensorKind]] = frozenset({SensorKind.TEMPERATURE})
@@ -508,6 +515,8 @@ class PenmanMonteithModel(ETBalanceModel):
     works in mm/h, so the rate is ET₀/24. Soil heat flux ``G`` is taken as 0
     (daily assumption).
     """
+
+    input_type: ClassVar[type] = PenmanStep
 
     method_id: ClassVar[str] = "penman_monteith"
 
@@ -587,6 +596,8 @@ class HargreavesModel(ETBalanceModel):
     on each :class:`HargreavesStep`. The rate is ET0/24 for the hourly integrator.
     """
 
+    input_type: ClassVar[type] = HargreavesStep
+
     method_id: ClassVar[str] = "hargreaves"
 
     required_sensors: ClassVar[frozenset[SensorKind]] = frozenset({SensorKind.TEMP_MAX, SensorKind.TEMP_MIN})
@@ -653,6 +664,8 @@ class VWCSystemModel(WaterBalanceModel):
     VWC deficit is benign (reference model D5). All zones scale the same current
     reading by their Kc downstream; the frame is shared.
     """
+
+    input_type: ClassVar[type] = VWCReading
 
     method_id: ClassVar[str] = "vwc_system"
 
@@ -746,6 +759,18 @@ MODEL_CATALOGUE: tuple[type[WaterBalanceModel], ...] = (
     ETModel,
 )
 
+#: The input DTOs the integration can actually build today. It is a statement
+#: about the *host*, kept here so the catalogue and the constraint on it are
+#: read together: ``sensor.py`` produces an :class:`ETStep` from the temperature
+#: buffer and a :class:`VWCReading` from the probe, and nothing yet produces the
+#: daily extremes Hargreaves needs or the full weather Penman-Monteith needs.
+#:
+#: Until it grows, a model outside it must not be offered — not in the dropdown
+#: and not by the automatic choice, which would otherwise pick the richest
+#: *declared* model and then raise on every reading. Widening this set is the
+#: last step of wiring a tier, not the first.
+RUNNABLE_INPUTS: frozenset[type] = frozenset({ETStep, VWCReading})
+
 #: Fallback when the site declares nothing at all — the model that needs least.
 DEFAULT_METHOD_ID: str = ETModel.method_id
 
@@ -759,8 +784,17 @@ def models_offered_by(env) -> tuple[type[WaterBalanceModel], ...]:
 
     Takes the site rather than a set of sensor kinds so the caller cannot
     accidentally ask the question against a stale snapshot of the bindings.
+
+    Two conditions, not one: the sensors must be declared **and** the host must
+    be able to build the model's input. The second is what stops a site that
+    declares humidity, wind and radiation from being handed Penman-Monteith by
+    the automatic choice and crashing on its first reading.
     """
-    return tuple(model for model in MODEL_CATALOGUE if env.satisfies(model.required_sensors))
+    return tuple(
+        model
+        for model in MODEL_CATALOGUE
+        if model.input_type in RUNNABLE_INPUTS and env.satisfies(model.required_sensors)
+    )
 
 
 def model_by_id(method_id: str) -> type[WaterBalanceModel] | None:

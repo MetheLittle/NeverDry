@@ -937,7 +937,12 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         if rain_delta > 0:
             self._accrue_yearly_rain(rain_delta)
 
-        if self._vwc_sensor:
+        # The branch follows the **model**, not the sensor. They used to be the
+        # same question, because a declared probe was the only way to get the VWC
+        # frame. Since the method can be chosen, they can disagree — a site with
+        # a probe that picks the simple tier — and branching on the sensor then
+        # feeds a VWC reading to an ET model, which raises on every update.
+        if self._model.reference_frame is not ReferenceFrame.ET:
             self._update_from_vwc()
             # In VWC mode, broadcast zeros — zones use VWC deficit * Kc. Rain is
             # already credited above; the VWC probe reflects soil moisture

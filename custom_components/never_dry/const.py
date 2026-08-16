@@ -27,16 +27,19 @@ CONF_ET_METHOD = "et_method"
 ET_METHOD_AUTO = "auto"
 DEFAULT_ET_METHOD = ET_METHOD_AUTO
 
-# The dropdown's options, richest first, mirroring
-# ``water_balance_model.MODEL_CATALOGUE``. Duplicated here on purpose: the form
-# must offer them without importing the model module, and a static list is what
-# the translation guard can check its labels against. The two are asserted equal
-# in tests/test_water_balance_model.py, so the mirror cannot drift.
+# The dropdown's options, richest first. Only the methods the integration can
+# actually RUN: Hargreaves-Samani and Penman-Monteith are written and tested but
+# nothing yet builds the input they read, so offering them would let a user pick
+# an option that raises on its first reading. They join this list in the same
+# change that feeds them, not before.
+#
+# Duplicated from ``water_balance_model`` on purpose: the form must offer these
+# without importing the model module, and a static list is what the translation
+# guard can check its labels against. tests/test_water_balance_model.py asserts
+# the two agree, so the mirror cannot drift.
 ET_METHOD_OPTIONS = (
     ET_METHOD_AUTO,
     "vwc_system",
-    "penman_monteith",
-    "hargreaves",
     "et_simple",
 )
 

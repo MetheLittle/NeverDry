@@ -46,12 +46,24 @@ class TestAutomatic:
 class TestRefusal:
     """A method whose inputs are missing is refused at the form, not at runtime."""
 
-    def test_penman_without_its_sensors_is_refused(self):
-        assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "penman_monteith"}) == "et_method_missing_sensors"
+    def test_a_method_that_cannot_run_is_refused_however_the_site_is_equipped(self):
+        """Penman-Monteith and Hargreaves are written and tested, and nothing builds
+        their input yet. They are not in the dropdown; this is the second lock, for
+        an entry edited by hand or restored from a version that offered them.
 
-    def test_hargreaves_needs_both_ends_of_the_day(self):
-        half = {**BARE_SITE, CONF_ET_METHOD: "hargreaves", CONF_TEMP_MAX_SENSOR: "sensor.tmax"}
-        assert _et_method_error(half) == "et_method_missing_sensors"
+        Refused even with every required sensor declared: the sensors are not what
+        is missing, so a "missing sensors" answer would send the user shopping for
+        hardware that would change nothing.
+        """
+        equipped = {
+            **BARE_SITE,
+            CONF_ET_METHOD: "penman_monteith",
+            CONF_HUMIDITY_SENSOR: "sensor.h",
+            CONF_WIND_SPEED_SENSOR: "sensor.w",
+            CONF_NET_RADIATION_SENSOR: "sensor.rad",
+        }
+        assert _et_method_error(equipped) == "et_method_unknown"
+        assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "hargreaves"}) == "et_method_unknown"
 
     def test_the_probe_model_without_a_probe_is_refused(self):
         assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "vwc_system"}) == "et_method_missing_sensors"
@@ -66,25 +78,6 @@ class TestAcceptance:
 
     def test_the_simple_tier_needs_only_a_thermometer(self):
         assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "et_simple"}) is None
-
-    def test_penman_is_accepted_once_all_four_are_declared(self):
-        rich = {
-            **BARE_SITE,
-            CONF_ET_METHOD: "penman_monteith",
-            CONF_HUMIDITY_SENSOR: "sensor.h",
-            CONF_WIND_SPEED_SENSOR: "sensor.w",
-            CONF_NET_RADIATION_SENSOR: "sensor.rad",
-        }
-        assert _et_method_error(rich) is None
-
-    def test_hargreaves_is_accepted_with_both_daily_extremes(self):
-        both = {
-            **BARE_SITE,
-            CONF_ET_METHOD: "hargreaves",
-            CONF_TEMP_MAX_SENSOR: "sensor.tmax",
-            CONF_TEMP_MIN_SENSOR: "sensor.tmin",
-        }
-        assert _et_method_error(both) is None
 
     def test_the_probe_model_is_accepted_with_a_probe(self):
         assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "vwc_system", CONF_VWC_SENSOR: "sensor.vwc"}) is None
@@ -161,3 +154,60 @@ class TestFormAndRuntimeAgree:
 
         for site in self.SITES.values():
             assert isinstance(build_model(self._environment_for(site)), WaterBalanceModel)
+
+
+class TestEveryOfferedMethodCanActuallyRun:
+    """Offered means runnable, and only a real update can prove it.
+
+    The earlier guard checked that a chosen method *builds*. That is not the
+    same thing: both Hargreaves-Samani and Penman-Monteith built correctly and
+    then raised on their first reading, because the hub fed them the reading it
+    knows how to make rather than the one they consume. Construction was never
+    the hard part.
+
+    So this walks the dropdown and drives one real update per method. It is the
+    cheapest possible end-to-end, and it is the test that would have caught both
+    of the crashes found on the running instance.
+    """
+
+    def _hub(self, hass, method, **extra):
+        from never_dry.sensor import DrynessIndexSensor
+
+        return DrynessIndexSensor(
+            hass,
+            {
+                CONF_TEMP_SENSOR: "sensor.t",
+                CONF_RAIN_SENSOR: "sensor.r",
+                CONF_ET_METHOD: method,
+                **extra,
+            },
+        )
+
+    def test_each_offered_method_survives_an_update(self, hass_mock):
+        from unittest.mock import MagicMock
+
+        from never_dry.const import ET_METHOD_AUTO, ET_METHOD_OPTIONS
+
+        hass_mock.states.get = MagicMock(return_value=MagicMock(state="24.0"))
+        for method in ET_METHOD_OPTIONS:
+            extra = {CONF_VWC_SENSOR: "sensor.soil"} if method in ("vwc_system", ET_METHOD_AUTO) else {}
+            hub = self._hub(hass_mock, method, **extra)
+            hub._on_sensor_change(MagicMock())  # must not raise
+
+    def test_a_probe_site_that_picks_the_simple_tier_still_works(self, hass_mock):
+        """The disagreement the choice made possible, and the reason the branch moved.
+
+        A declared probe used to be the only way to reach the VWC frame, so
+        branching on the sensor and branching on the model were the same
+        question. They are not any more, and the sensor answer feeds a moisture
+        reading to a temperature model.
+        """
+        from unittest.mock import MagicMock
+
+        from never_dry.water_balance_model import ETModel
+
+        hass_mock.states.get = MagicMock(return_value=MagicMock(state="24.0"))
+        hub = self._hub(hass_mock, "et_simple", **{CONF_VWC_SENSOR: "sensor.soil"})
+
+        assert isinstance(hub._model, ETModel)
+        hub._on_sensor_change(MagicMock())  # must not raise

@@ -101,7 +101,7 @@ from .unit_convert import (
     sensors_input_to_metric,
     zone_input_to_metric,
 )
-from .water_balance_model import model_by_id
+from .water_balance_model import RUNNABLE_INPUTS, model_by_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -127,12 +127,23 @@ def _is_imperial(hass) -> bool:
 #: class that makes the entity picker useful. Declared once and rendered into
 #: both forms: setup and options must offer the same vocabulary, or a site
 #: could declare a sensor it can never edit.
+#:
+#: The daily temperature extremes are **deliberately absent**. NeverDry already
+#: reads a thermometer continuously, so asking for its own max and min is asking
+#: the user to build with helpers something the integration can observe — and it
+#: invites the worst version of the mistake: the same entity in both boxes gives
+#: a zero diurnal range, which Hargreaves turns into an evapotranspiration of
+#: exactly zero. A deficit that never grows is a garden that is never watered,
+#: and nothing anywhere says so.
+#:
+#: Radiation is asked for as **solar** radiation — what a pyranometer reports,
+#: and what a consumer weather station exposes. The *net* radiation the FAO-56
+#: equation uses is computed from it, per eq. 38-40; asking for it directly
+#: would be asking for an instrument almost nobody owns.
 _EXTRA_SENSORS: tuple[tuple[str, str | None], ...] = (
     (CONF_HUMIDITY_SENSOR, "humidity"),
     (CONF_WIND_SPEED_SENSOR, "wind_speed"),
     (CONF_NET_RADIATION_SENSOR, "irradiance"),
-    (CONF_TEMP_MAX_SENSOR, "temperature"),
-    (CONF_TEMP_MIN_SENSOR, "temperature"),
 )
 
 
@@ -191,6 +202,11 @@ def _et_method_error(user_input: dict) -> str | None:
         return None
     model = model_by_id(method)
     if model is None:
+        return "et_method_unknown"
+    if model.input_type not in RUNNABLE_INPUTS:
+        # Written and tested, but nothing builds its input yet. It is not in the
+        # dropdown either; this is the second lock, for an entry edited by hand
+        # or restored from a version where the option existed.
         return "et_method_unknown"
     env = Environment(
         temperature_sensor=user_input.get(CONF_TEMP_SENSOR) or "",

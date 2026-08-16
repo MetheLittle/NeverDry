@@ -282,7 +282,14 @@ class TestCapabilityMatch:
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
         assert models_offered_by(env) == (ETModel,)
 
-    def test_declaring_the_richer_sensors_unlocks_penman_without_touching_code(self):
+    def test_declaring_the_sensors_is_not_enough_while_the_input_cannot_be_built(self):
+        """Two conditions, and this is the one that is easy to forget.
+
+        A site can declare everything Penman-Monteith requires and still not be
+        offered it, because nothing yet builds the reading it consumes. Offering
+        it would produce a model that raises on its first update — selectable
+        and not runnable, which is worse than absent.
+        """
         from never_dry.environment import Environment
         from never_dry.water_balance_model import PenmanMonteithModel, models_offered_by
 
@@ -293,7 +300,8 @@ class TestCapabilityMatch:
             wind_speed_sensor="sensor.w",
             net_radiation_sensor="sensor.rad",
         )
-        assert PenmanMonteithModel in models_offered_by(env)
+        assert env.satisfies(PenmanMonteithModel.required_sensors)
+        assert PenmanMonteithModel not in models_offered_by(env)
 
     def test_a_probe_wins_over_the_weather_tiers(self):
         """A measured soil is better evidence than an estimate, so it leads the order."""
@@ -379,11 +387,16 @@ def test_the_form_options_mirror_the_catalogue():
 
     The form cannot import the model module (the translation guard resolves the
     dropdown statically), so the identifiers are written twice. This is the test
-    that makes the duplication safe: add a model and forget the constant, and
-    the method is unreachable from the UI with nothing else complaining.
+    that makes the duplication safe, in both directions: a method that runs and
+    is missing here is unreachable from the UI, and a method listed here that
+    does *not* run is an option that raises when chosen.
     """
     from never_dry.const import ET_METHOD_AUTO, ET_METHOD_OPTIONS
-    from never_dry.water_balance_model import MODEL_CATALOGUE
+    from never_dry.water_balance_model import MODEL_CATALOGUE, RUNNABLE_INPUTS
 
-    expected = (ET_METHOD_AUTO, *(m.method_id for m in MODEL_CATALOGUE))
-    assert tuple(ET_METHOD_OPTIONS) == expected
+    runnable = tuple(m.method_id for m in MODEL_CATALOGUE if m.input_type in RUNNABLE_INPUTS)
+    expected = (ET_METHOD_AUTO, *runnable)
+    assert tuple(ET_METHOD_OPTIONS) == expected, (
+        "the dropdown must offer exactly the methods that run: add a method here "
+        "in the change that builds its input, not in the one that writes the class"
+    )

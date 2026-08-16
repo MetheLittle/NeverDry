@@ -14,9 +14,7 @@
           "vwc_sensor": "Sensore di umidità del suolo (opzionale)",
           "humidity_sensor": "Sensore di umidità relativa",
           "wind_speed_sensor": "Sensore di velocità del vento",
-          "net_radiation_sensor": "Sensore di radiazione solare/netta",
-          "temp_max_sensor": "Sensore di temperatura massima giornaliera",
-          "temp_min_sensor": "Sensore di temperatura minima giornaliera",
+          "net_radiation_sensor": "Sensore di radiazione solare",
           "et_method": "Metodo di evapotraspirazione"
         },
         "data_description": {
@@ -29,9 +27,7 @@
           "vwc_sensor": "Se impostato, il deficit viene calcolato direttamente dall'umidità del suolo invece che dal modello ET",
           "humidity_sensor": "Facoltativo. Insieme a vento e radiazione sblocca Penman-Monteith.",
           "wind_speed_sensor": "Facoltativo. Insieme a umidità e radiazione sblocca Penman-Monteith.",
-          "net_radiation_sensor": "Facoltativo. Insieme a umidità e vento sblocca Penman-Monteith.",
-          "temp_max_sensor": "Facoltativo. Con la minima giornaliera sblocca Hargreaves-Samani.",
-          "temp_min_sensor": "Facoltativo. Con la massima giornaliera sblocca Hargreaves-Samani.",
+          "net_radiation_sensor": "Facoltativo. La lettura di un piranometro in W/m2. La radiazione netta che usa la FAO-56 viene calcolata da questa, quindi non ti viene chiesta.",
           "et_method": "Lascia Automatico a meno che tu non voglia fissare un metodo. Un metodo i cui sensori non hai dichiarato viene rifiutato, e l'errore dice quale manca."
         }
       },
@@ -160,17 +156,13 @@
           "d_max": "Limite massimo del deficit",
           "humidity_sensor": "Sensore di umidità relativa",
           "wind_speed_sensor": "Sensore di velocità del vento",
-          "net_radiation_sensor": "Sensore di radiazione solare/netta",
-          "temp_max_sensor": "Sensore di temperatura massima giornaliera",
-          "temp_min_sensor": "Sensore di temperatura minima giornaliera",
+          "net_radiation_sensor": "Sensore di radiazione solare",
           "et_method": "Metodo di evapotraspirazione"
         },
         "data_description": {
           "humidity_sensor": "Facoltativo. Insieme a vento e radiazione sblocca Penman-Monteith.",
           "wind_speed_sensor": "Facoltativo. Insieme a umidità e radiazione sblocca Penman-Monteith.",
-          "net_radiation_sensor": "Facoltativo. Insieme a umidità e vento sblocca Penman-Monteith.",
-          "temp_max_sensor": "Facoltativo. Con la minima giornaliera sblocca Hargreaves-Samani.",
-          "temp_min_sensor": "Facoltativo. Con la massima giornaliera sblocca Hargreaves-Samani.",
+          "net_radiation_sensor": "Facoltativo. La lettura di un piranometro in W/m2. La radiazione netta che usa la FAO-56 viene calcolata da questa, quindi non ti viene chiesta.",
           "et_method": "Lascia Automatico a meno che tu non voglia fissare un metodo. Un metodo i cui sensori non hai dichiarato viene rifiutato, e l'errore dice quale manca."
         }
       },

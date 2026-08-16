@@ -14,9 +14,7 @@
           "vwc_sensor": "Soil moisture sensor (optional)",
           "humidity_sensor": "Relative humidity sensor",
           "wind_speed_sensor": "Wind speed sensor",
-          "net_radiation_sensor": "Solar/net radiation sensor",
-          "temp_max_sensor": "Daily maximum temperature sensor",
-          "temp_min_sensor": "Daily minimum temperature sensor",
+          "net_radiation_sensor": "Solar radiation sensor",
           "et_method": "Evapotranspiration method"
         },
         "data_description": {
@@ -29,9 +27,7 @@
           "vwc_sensor": "If set, deficit is calculated directly from soil moisture instead of the ET model",
           "humidity_sensor": "Optional. Unlocks Penman-Monteith together with wind and radiation.",
           "wind_speed_sensor": "Optional. Unlocks Penman-Monteith together with humidity and radiation.",
-          "net_radiation_sensor": "Optional. Unlocks Penman-Monteith together with humidity and wind.",
-          "temp_max_sensor": "Optional. With the daily minimum, unlocks Hargreaves-Samani.",
-          "temp_min_sensor": "Optional. With the daily maximum, unlocks Hargreaves-Samani.",
+          "net_radiation_sensor": "Optional. A pyranometer reading in W/m2. The net radiation FAO-56 uses is computed from it, so it is not asked for.",
           "et_method": "Leave on Automatic unless you want to pin one method. A method whose sensors you have not declared is refused, and the error says which one is missing."
         }
       },
@@ -160,17 +156,13 @@
           "d_max": "Maximum deficit cap",
           "humidity_sensor": "Relative humidity sensor",
           "wind_speed_sensor": "Wind speed sensor",
-          "net_radiation_sensor": "Solar/net radiation sensor",
-          "temp_max_sensor": "Daily maximum temperature sensor",
-          "temp_min_sensor": "Daily minimum temperature sensor",
+          "net_radiation_sensor": "Solar radiation sensor",
           "et_method": "Evapotranspiration method"
         },
         "data_description": {
           "humidity_sensor": "Optional. Unlocks Penman-Monteith together with wind and radiation.",
           "wind_speed_sensor": "Optional. Unlocks Penman-Monteith together with humidity and radiation.",
-          "net_radiation_sensor": "Optional. Unlocks Penman-Monteith together with humidity and wind.",
-          "temp_max_sensor": "Optional. With the daily minimum, unlocks Hargreaves-Samani.",
-          "temp_min_sensor": "Optional. With the daily maximum, unlocks Hargreaves-Samani.",
+          "net_radiation_sensor": "Optional. A pyranometer reading in W/m2. The net radiation FAO-56 uses is computed from it, so it is not asked for.",
           "et_method": "Leave on Automatic unless you want to pin one method. A method whose sensors you have not declared is refused, and the error says which one is missing."
         }
       },
