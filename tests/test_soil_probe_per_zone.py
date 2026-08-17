@@ -34,9 +34,17 @@ def _zone(hass, dryness, **cfg):
 
 
 class TestAZoneWithItsOwnProbe:
-    """It measures. That is the whole difference, and it changes who it listens to."""
+    """The probe is data, not the deficit — and that distinction was decided the hard way.
 
-    def test_it_reads_its_deficit_from_the_probe(self, hass_mock):
+    Implementing it the other way round was rejected on field evidence: two zones
+    on the same soil sit at systematically different moisture because the
+    irrigation is unbalanced and one has far more shade on the ground. Both are
+    circumstances of a spot, and a deficit that followed the reading would feed a
+    plumbing imbalance back into the model as if it were information about the
+    soil's need.
+    """
+
+    def test_the_reading_is_published(self, hass_mock):
         hub = DrynessIndexSensor(hass_mock, dict(HUB))
         zone = _zone(hass_mock, hub, **{CONF_ZONE_VWC_SENSOR: "sensor.orto_soil"})
 
@@ -44,22 +52,37 @@ class TestAZoneWithItsOwnProbe:
         event.data = {"new_state": MagicMock(state="18.0")}  # 18 %, below field capacity
         zone._on_own_probe(event)
 
-        assert zone._zone_deficit == pytest.approx(36.0)  # (0.30 - 0.18) * 0.30 m * 1000
+        attrs = zone.extra_state_attributes
+        assert attrs["probe_water_content"] == pytest.approx(0.18)
+        # Published beside it: the gap between this and the model's deficit after
+        # an irrigation is what reveals a delivery that moved no water.
+        assert attrs["probe_implied_deficit_mm"] == pytest.approx(36.0)
 
-    def test_it_stops_listening_to_the_site(self, hass_mock):
-        """The hub broadcasts an estimate for soil this zone is not made of.
+    def test_the_reading_does_not_touch_the_deficit(self, hass_mock):
+        """The rejected design, kept as a test so it cannot come back by accident."""
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **{CONF_ZONE_VWC_SENSOR: "sensor.orto_soil"})
+        zone._zone_deficit = 4.0
 
-        Nothing the site says — an ET rate, or a shared probe's reading — carries
-        information about this patch of ground, so the broadcast is ignored
-        rather than blended.
+        event = MagicMock()
+        event.data = {"new_state": MagicMock(state="18.0")}
+        zone._on_own_probe(event)
+
+        assert zone._zone_deficit == 4.0
+
+    def test_the_zone_keeps_integrating_the_model(self, hass_mock):
+        """A probe adds a measurement; it does not switch the model off.
+
+        This is also the failure mode that decided it: a probe that dies would
+        otherwise freeze the deficit and stop the watering, in silence.
         """
         hub = DrynessIndexSensor(hass_mock, dict(HUB))
         zone = _zone(hass_mock, hub, **{CONF_ZONE_VWC_SENSOR: "sensor.orto_soil"})
-        zone._zone_deficit = 5.0
+        zone._zone_deficit = 1.0
 
         zone._on_et_update(1.0, 0.3, 0.0)
 
-        assert zone._zone_deficit == 5.0
+        assert zone._zone_deficit > 1.0
 
     def test_a_zone_without_one_is_untouched(self, hass_mock):
         """The change must be invisible to every zone that has no probe."""
@@ -72,7 +95,7 @@ class TestAZoneWithItsOwnProbe:
         assert zone._zone_deficit > 1.0
 
     def test_a_percentage_reading_is_converted_not_believed(self, hass_mock):
-        """Consumer probes report 45, not 0.45 — fed raw it pins the deficit at zero."""
+        """Consumer probes report 45, not 0.45 — read raw, every reading looks saturated."""
         hub = DrynessIndexSensor(hass_mock, dict(HUB))
         zone = _zone(hass_mock, hub, **{CONF_ZONE_VWC_SENSOR: "sensor.orto_soil"})
 
@@ -80,19 +103,18 @@ class TestAZoneWithItsOwnProbe:
         event.data = {"new_state": MagicMock(state="45")}
         zone._on_own_probe(event)
 
-        assert zone._zone_deficit == 0.0  # 45 % is above field capacity: no deficit
+        assert zone.extra_state_attributes["probe_water_content"] == pytest.approx(0.45)
 
-    def test_an_unreadable_probe_holds_the_last_value(self, hass_mock):
+    def test_an_unreadable_probe_publishes_nothing(self, hass_mock):
         """A missing reading is not a dry soil, and not a wet one either."""
         hub = DrynessIndexSensor(hass_mock, dict(HUB))
         zone = _zone(hass_mock, hub, **{CONF_ZONE_VWC_SENSOR: "sensor.orto_soil"})
-        zone._zone_deficit = 7.0
 
         event = MagicMock()
         event.data = {"new_state": MagicMock(state="unavailable")}
         zone._on_own_probe(event)
 
-        assert zone._zone_deficit == 7.0
+        assert "probe_water_content" not in zone.extra_state_attributes
 
 
 class TestTheUpgrade:

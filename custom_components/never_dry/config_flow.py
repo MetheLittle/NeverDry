@@ -223,7 +223,18 @@ def _et_method_error(user_input: dict) -> str | None:
 
 
 def _sensors_schema(is_imperial: bool) -> vol.Schema:
-    """Sensors + ET parameters form for initial setup, unit-aware."""
+    """Sensors + ET parameters form for initial setup, unit-aware.
+
+    **No soil probe here.** A probe measures one patch of soil, with one kind of
+    planting above it and its own watering history, so a probe declared for the
+    installation was answering a question nobody asked: it drove zones it knows
+    nothing about. It is declared per zone now.
+
+    The key survives in ``const`` and ``Environment`` on purpose: installations
+    that already have one keep working until they say which zone it belongs to
+    (the repair issue), and removing the field is what stops a *new* one being
+    created.
+    """
     t_unit = "°F" if is_imperial else "°C"
     d_unit = "in" if is_imperial else "mm"
     t_base_default = _c_to_f(DEFAULT_T_BASE) if is_imperial else DEFAULT_T_BASE
@@ -269,7 +280,6 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
                     unit_of_measurement=d_unit,
                 )
             ),
-            vol.Optional(CONF_VWC_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
             **_extra_sensor_fields(),
             **_et_method_field(),
         }
@@ -305,10 +315,6 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
                     mode="dropdown",
                 )
             ),
-            vol.Optional(
-                CONF_VWC_SENSOR,
-                description={"suggested_value": current.get(CONF_VWC_SENSOR)},
-            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
             vol.Optional(CONF_ALPHA, default=current.get(CONF_ALPHA, DEFAULT_ALPHA)): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0.05,

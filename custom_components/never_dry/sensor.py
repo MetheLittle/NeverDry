@@ -1881,6 +1881,8 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         # the soil being watered, and no estimate can improve on that.
         self._own_probe = zone_config.get(CONF_ZONE_VWC_SENSOR)
         self._own_probe_warned = False
+        self._probe_vwc: float | None = None
+        self._probe_implied_mm: float | None = None
         self._probe_model = (
             VWCPerZoneModel(
                 source=self._zone_name,
@@ -2136,12 +2138,6 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
 
     def _on_et_update(self, dt_h: float, et_h: float, rain: float) -> None:
         """Update zone-specific deficit when base sensor broadcasts."""
-        # A zone with its own probe does not listen to the site at all: it is
-        # measuring the soil it waters, which is the whole point of moving the
-        # probe here. Nothing the hub broadcasts — an ET rate, or the shared
-        # probe's reading — says anything about this patch of ground.
-        if self._own_probe is not None:
-            return
         # In VWC mode (dt_h==0, et_h==0, rain==0), use base deficit * Kc
         if dt_h == 0.0 and et_h == 0.0 and rain == 0.0:
             kc = self._get_current_kc()
@@ -2156,13 +2152,27 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             self.async_write_ha_state()
 
     def _on_own_probe(self, event) -> None:
-        """Recompute this zone's deficit from its own probe reading.
+        """Record this zone's probe reading. It does **not** own the deficit.
 
-        Stateless, like every VWC model: each reading replaces the deficit
-        rather than adjusting it, so there is nothing to drift and nothing to
-        seed. Irrigation does not need to be subtracted either — the next
-        reading already reflects the wetter soil, which is the property that
-        makes a measured deficit simpler than an estimated one.
+        A point measurement does not generalise to the zone, and the reason is
+        empirical rather than theoretical: two zones on the same soil sit at
+        systematically different moisture because the irrigation is unbalanced
+        and one has far more shade on the ground. Both are circumstances of a
+        spot. Letting the deficit follow that reading would take an imbalance in
+        the plumbing and a difference in canopy and feed them back as if they
+        were information about how much water the soil needs.
+
+        What a probe legitimately generalises is what the *soil* does — the field
+        capacity it settles at after drainage, and how fast it drains and dries.
+        Those are properties of the texture, not of the plant above it, and both
+        need a curve over days rather than a single reading. So the reading is
+        published and the deficit stays with the model that covers the whole zone.
+
+        The probe-implied deficit is published beside it on purpose: the gap
+        between predicted and measured after an irrigation is the one signal that
+        reveals a hydraulic fault — thirty litres delivered and the moisture did
+        not move means a clogged emitter or a closed tap, which nothing else in
+        the system can see.
         """
         state = event.data.get("new_state") if event else self._hass.states.get(self._own_probe)
         if state is None or state.state in ("unavailable", "unknown"):
@@ -2183,7 +2193,8 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
                     raw,
                 )
             return
-        self._zone_deficit = self._probe_model.step(VWCReading(vwc=vwc)).value_mm
+        self._probe_vwc = vwc
+        self._probe_implied_mm = self._probe_model.step(VWCReading(vwc=vwc)).value_mm
         if getattr(self, "hass", None):
             self.async_write_ha_state()
 
@@ -2526,6 +2537,12 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             "deficit_mm": round(self._zone_deficit, 2),
             "irrigating": self._irrigating,
         }
+        if self._probe_vwc is not None:
+            # Published, not used: the raw material for observing field capacity
+            # and the soil's dynamics, and for spotting a delivery that moved no
+            # water. The deficit above is the model's, and stays the model's.
+            attrs["probe_water_content"] = round(self._probe_vwc, 3)
+            attrs["probe_implied_deficit_mm"] = round(self._probe_implied_mm, 2)
         attrs["total_water_delivered_l"] = round(self._total_water_delivered, 1)
         attrs["yearly_water_delivered_l"] = round(self._yearly_water_delivered, 1)
         attrs["yearly_water_year"] = self._yearly_water_year
