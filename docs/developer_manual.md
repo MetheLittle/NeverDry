@@ -627,6 +627,35 @@ that order, because each step is what makes the next one safe.
    the entry in `TestEveryOfferedMethodCanActuallyRun.SENSORS_FOR` so the
    end-to-end guard drives a real update against a site equipped for it.
 
+### The soil probe is a support, never the owner of the balance
+
+**Decided 2026-08-17.** A zone's probe does not write the deficit. `zone.py` owns
+it and the water-balance model computes it; `IrrigationZoneSensor._on_own_probe`
+publishes the reading and stops there.
+
+The reasoning is empirical, and it is the kind that only a real garden produces:
+two zones on the same soil sit at systematically different moisture because the
+irrigation is unbalanced and one has far more shade on the ground. A deficit that
+followed the reading would take an imbalance in the plumbing and a difference in
+canopy and feed them back as facts about the soil's need.
+
+The failure mode seals it. A probe that dies would freeze the deficit and stop
+the watering silently — the class of defect the guards in §8b exist to prevent.
+With the model in charge, a dead probe degrades to the estimate every zone always
+has.
+
+What the probe is for, and what to build on it:
+
+| Use | Why it generalises from one spot |
+|---|---|
+| Observed field capacity | The plateau after drainage is a property of the texture, not of the plant above |
+| Drainage / drying dynamics | Likewise a property of the soil, readable only as a curve over days |
+| Hydraulic fault detection | The gap between the model's deficit and `probe_implied_deficit_mm` after a delivery. Litres out and moisture unmoved means a clogged emitter or a closed tap — the only signal in the system that reveals it |
+
+An earlier implementation (2026-08-16) had the probe own the zone's deficit and
+was reverted the next morning. If you are tempted again, read
+`design/soil-moisture-model.md` §5 first: the argument is there, with the numbers.
+
 ### What is computed rather than required
 
 Two inputs the equations use are deliberately *not* asked for, because asking

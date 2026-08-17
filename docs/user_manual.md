@@ -76,18 +76,39 @@ Two entries in that table need a word:
 **You are never asked for daily maximum and minimum temperature.** NeverDry
 observes them from the thermometer it already reads.
 
-**The soil probe is declared once, for the whole installation — and that is
-wrong.** A probe measures one patch of soil, with one kind of planting above it
-and its own watering history, so its reading is not transferable to a zone
-watered independently. Today the single declared probe drives every zone; the
-agreed direction is a probe **per zone**, and it is not implemented yet. If you
-have one probe and several zones, treat the reading as belonging to the zone it
-is buried in and read the others with that in mind.
+**A soil probe supports the model — it does not replace it.** This is worth
+being clear about, because the opposite is what most people expect.
 
-Where to put it, when you have one: **in an irrigated zone**, at root depth,
-midway between two emitters — not under one, not at the edge, not in a hollow.
-A probe in unwatered ground would never see the irrigation arrive and would ask
-for water for ever.
+The probe is declared **per zone**, in that zone's settings. What it does *not*
+do is decide the zone's water deficit. A probe reads one spot, at one depth,
+under whatever plant happens to be above it — and two zones on the same soil sit
+at systematically different moisture whenever the irrigation is unbalanced or one
+gets more shade on the ground. Those are circumstances of a spot, not facts about
+how much water the zone needs, so letting the deficit follow the reading would
+feed a plumbing imbalance back into the model as if it were information about the
+soil.
+
+There is also a plainer reason: a probe that dies — battery, corrosion, a cable
+cut by a spade — would freeze the deficit and stop the watering, with nothing to
+tell you. With the model in charge, a dead probe simply leaves you with the
+estimate you had before.
+
+What the probe *is* for:
+
+- **Seeing what your soil actually holds.** The level the moisture settles at
+  after a good watering drains away is your real field capacity, which today is
+  a default value the software guesses.
+- **Catching a hydraulic fault.** If a zone delivers thirty litres and its
+  moisture does not move, something is wrong at the tap or the emitter — and
+  this is the only signal in the whole system that can reveal it.
+
+The reading is published on the zone's *Volume* sensor
+(`probe_water_content`), alongside the deficit that reading alone would imply, so
+the two can be compared.
+
+**Where to bury it:** in an irrigated zone, at root depth, midway between two
+emitters — not under one, not at the edge, not in a hollow. A probe in unwatered
+ground never sees the irrigation arrive.
 
 #### What each method actually uses
 
