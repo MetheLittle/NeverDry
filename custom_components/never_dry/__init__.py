@@ -21,7 +21,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_ZONE_NAME, CONF_ZONES, CONFIG_VERSION, DOMAIN
+from .const import CONF_VWC_SENSOR, CONF_ZONE_NAME, CONF_ZONE_VWC_SENSOR, CONF_ZONES, CONFIG_VERSION, DOMAIN
 from .services import async_unload_services
 
 
@@ -268,6 +268,34 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 zone["plant_family"] = "custom"
         hass.config_entries.async_update_entry(entry, data=new_data, version=3)
 
+    if entry.version == 3:
+        # The soil probe was declared once for the whole installation and drove
+        # every zone. That is wrong and has been for a while: a probe measures
+        # one patch of soil, with one planting above it and its own watering
+        # history, so its reading is not transferable to a zone watered
+        # independently.
+        #
+        # Where the answer is unambiguous it is applied. One zone means the
+        # probe is in that zone — there is nothing to ask.
+        #
+        # With several zones only the user knows where it is buried, so nothing
+        # is guessed and nothing is deleted: the binding stays exactly where it
+        # is, the installation keeps behaving as it did, and a repair issue asks
+        # the question. Deleting would have degraded those zones to an estimate
+        # in silence and thrown away an entity the user had already supplied.
+        new_data = {**entry.data}
+        probe = new_data.get(CONF_VWC_SENSOR)
+        zones = new_data.get(CONF_ZONES, [])
+        if probe and len(zones) == 1:
+            zones[0] = {**zones[0], CONF_ZONE_VWC_SENSOR: probe}
+            new_data.pop(CONF_VWC_SENSOR, None)
+            _LOGGER.info(
+                "Soil probe %s moved to zone '%s': with one zone there is nothing to ask",
+                probe,
+                zones[0].get(CONF_ZONE_NAME),
+            )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=4)
+
     _LOGGER.info(
         "Migration of NeverDry config entry to version %s successful",
         CONFIG_VERSION,
@@ -337,6 +365,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # After the file logger is attached, so the removals are visible in the
     # NeverDry activity log; still before platforms create the new entities.
     _async_remove_legacy_rain_entities(hass, entry)
+
+    # Checked at every setup, not once at migration: adding a zone later turns
+    # an unambiguous installation into one that needs asking, and answering by
+    # editing the zone directly should clear the issue without anyone answering
+    # the question twice.
+    from .repairs import async_check_soil_probe
+
+    async_check_soil_probe(hass, entry)
+
     await _async_register_frontend(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))

@@ -49,14 +49,16 @@
               "plant_family": "Plant family",
               "kc": "Custom crop coefficient Kc (overrides plant family)",
               "exposure": "Site exposure",
-              "microclimate_factor": "Custom microclimate factor (Advanced only)"
+              "microclimate_factor": "Custom microclimate factor (Advanced only)",
+              "vwc_sensor": "Soil moisture probe (this zone)"
             },
             "data_description": {
               "area_m2": "Surface area of this irrigation zone in square meters",
               "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
               "kc": "Used only when the plant family is Custom. With any other family the seasonal curve applies and this field is ignored.",
               "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value. Pick Custom to enter your own factor below.",
-              "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground."
+              "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground.",
+              "vwc_sensor": "Optional. A probe buried in this zone, at root depth and midway between two emitters. When set, this zone measures its deficit instead of estimating it — and ignores the site-wide model entirely."
             }
           },
           "valve_and_pipe": {
@@ -180,13 +182,15 @@
               "plant_family": "Plant family",
               "kc": "Custom crop coefficient Kc",
               "exposure": "Site exposure",
-              "microclimate_factor": "Custom microclimate factor (Advanced only)"
+              "microclimate_factor": "Custom microclimate factor (Advanced only)",
+              "vwc_sensor": "Soil moisture probe (this zone)"
             },
             "data_description": {
               "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
               "kc": "Used only when the plant family is Custom. With any other family the seasonal curve applies and this field is ignored.",
               "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value. Pick Custom to enter your own factor below.",
-              "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground."
+              "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground.",
+              "vwc_sensor": "Optional. A probe buried in this zone, at root depth and midway between two emitters. When set, this zone measures its deficit instead of estimating it — and ignores the site-wide model entirely."
             }
           },
           "valve_and_pipe": {
@@ -245,13 +249,15 @@
               "plant_family": "Plant family",
               "kc": "Custom crop coefficient Kc",
               "exposure": "Site exposure",
-              "microclimate_factor": "Custom microclimate factor (Advanced only)"
+              "microclimate_factor": "Custom microclimate factor (Advanced only)",
+              "vwc_sensor": "Soil moisture probe (this zone)"
             },
             "data_description": {
               "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
               "kc": "Used only when the plant family is Custom. With any other family the seasonal curve applies and this field is ignored.",
               "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value. Pick Custom to enter your own factor below.",
-              "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground."
+              "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground.",
+              "vwc_sensor": "Optional. A probe buried in this zone, at root depth and midway between two emitters. When set, this zone measures its deficit instead of estimating it — and ignores the site-wide model entirely."
             }
           },
           "valve_and_pipe": {
@@ -399,6 +405,25 @@
       },
       "model_input_derived_wind_2m_m_s": {
         "name": "Wind speed at 2 m"
+      }
+    }
+  },
+  "issues": {
+    "soil_probe_needs_a_zone": {
+      "title": "NeverDry: which zone is the soil probe in?",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Which zone is the probe in?",
+            "description": "The soil moisture probe `{probe}` is declared for the whole installation, so every zone is currently reading it. A probe measures one patch of soil, with one kind of planting above it and its own watering history — its reading is not transferable to a zone watered independently.\n\nTell NeverDry which zone it is buried in. Nothing has changed in the meantime: your zones are behaving exactly as before, and will keep doing so until you answer.",
+            "data": {
+              "zone": "Which zone is the probe in?"
+            },
+            "data_description": {
+              "zone": "The chosen zone will measure its deficit from the probe. The other zones go back to estimating it, which is what a probe in somebody else's soil could never tell them."
+            }
+          }
+        }
       }
     }
   }

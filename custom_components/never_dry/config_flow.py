@@ -50,6 +50,7 @@ from .const import (
     CONF_ZONE_THRESHOLD,
     CONF_ZONE_VALVE,
     CONF_ZONE_VOLUME_ENTITY,
+    CONF_ZONE_VWC_SENSOR,
     CONF_ZONES,
     CONFIG_VERSION,
     DEFAULT_ALPHA,
@@ -375,6 +376,15 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                         ),
                         vol.Optional(CONF_ZONE_KC): selector.NumberSelector(
                             selector.NumberSelectorConfig(min=0.1, max=2.0, step=0.01, mode="box")
+                        ),
+                        # The probe belongs here, in the zone, not to the
+                        # installation: it measures one patch of soil with one
+                        # planting above it and its own watering history, and a
+                        # reading from somebody else's patch says nothing about
+                        # this one. A zone that declares one stops estimating
+                        # and starts measuring.
+                        vol.Optional(CONF_ZONE_VWC_SENSOR): selector.EntitySelector(
+                            selector.EntitySelectorConfig(domain="sensor", device_class="moisture")
                         ),
                         vol.Optional(CONF_ZONE_EXPOSURE, default=DEFAULT_EXPOSURE): selector.SelectSelector(
                             selector.SelectSelectorConfig(
@@ -1042,6 +1052,12 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                                     step=0.01,
                                     mode="box",
                                 )
+                            ),
+                            vol.Optional(
+                                CONF_ZONE_VWC_SENSOR,
+                                description={"suggested_value": _d(CONF_ZONE_VWC_SENSOR, None)},
+                            ): selector.EntitySelector(
+                                selector.EntitySelectorConfig(domain="sensor", device_class="moisture")
                             ),
                             vol.Optional(
                                 CONF_ZONE_EXPOSURE,

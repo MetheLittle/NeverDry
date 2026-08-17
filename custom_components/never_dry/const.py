@@ -1,7 +1,7 @@
 """Constants for the NeverDry integration."""
 
 DOMAIN = "never_dry"
-CONFIG_VERSION = 3
+CONFIG_VERSION = 4
 
 # ── Sensor inputs ─────────────────────────────────────────
 CONF_TEMP_SENSOR = "temperature_sensor"
@@ -88,6 +88,11 @@ CONF_ZONE_VOLUME_ENTITY = "volume_entity"
 CONF_ZONE_FLOW_METER_SENSOR = "flow_meter_sensor"
 CONF_ZONE_DELIVERY_TIMEOUT = "delivery_timeout"
 CONF_ZONE_BATTERY_SENSOR = "battery_sensor"
+# A soil-moisture probe belonging to THIS zone. A probe measures one patch of
+# soil, with one kind of planting above it and its own watering history, so its
+# reading is not transferable to a zone watered independently — which is why the
+# installation-wide binding it replaces was a design error, not a shortcut.
+CONF_ZONE_VWC_SENSOR = "vwc_sensor"
 CONF_ZONE_IRRIGATION_MODE = "irrigation_mode"
 CONF_ZONE_IRRIGATION_TIME = "irrigation_time"
 CONF_ZONE_HW_MAX_DURATION_TOPIC = "hw_max_duration_topic"

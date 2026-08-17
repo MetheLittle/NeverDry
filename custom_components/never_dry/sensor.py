@@ -80,6 +80,7 @@ from .const import (
     CONF_ZONE_THRESHOLD,
     CONF_ZONE_VALVE,
     CONF_ZONE_VOLUME_ENTITY,
+    CONF_ZONE_VWC_SENSOR,
     CONF_ZONES,
     DEFAULT_ALPHA,
     DEFAULT_ANEMOMETER_HEIGHT_M,
@@ -135,6 +136,7 @@ from .water_balance_model import (
     PenmanMonteithModel,
     PenmanStep,
     ReferenceFrame,
+    VWCPerZoneModel,
     VWCReading,
     WaterBalanceModel,
     build_model,
@@ -1874,6 +1876,22 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
 
         self._d_max = dryness_sensor._d_max
 
+        # A probe of this zone's own, if declared. When present it replaces the
+        # site's model entirely for this zone: the reading is a measurement of
+        # the soil being watered, and no estimate can improve on that.
+        self._own_probe = zone_config.get(CONF_ZONE_VWC_SENSOR)
+        self._own_probe_warned = False
+        self._probe_model = (
+            VWCPerZoneModel(
+                source=self._zone_name,
+                field_capacity=dryness_sensor._field_cap,
+                root_depth=dryness_sensor._root_depth,
+                d_max=self._d_max,
+            )
+            if self._own_probe
+            else None
+        )
+
         # Efficiency: the system type decides, per the preset/override
         # contract in const. Only the custom type (default_efficiency: None)
         # reads the box; behind a real type the box is ignored and the config
@@ -2056,6 +2074,9 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         global Dryness Index scaled by this zone's Kc — so a new zone
         starts with a realistic deficit instead of zero.
         """
+        if self._own_probe:
+            self.async_on_remove(async_track_state_change_event(self.hass, [self._own_probe], self._on_own_probe))
+
         last = await self.async_get_last_state()
         if last and last.attributes:
             with contextlib.suppress(ValueError, TypeError):
@@ -2115,6 +2136,12 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
 
     def _on_et_update(self, dt_h: float, et_h: float, rain: float) -> None:
         """Update zone-specific deficit when base sensor broadcasts."""
+        # A zone with its own probe does not listen to the site at all: it is
+        # measuring the soil it waters, which is the whole point of moving the
+        # probe here. Nothing the hub broadcasts — an ET rate, or the shared
+        # probe's reading — says anything about this patch of ground.
+        if self._own_probe is not None:
+            return
         # In VWC mode (dt_h==0, et_h==0, rain==0), use base deficit * Kc
         if dt_h == 0.0 and et_h == 0.0 and rain == 0.0:
             kc = self._get_current_kc()
@@ -2125,6 +2152,38 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
                 0.0,
                 min(self._zone_deficit + et_h * kc * dt_h - rain, self._d_max),
             )
+        if getattr(self, "hass", None):
+            self.async_write_ha_state()
+
+    def _on_own_probe(self, event) -> None:
+        """Recompute this zone's deficit from its own probe reading.
+
+        Stateless, like every VWC model: each reading replaces the deficit
+        rather than adjusting it, so there is nothing to drift and nothing to
+        seed. Irrigation does not need to be subtracted either — the next
+        reading already reflects the wetter soil, which is the property that
+        makes a measured deficit simpler than an estimated one.
+        """
+        state = event.data.get("new_state") if event else self._hass.states.get(self._own_probe)
+        if state is None or state.state in ("unavailable", "unknown"):
+            return
+        try:
+            raw = float(state.state)
+        except (ValueError, TypeError):
+            return
+        vwc = vwc_to_fraction(raw)
+        if vwc is None:
+            if not self._own_probe_warned:
+                self._own_probe_warned = True
+                _LOGGER.warning(
+                    "Zone '%s': probe '%s' reported %s, which is not a water content on either "
+                    "scale (expected 0-1 or 0-100). Reading ignored, deficit held at its last value",
+                    self._zone_name,
+                    self._own_probe,
+                    raw,
+                )
+            return
+        self._zone_deficit = self._probe_model.step(VWCReading(vwc=vwc)).value_mm
         if getattr(self, "hass", None):
             self.async_write_ha_state()
 
