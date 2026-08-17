@@ -76,6 +76,19 @@ Two entries in that table need a word:
 **You are never asked for daily maximum and minimum temperature.** NeverDry
 observes them from the thermometer it already reads.
 
+**The soil probe is declared once, for the whole installation — and that is
+wrong.** A probe measures one patch of soil, with one kind of planting above it
+and its own watering history, so its reading is not transferable to a zone
+watered independently. Today the single declared probe drives every zone; the
+agreed direction is a probe **per zone**, and it is not implemented yet. If you
+have one probe and several zones, treat the reading as belonging to the zone it
+is buried in and read the others with that in mind.
+
+Where to put it, when you have one: **in an irrigated zone**, at root depth,
+midway between two emitters — not under one, not at the edge, not in a hollow.
+A probe in unwatered ground would never see the irrigation arrive and would ask
+for water for ever.
+
 #### What each method actually uses
 
 The table above answers "what do I have to connect". This one answers "what is
