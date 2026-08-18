@@ -69,6 +69,15 @@ async def async_get_config_entry_diagnostics(
     operators = hass.data.get(DOMAIN, {}).get(f"_operators_{entry.entry_id}", {})
     valve_latency = {entity_id: op.latency_diagnostics for entity_id, op in operators.items()}
 
+    # ── 5. Flow rate learned from real sessions ──────────────────────────────
+    # Reported next to the configured rate on purpose: the gap between them is
+    # the whole point, and it is invisible in any single reading.
+    session_flow = {
+        entity_id: op.session_flow_diagnostics
+        for entity_id, op in operators.items()
+        if hasattr(op, "session_flow_diagnostics")
+    }
+
     return {
         "domain": DOMAIN,
         "config_entry_id": entry.entry_id,
@@ -76,6 +85,7 @@ async def async_get_config_entry_diagnostics(
         "config_data": config_data,
         "entity_states": entity_states,
         "valve_latency": valve_latency,
+        "session_flow": session_flow,
         "activity_log": {
             "path": log_path,
             "total_lines": log_total_lines,

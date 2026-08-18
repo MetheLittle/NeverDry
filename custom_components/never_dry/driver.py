@@ -43,7 +43,7 @@ from dataclasses import dataclass, replace
 from datetime import timedelta
 from enum import StrEnum
 from time import monotonic
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import (
@@ -59,6 +59,7 @@ from .const import (
     DELIVERY_MODE_VOLUME_PRESET,
     FLOW_METER_POLL_INTERVAL_S,
 )
+from .session_flow import MIN_SESSION_S, SETTLE_DELAY_S, SessionFlowTracker
 from .valve_fsm import (
     CancelAllTimers,
     CancelTimer,
@@ -1058,6 +1059,18 @@ class ZoneDriver(Driver):
         self._flow_meter_sensor = flow_meter_sensor
         self._delivery_timeout_s = delivery_timeout_s
         self._auto_open_grace_s = auto_open_grace_s
+        self._session_flow = SessionFlowTracker(hass, entity_id)
+        hass.async_create_task(self._session_flow.async_load())
+
+    @property
+    def measured_flow_lpm(self) -> float | None:
+        """Flow rate learned from real sessions, or ``None`` before enough of them."""
+        return self._session_flow.median_lpm()
+
+    @property
+    def session_flow_diagnostics(self) -> dict[str, Any]:
+        """Learned-flow statistics for this zone."""
+        return self._session_flow.as_dict()
 
     @property
     def delivery_mode(self) -> DeliveryMode:
@@ -1148,6 +1161,13 @@ class ZoneDriver(Driver):
         if (result := await self.async_turn_on()).status != OperationStatus.OK:
             return DeliveryResult(0.0, DeliveryQuality.LOW_CONFIDENCE, 0.0, liters, detail=result.error_detail)
 
+        # Baseline for the learned flow rate: the meter as it stood before any
+        # water moved. Kept apart from ``initial`` because the loop below rebases
+        # that one when the counter resets, and a rebased baseline would turn the
+        # reset into a phantom volume.
+        baseline = initial
+        session_start = monotonic()
+
         delivered = 0.0
         elapsed = 0.0
         timeout = self._delivery_timeout_s
@@ -1172,8 +1192,46 @@ class ZoneDriver(Driver):
                 reached_target = True
                 break
 
+        session_s = monotonic() - session_start
         await self.async_turn_off()
+        self._schedule_flow_sample(meter, baseline, session_s)
         return self._settle(liters, delivered, elapsed, reached_target)
+
+    def _schedule_flow_sample(self, meter: str, baseline: float, session_s: float) -> None:
+        """Arrange to read the meter once the session's late ticks have landed.
+
+        Deferred rather than awaited: the caller owes its result to the zone now,
+        and ``SETTLE_DELAY_S`` of waiting would show up as a session that takes
+        half a minute longer to finish than it did.
+        """
+        if session_s < MIN_SESSION_S:
+            return
+        self._hass.async_create_task(self._record_flow_sample(meter, baseline, session_s))
+
+    async def _record_flow_sample(self, meter: str, baseline: float, session_s: float) -> None:
+        """Read the settled meter and record what the session's flow really was."""
+        await asyncio.sleep(SETTLE_DELAY_S)
+        final = flow_utils.read_volume_liters(self._hass, meter)
+        if final is None:
+            return
+        volume = final - baseline
+        if volume <= 0:
+            # Either nothing was measured or the counter reset mid-session; both
+            # make the difference meaningless, and a guess is worse than a gap.
+            return
+        lpm = volume / (session_s / 60.0)
+        self._session_flow.window.record(lpm)
+        await self._session_flow.async_save()
+        _LOGGER.info(
+            "Zone '%s': session flow %.2f L/min (%.0f L/h) from %.1f L over %.0f s — median of %d session(s): %s",
+            self._name,
+            lpm,
+            lpm * 60.0,
+            volume,
+            session_s,
+            self._session_flow.window.sample_count,
+            f"{m * 60.0:.0f} L/h" if (m := self._session_flow.median_lpm()) is not None else "not enough yet",
+        )
 
     async def _deliver_by_rate(
         self,
