@@ -170,7 +170,7 @@ class TestTheDeliveryLoopHandsOverTheRightBaseline:
         driver.async_turn_off = AsyncMock()
         driver._driver_is_off = MagicMock(return_value=False)
         captured = {}
-        driver._schedule_flow_sample = lambda meter, baseline, session_s: captured.update(
+        driver.schedule_flow_sample = lambda meter, baseline, session_s: captured.update(
             meter=meter, baseline=baseline, session_s=session_s
         )
 
@@ -194,7 +194,7 @@ class TestTheDeliveryLoopHandsOverTheRightBaseline:
         driver.async_turn_off = AsyncMock()
         driver._driver_is_off = MagicMock(return_value=False)
         captured = {}
-        driver._schedule_flow_sample = lambda meter, baseline, session_s: captured.update(baseline=baseline)
+        driver.schedule_flow_sample = lambda meter, baseline, session_s: captured.update(baseline=baseline)
 
         await driver._deliver_by_volume(40.0, "sensor.meter", None, None)
 
@@ -209,7 +209,7 @@ class TestShortSessionsAreRefused:
         driver = _driver(hass)
         driver._hass = MagicMock()
 
-        driver._schedule_flow_sample("sensor.meter", 1000.0, MIN_SESSION_S - 1)
+        driver.schedule_flow_sample("sensor.meter", 1000.0, MIN_SESSION_S - 1)
 
         driver._hass.async_create_task.assert_not_called()
 
@@ -218,7 +218,7 @@ class TestShortSessionsAreRefused:
         driver = _driver(hass)
         driver._hass = MagicMock()
 
-        driver._schedule_flow_sample("sensor.meter", 1000.0, MIN_SESSION_S + 1)
+        driver.schedule_flow_sample("sensor.meter", 1000.0, MIN_SESSION_S + 1)
 
         driver._hass.async_create_task.assert_called_once()
 
@@ -386,3 +386,37 @@ class TestThePressIsVisibleBeforeItsOutcome:
             await IrrigationController._open_valve(ctrl, "switch.valve")
 
         assert seen == [True, False]
+
+
+class TestTheSeamsAreThePublicOnes:
+    """Cross-object calls must go through public names, or a rename breaks silently.
+
+    Found by inspection, not by a failing test: the controller reached into
+    `driver._schedule_flow_sample`, and when that was made public the driver's
+    own call site kept the old name. Nothing failed, because the driver's
+    delivery loop is not the one production takes — so the test suite could not
+    see it. These assert the seam itself.
+    """
+
+    def test_the_driver_exposes_the_flow_sample_seam_publicly(self):
+        from never_dry.driver import ZoneDriver
+
+        assert hasattr(ZoneDriver, "schedule_flow_sample")
+        assert not hasattr(ZoneDriver, "_schedule_flow_sample")
+
+    def test_the_driver_calls_its_own_seam_by_the_public_name(self):
+        import inspect
+
+        from never_dry.driver import ZoneDriver
+
+        src = inspect.getsource(ZoneDriver._deliver_by_volume)
+        assert "self.schedule_flow_sample(" in src
+        assert "self._schedule_flow_sample(" not in src
+
+    def test_the_controller_does_not_reach_into_driver_privates(self):
+        import inspect
+
+        from never_dry import controller as controller_module
+
+        src = inspect.getsource(controller_module)
+        assert "driver._" not in src, "the controller must use the driver's public seams"

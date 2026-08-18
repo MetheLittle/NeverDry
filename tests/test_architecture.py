@@ -34,7 +34,22 @@ PACKAGE = pathlib.Path(__file__).resolve().parent.parent / "custom_components" /
 PURE_DOMAIN_MODULES = ("zone", "water_balance_model", "environment", "scheduler")
 
 #: The Home-Assistant-coupled layer. The domain must never import it.
-HA_LAYER_MODULES = ("sensor", "controller", "valve_operator", "config_flow", "diagnostics", "button", "driver")
+HA_LAYER_MODULES = (
+    "sensor",
+    "controller",
+    "valve_operator",
+    "config_flow",
+    "diagnostics",
+    "button",
+    "driver",
+    # Both hold Home Assistant state on behalf of the domain rules they feed:
+    # `session_flow` persists what deliveries measured, `reachability_watch`
+    # collects the silences that `environment.judge_fleet` weighs. Listed here
+    # so the domain cannot import them — the omission would have let a pure
+    # module reach the runtime through a module nobody had classified.
+    "session_flow",
+    "reachability_watch",
+)
 
 #: Domain modules the integration actually imports today. Move a name here in
 #: the same commit that wires it — the test below fails in both directions, so

@@ -293,10 +293,14 @@ Home Assistant runtime.
 `reachability_watch.py` supplies the numbers the judge consumes. It is
 deliberately the only part that touches Home Assistant.
 
-**The union is resolved through the registries**, exactly as sketched above:
-valve entity → entity registry → `device_id` → every entity of that device. The
-members are never inspected. A valve whose entity has no device degrades to
-watching itself — less signal, no error, no special case.
+**The number stays the driver's.** `Driver.silence_s()` resolves its own device
+through the registries — valve entity → `device_id` → every entity of that
+device — and answers how long the union has been quiet. The members are never
+inspected. A valve whose entity has no device degrades to watching itself: less
+signal, no error, no special case. `reachability_watch.py` only collects those
+numbers and hands the fleet to the judge, which keeps the split this note
+argued for: the measurement is the driver's, the judgement is the site's,
+because no valve can judge itself.
 
 **The floor is learned rather than configured.** Each hourly tick records how
 long a device has been quiet; when the device finally reports, that peak becomes

@@ -302,10 +302,14 @@ class IrrigationController:
         refusing to try on statistical grounds would turn a warning into an
         outage.
         """
-        valves = {name: zone.valve for name, zone in self._zones.items() if zone.valve}
-        if len(valves) < 2:
+        drivers = {
+            name: driver
+            for name, zone in self._zones.items()
+            if zone.valve and (driver := self._valve_operators.get(zone.valve)) is not None
+        }
+        if len(drivers) < 2:
             return  # nothing to compare against; the criterion needs siblings
-        verdicts = self._reachability.observe(valves)
+        verdicts = self._reachability.observe(drivers)
         now = time.monotonic()
         for zone_name, verdict in verdicts.items():
             zone = self._zones.get(zone_name)
@@ -1306,9 +1310,9 @@ class IrrigationController:
         later. The delivery has to return now regardless.
         """
         driver = self._driver_for(zone)
-        if driver is None or baseline is None or not hasattr(driver, "_schedule_flow_sample"):
+        if driver is None or baseline is None or not hasattr(driver, "schedule_flow_sample"):
             return
-        driver._schedule_flow_sample(meter_entity, baseline, session_s)
+        driver.schedule_flow_sample(meter_entity, baseline, session_s)
 
     async def _deliver_flow_rate(
         self,

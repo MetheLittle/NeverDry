@@ -42,10 +42,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from enum import StrEnum
-from time import monotonic
+from time import monotonic, time
 from typing import Any, ClassVar
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
@@ -1152,6 +1153,7 @@ class ZoneDriver(Driver):
         self._delivery_timeout_s = delivery_timeout_s
         self._auto_open_grace_s = auto_open_grace_s
         self._session_flow = SessionFlowTracker(hass, entity_id)
+        self._device_entities: tuple[str, ...] | None = None
         hass.async_create_task(self._session_flow.async_load())
 
     @property
@@ -1180,6 +1182,55 @@ class ZoneDriver(Driver):
             return
         self._session_flow.window.record(lpm)
         self._hass.async_create_task(self._session_flow.async_save())
+
+    def silence_s(self) -> float | None:
+        """Seconds since any entity of this actuator's device last reported.
+
+        The number the fleet judgement consumes, supplied here because the driver
+        is the only layer that knows which entities back this actuator — the
+        judgement itself belongs to the site, since no valve can judge itself.
+        See ``docs/design/valve-reachability.md``.
+
+        ``None`` when nothing can be read, which is not the same as "quiet".
+        """
+        freshest: float | None = None
+        for entity_id in self.device_entities():
+            state = self._hass.states.get(entity_id)
+            if state is None:
+                continue
+            reported = getattr(state, "last_reported", None) or state.last_updated
+            if reported is None:
+                continue
+            ts = reported.timestamp()
+            if freshest is None or ts > freshest:
+                freshest = ts
+        if freshest is None:
+            return None
+        return max(0.0, time() - freshest)
+
+    def device_entities(self) -> tuple[str, ...]:
+        """Every entity of this actuator's device, or the actuator alone.
+
+        Any of them reporting proves the device is on the mesh, so the union is
+        the signal and its members are never inspected. Resolved once and cached:
+        a device's entity set does not change between ticks in a way that matters.
+        """
+        if self._device_entities is None:
+            self._device_entities = self._resolve_device_entities()
+        return self._device_entities
+
+    def _resolve_device_entities(self) -> tuple[str, ...]:
+        """Registry walk: entity → device → every entity of that device."""
+        try:
+            registry = er.async_get(self._hass)
+            entry = registry.async_get(self._entity_id)
+            if entry is None or entry.device_id is None:
+                return (self._entity_id,)
+            siblings = er.async_entries_for_device(registry, entry.device_id, include_disabled_entities=False)
+            return tuple(e.entity_id for e in siblings) or (self._entity_id,)
+        except Exception:  # a registry hiccup must not silence the watch
+            _LOGGER.debug("Could not resolve the device of '%s'", self._entity_id, exc_info=True)
+            return (self._entity_id,)
 
     def record_meter_resolution(self, step: float) -> None:
         """Register a counter increment observed outside a delivery (a test)."""
@@ -1379,11 +1430,16 @@ class ZoneDriver(Driver):
 
         session_s = monotonic() - session_start
         await self.async_turn_off()
-        self._schedule_flow_sample(meter, baseline, session_s)
+        self.schedule_flow_sample(meter, baseline, session_s)
         return self._settle(liters, delivered, elapsed, reached_target)
 
-    def _schedule_flow_sample(self, meter: str, baseline: float, session_s: float) -> None:
+    def schedule_flow_sample(self, meter: str, baseline: float, session_s: float) -> None:
         """Arrange to read the meter once the session's late ticks have landed.
+
+        Public because the delivery loop lives in the controller: the driver owns
+        what it knows about its own actuator, and the caller that ran the session
+        is the only one holding the baseline and the elapsed time. Reaching into
+        a private method for this was the wrong seam.
 
         Deferred rather than awaited: the caller owes its result to the zone now,
         and ``SETTLE_DELAY_S`` of waiting would show up as a session that takes
