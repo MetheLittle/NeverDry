@@ -82,6 +82,21 @@ from .valve_notifier import NotificationKind, Severity, ValveNotifier
 
 _LOGGER = logging.getLogger(__name__)
 
+# ── Flow verification window (GH #173) ───────────────────────────────────
+# The time before a cumulative counter *can* move is resolution / flow rate, so
+# the window has to be derived per zone. These bound that derivation.
+#: Multiplier on the expected time to first increment, for jitter and reporting
+#: cadence. The counter may tick just after the theoretical instant.
+FLOW_VERIFY_MARGIN: float = 1.5
+#: Never wait less than this, whatever the arithmetic says.
+FLOW_VERIFY_MIN_S: float = 10.0
+#: Past this, the window stops being a guard: "commanded but dry" would take
+#: too long to notice, so verification is declared inapplicable instead.
+FLOW_VERIFY_MAX_S: float = 180.0
+#: Used until a delivery or a test reveals the meter's step. Deliberately more
+#: generous than the old 10 s constant, which is what failed in the field.
+FLOW_VERIFY_UNKNOWN_RESOLUTION_S: float = 90.0
+
 # ``volume_preset``: how long to wait for a smart valve to auto-open on a
 # ``number.set_value`` dose before we send an explicit open (idempotent).
 AUTO_OPEN_GRACE_S: float = 3.0
@@ -313,6 +328,14 @@ class Driver(abc.ABC):
         self._max_retries = max_retries
         self._backoff_s = backoff_s if backoff_s is not None else self.DEFAULT_BACKOFF_S
         self._flow_zero_threshold = flow_zero_threshold
+        # A rate sensor is compared against zero; a cumulative counter is only
+        # meaningful as a difference. Resolved once here, from the unit, by the
+        # same helper the delivery loop uses — the two must never disagree about
+        # what the sensor is.
+        self._flow_is_rate = flow_sensor_entity_id is not None and flow_utils.is_flow_rate_sensor(
+            hass, flow_sensor_entity_id
+        )
+        self._last_flow_level: float | None = None
         self._notifier = notifier
         # Static float or zero-arg callable re-evaluated at every open, so the
         # watchdog and hardware timer track the current deficit, not a snapshot.
@@ -717,29 +740,57 @@ class Driver(abc.ABC):
         )
 
     async def _attempt_leak_recovery(self) -> bool:
-        """Last-resort recovery from ``CLOSE_LEAK``: re-issue close, re-check flow."""
+        """Last-resort recovery from ``CLOSE_LEAK``: re-issue close, re-check flow.
+
+        On a cumulative counter the question is whether it is *still climbing*
+        after the second close, not whether its total is above a threshold. The
+        total is always above it — that reading is why closed valves were being
+        escalated as stuck open, with an integration-wide emergency stop behind
+        it (the number in those reports was the litre count, not a flow).
+        """
         _LOGGER.warning(
             "Driver '%s' CLOSE_LEAK detected — attempting recovery (direct close + recheck)",
             self._name,
         )
-        await self._call_actuator(on=False)
-        await asyncio.sleep(self._fsm_config.leak_timeout_s)
-
         if self._flow_sensor_entity_id is None:
             return False
+        before = self._read_flow_value()
+        await self._call_actuator(on=False)
+        await asyncio.sleep(self._fsm_config.leak_timeout_s)
+        after = self._read_flow_value()
+        if after is None:
+            return False
+
+        if self._flow_is_rate:
+            recovered = after <= self._flow_zero_threshold
+            detail = f"rate={after:.3f}"
+        elif before is None:
+            # No before-reading means no basis for comparison. Claiming recovery
+            # here would be the same fallacy the counter bug rested on: silence
+            # is not proof that the water stopped.
+            recovered = False
+            detail = f"counter {after} L, no baseline to compare"
+        else:
+            recovered = after <= before
+            detail = f"counter {before}→{after} L"
+
+        if recovered:
+            _LOGGER.info("Driver '%s' leak recovery succeeded (%s)", self._name, detail)
+        else:
+            _LOGGER.error("Driver '%s' leak recovery failed (%s)", self._name, detail)
+        return recovered
+
+    def _read_flow_value(self) -> float | None:
+        """Current numeric reading of the flow sensor, or ``None`` if unusable."""
+        if self._flow_sensor_entity_id is None:
+            return None
         state = self._hass.states.get(self._flow_sensor_entity_id)
         if state is None:
-            return False
+            return None
         try:
-            flow = float(state.state)
+            return float(state.state)
         except (ValueError, TypeError):
-            return False
-        recovered = flow <= self._flow_zero_threshold
-        if recovered:
-            _LOGGER.info("Driver '%s' leak recovery succeeded (flow=%.3f)", self._name, flow)
-        else:
-            _LOGGER.error("Driver '%s' leak recovery failed (flow=%.3f)", self._name, flow)
-        return recovered
+            return None
 
     async def _escalate_stuck_open(self) -> None:
         """Trigger integration-wide emergency stop + CRITICAL notification."""
@@ -920,7 +971,45 @@ class Driver(abc.ABC):
             seconds = self._latency.open_timeout_s()
         elif name == TimerName.CLOSE and len(self._latency.close._samples) >= MIN_SAMPLES:
             seconds = self._latency.close_timeout_s()
+        elif name == TimerName.FLOW:
+            seconds, verdict = self.flow_verify_window()
+            if verdict is not None:
+                self._timers[name] = self._hass.async_create_task(
+                    self._timer(name, seconds, event=ValveEvent.FLOW_UNVERIFIABLE, note=verdict)
+                )
+                return
         self._timers[name] = self._hass.async_create_task(self._timer(name, seconds))
+
+    def flow_verify_window(self) -> tuple[float, str | None]:
+        """Seconds to wait for the first sign of flow, and why if it is hopeless.
+
+        The base actuator has no meter of its own, so it keeps the configured
+        constant. :class:`ZoneDriver` overrides this with a window derived from
+        the zone.
+        """
+        return self._fsm_config.flow_verify_timeout_s, None
+
+    async def _timer(
+        self,
+        name: TimerName,
+        seconds: float,
+        *,
+        event: ValveEvent | None = None,
+        note: str | None = None,
+    ) -> None:
+        """Background task: sleep, then dispatch a ``TIMEOUT_*`` (or ``event``)."""
+        try:
+            await asyncio.sleep(seconds)
+            if note:
+                _LOGGER.info("Driver '%s': %s", self._name, note)
+            await self._dispatch(event or _TIMEOUT_EVENT_FOR_TIMER[name])
+        except asyncio.CancelledError:
+            # Expected, and the normal way a timer ends: `_cancel_timer` cancels
+            # this task whenever the event it guards arrives first — a valve that
+            # confirms before its timeout, a session that stops early. Swallowing
+            # it here keeps cancellation from surfacing as a spurious error; a
+            # real timeout still dispatches its event on the line above.
+            pass
 
     def _cancel_timer(self, name: TimerName) -> None:
         """Cancel ``name`` if it is running; safe to call when absent."""
@@ -932,19 +1021,6 @@ class Driver(abc.ABC):
         """Cancel every active timer for this actuator."""
         for name in list(self._timers):
             self._cancel_timer(name)
-
-    async def _timer(self, name: TimerName, seconds: float) -> None:
-        """Background task: sleep, then dispatch the matching ``TIMEOUT_*`` event."""
-        try:
-            await asyncio.sleep(seconds)
-            await self._dispatch(_TIMEOUT_EVENT_FOR_TIMER[name])
-        except asyncio.CancelledError:
-            # Expected, and the normal way a timer ends: `_cancel_timer` cancels
-            # this task whenever the event it guards arrives first — a valve that
-            # confirms before its timeout, a session that stops early. Swallowing
-            # it here keeps cancellation from surfacing as a spurious error; a
-            # real timeout still dispatches its event on the line above.
-            pass
 
     # ── HA state listeners ───────────────────────────────────────────────
 
@@ -995,18 +1071,34 @@ class Driver(abc.ABC):
         )
 
     async def _handle_flow_state(self, event) -> None:
-        """Map a flow-sensor state change to OBS_FLOW_POSITIVE/OBS_FLOW_ZERO."""
+        """Map a flow-sensor state change to OBS_FLOW_POSITIVE/OBS_FLOW_ZERO.
+
+        The sensor may be a rate or a cumulative counter, and the two cannot be
+        read the same way. A rate is compared against zero directly. A counter
+        is a level: comparing 646 L against a 0.05 threshold says "flow" forever
+        after the first litre, which is what made a shut valve look like it was
+        still leaking. What matters on a counter is whether it *moved*.
+        """
         new_state = event.data.get("new_state")
         if new_state is None:
             return
         try:
-            flow = float(new_state.state)
+            value = float(new_state.state)
         except (ValueError, TypeError):
             return
-        if flow > self._flow_zero_threshold:
-            await self._dispatch(ValveEvent.OBS_FLOW_POSITIVE)
+
+        if self._flow_is_rate:
+            moving = value > self._flow_zero_threshold
         else:
-            await self._dispatch(ValveEvent.OBS_FLOW_ZERO)
+            previous = self._last_flow_level
+            self._last_flow_level = value
+            if previous is None:
+                # First reading of a counter is a level, not a movement: it says
+                # nothing about now. Wait for a second one before judging.
+                return
+            moving = value > previous
+
+        await self._dispatch(ValveEvent.OBS_FLOW_POSITIVE if moving else ValveEvent.OBS_FLOW_ZERO)
 
 
 # ── Zone actuator (the model's ``ZoneDriver``) ─────────────────────────────
@@ -1088,6 +1180,62 @@ class ZoneDriver(Driver):
             return
         self._session_flow.window.record(lpm)
         self._hass.async_create_task(self._session_flow.async_save())
+
+    def record_meter_resolution(self, step: float) -> None:
+        """Register a counter increment observed outside a delivery (a test)."""
+        if self._session_flow.observe_step(step):
+            self._hass.async_create_task(self._session_flow.async_save())
+
+    @property
+    def meter_resolution_l(self) -> float | None:
+        """Smallest counter increment seen, or ``None`` before any was."""
+        return self._session_flow.resolution_l
+
+    def time_to_first_tick_s(self) -> float | None:
+        """Seconds before the meter *can* move: resolution ÷ flow rate.
+
+        The quantity behind both the verification window and the shortest test
+        worth running. It needs no measurement of its own — the design rate is
+        always present, so a zone can answer this before it has ever run.
+        """
+        resolution = self._session_flow.resolution_l
+        rate = self.effective_flow_lpm
+        if not resolution or rate <= 0:
+            return None
+        return resolution / rate * 60.0
+
+    def flow_verify_window(self) -> tuple[float, str | None]:
+        """How long to wait for the first sign of flow, and why if it is hopeless.
+
+        A fixed window cannot work, because the time before a counter *can*
+        move is a property of the installation: resolution over flow rate. At
+        1 L and 1.2 L/min that is 50 s, and the constant was 10 — the check
+        could not pass however healthy the valve was (GH #173).
+
+        Making the window merely generous is not the fix either. A long window
+        means "valve commanded, no water arriving" takes minutes to notice, and
+        that detection is a safety layer. So the window is derived, and when the
+        derivation exceeds what is still useful as a guard, the verification is
+        declared inapplicable instead of being stretched: on a meter stepping in
+        28 L units, no window both passes on a healthy valve and catches a dead
+        one, and pretending otherwise only produces false failures.
+        """
+        expected = self.time_to_first_tick_s()
+        if expected is None:
+            # Resolution unknown (no delivery or test has revealed a step yet).
+            # Be conservative rather than strict: the constant is what caused the
+            # field failures, and a false ACTUATION_FAILED closes a working zone.
+            return FLOW_VERIFY_UNKNOWN_RESOLUTION_S, None
+        window = expected * FLOW_VERIFY_MARGIN
+        if window > FLOW_VERIFY_MAX_S:
+            return (
+                FLOW_VERIFY_MAX_S,
+                f"flow verification not applicable — the meter needs about {expected:.0f}s "
+                f"to register its first {self._session_flow.resolution_l:g} L step at "
+                f"{self.effective_flow_lpm:.2f} L/min, longer than any useful guard. "
+                f"Proceeding; flow remains an observer, not a gate",
+            )
+        return max(window, FLOW_VERIFY_MIN_S), None
 
     @property
     def session_flow_diagnostics(self) -> dict[str, Any]:
@@ -1195,6 +1343,7 @@ class ZoneDriver(Driver):
         # that one when the counter resets, and a rebased baseline would turn the
         # reset into a phantom volume.
         baseline = initial
+        last_reading = initial
         session_start = monotonic()
 
         delivered = 0.0
@@ -1211,6 +1360,13 @@ class ZoneDriver(Driver):
             current = flow_utils.read_volume_liters(self._hass, meter)
             if current is None:
                 continue
+            if last_reading is not None and current > last_reading:
+                # Every delivery teaches the meter's step for free. The smallest
+                # increment ever seen is its limit of detection, and that number
+                # is what makes the flow-verification window derivable without
+                # asking the user to run a test.
+                self._session_flow.observe_step(current - last_reading)
+            last_reading = current
             delivered = current - initial
             if delivered < 0:
                 initial = 0.0

@@ -120,7 +120,7 @@ from .const import (
 from .controller import IrrigationController
 from .environment import DEFAULT_LATITUDE, Environment, RainSensorType
 from .services import async_setup_services
-from .unit_convert import LPM_TO_GPH, LPM_TO_LPH
+from .unit_convert import LITERS_TO_GALLONS, LPM_TO_GPH, LPM_TO_LPH
 from .valve_fsm import FailureKind, ValveState
 from .water_balance_model import (
     MODEL_CATALOGUE,
@@ -511,6 +511,7 @@ def _create_entities(
         entities.append(ZoneLastVolumeSensor(zone_sensor, zone_device))
         entities.append(ZoneFlowRateSensor(zone_sensor, zone_device))
         entities.append(ZoneMeasuredFlowSensor(zone_sensor, zone_device))
+        entities.append(ZoneMeterResolutionSensor(zone_sensor, zone_device))
         entities.append(ZoneDurationSensor(zone_sensor, zone_device))
         entities.append(ZoneLastDurationSensor(zone_sensor, zone_device))
         entities.append(ZoneKcSensor(zone_sensor, zone_device))
@@ -3178,6 +3179,64 @@ class ZoneMeasuredFlowSensor(_ZoneTextSensor):
                     "notes": test.get("notes"),
                 }
             )
+        return attrs
+
+
+class ZoneMeterResolutionSensor(_ZoneTextSensor):
+    """The smallest increment this zone's water meter has ever reported.
+
+    Its limit of detection, learned by watching deliveries — no test required.
+    Exposed rather than kept internal because it is the number that decides how
+    long the integration must wait before a still counter means anything, and a
+    control whose basis is invisible cannot be argued with when it misfires.
+
+    With a series behind it, it also reports on the meter itself: a resolution
+    that suddenly coarsens is a counter that has started skipping.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, zone_sensor, device_info=None):
+        super().__init__(
+            zone_sensor,
+            "Water meter resolution",
+            "mdi:ruler",
+            "meter_resolution_zone",
+            device_info,
+            diagnostic=True,
+        )
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return UnitOfVolume.GALLONS if self._is_imperial else UnitOfVolume.LITERS
+
+    @property
+    def _is_imperial(self) -> bool:
+        units = getattr(getattr(self, "hass", None), "config", None)
+        units = getattr(units, "units", None)
+        return getattr(units, "volume_unit", None) == UnitOfVolume.GALLONS
+
+    @property
+    def native_value(self) -> float | None:
+        """`None` until the counter has been seen to move at least once."""
+        operator = getattr(self._zone_sensor, "_operator", None)
+        resolution = getattr(operator, "meter_resolution_l", None) if operator else None
+        if not resolution:
+            return None
+        return round(resolution * LITERS_TO_GALLONS if self._is_imperial else resolution, 3)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """What the resolution costs in waiting, which is why it is published."""
+        operator = getattr(self._zone_sensor, "_operator", None)
+        if operator is None:
+            return {}
+        attrs: dict = {}
+        if (first_tick := getattr(operator, "time_to_first_tick_s", lambda: None)()) is not None:
+            attrs["time_to_first_tick_s"] = round(first_tick, 1)
+            # The shortest supervised test that can see anything at all: one
+            # increment proves the valve opened, several are needed to measure.
+            attrs["shortest_useful_test_min"] = max(1, math.ceil(first_tick * 5 / 60))
         return attrs
 
 

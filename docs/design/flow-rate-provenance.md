@@ -41,8 +41,10 @@ If the counter moves, water is flowing — that inference is sound. If the
 counter does not move, nothing follows: the flow may be below the meter's
 limit of detection, or the meter may simply not have reported yet.
 
-This asymmetry is not a subtlety, it is the whole safety argument. Two live
-defects come from reading silence as evidence of absence:
+This asymmetry is not a subtlety, it is the whole safety argument. Two defects
+came from reading silence as evidence of absence; both are fixed, and both are
+worth keeping on the record because the reasoning that produced them is easy to
+repeat:
 
 - **Open verification.** The FSM waits a fixed 10 s (`valve_fsm.py`,
   `flow_verify_timeout_s`) for flow to appear, then declares `ACTUATION_FAILED`.
@@ -55,8 +57,16 @@ defects come from reading silence as evidence of absence:
   whole integration. On 2026-08-18 this fired on a valve that HA recorded as
   closed twenty seconds earlier.
 
-The rule the code must follow: **a still meter qualifies an action, it never
+The rule the code follows now: **a still meter qualifies an action, it never
 refuses one.** Absence of evidence is not evidence of absence.
+
+Concretely: the verification window is derived per zone from
+`resolution / flow rate`, and where that exceeds what is still useful as a
+guard the check is declared *not applicable* — a distinct FSM event
+(`FLOW_UNVERIFIABLE`) that lets the run proceed with flow demoted to observer,
+rather than a failure that closes a working valve. On the closing side, a
+cumulative counter is judged on whether it is **still climbing** after a second
+close, never on whether its total exceeds a threshold.
 
 ## What each one is for
 
@@ -201,13 +211,34 @@ The last rename matters more than it looks: the entity reports **litres**, not a
 rate, and calling it a *flow meter* is what made it plausible to compare its
 reading against a rate threshold — the defect behind the false leak reports.
 
+## An observed model of the installation
+
+Three quantities are now learned per valve rather than declared, and each one
+replaces a constant that the field had already refuted:
+
+| Learned | Replaces | Used for |
+|---|---|---|
+| Confirmation latency (`ValveLatencyTracker`) | fixed open/close timeouts | how long to wait for the switch to answer |
+| Flow rate (`SessionFlowWindow`) | the design rate, for planning | durations, timeout scaling, credited estimates |
+| Meter resolution (`resolution_l`) | the assumption that a counter ticks promptly | the flow-verification window, and whether a test is practicable |
+
+Together they are a measured model of this particular controller, valve and
+meter — more accurate than the ratings precisely because it is observed rather
+than declared. Every control that used to rest on a constant now rests on a
+number the installation produced itself, and each is published so the basis of
+a decision is visible when that decision misfires.
+
+The resolution is the newest of the three and the one that costs nothing: every
+delivery reveals counter increments, and the smallest ever seen is the meter's
+limit of detection. No test is required, though a supervised test contributes
+its observed step too.
+
 ## Open
 
-- **The one-way-witness rule is documented here but not yet enforced in the
-  FSM.** Open verification and leak recovery still read a cumulative counter as
-  if it were a rate — the two live defects described above. This is the next
-  correction, and the most important one.
 - Notifying when historical ÷ design falls below a fraction of the zone's own
   baseline. The ratio is published today; nothing watches it.
 - Stratifying the historical samples by hour of day, to remove the mains-supply
   confounder described under *Known limits*.
+- Deriving the supervised test's suggested duration from `resolution / flow`
+  and offering it in the UI; today the figure is published as an attribute
+  (`shortest_useful_test_min`) but the slider does not use it.

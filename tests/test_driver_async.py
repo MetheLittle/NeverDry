@@ -78,6 +78,37 @@ def _zone_driver(hass, *, entity_id="switch.valve", flow_rate=60.0, **kwargs) ->
     )
 
 
+class _Meter:
+    """A settable meter reading, so a test can move it at a chosen moment."""
+
+    def __init__(self, value: str, unit: str) -> None:
+        self.value = value
+        self.unit = unit
+
+    def set(self, value: str) -> None:
+        self.value = value
+
+
+def _wire_meter(hass, value: str, *, unit: str) -> _Meter:
+    """Make sensor.flow read `value` with an explicit unit, and return a handle.
+
+    The unit is what tells the driver whether it is holding a rate or a
+    cumulative counter, and the two are judged by different questions. The
+    handle lets a test advance the counter mid-recovery, which is the only way
+    to distinguish a real leak from a meter that simply has a large total.
+    """
+    meter = _Meter(value, unit)
+
+    def states_get(entity_id):
+        state = MagicMock()
+        state.state = meter.value
+        state.attributes = {"unit_of_measurement": meter.unit}
+        return state
+
+    hass.states.get = MagicMock(side_effect=states_get)
+    return meter
+
+
 def _state_event(value: str) -> MagicMock:
     event = MagicMock()
     event.data = {"new_state": MagicMock(state=value)}
@@ -669,25 +700,53 @@ class TestLeakRecovery:
 
     async def test_it_re_issues_the_close_before_judging(self, hass):
         """The first command may simply have been lost on the wire."""
+        _wire_meter(hass, "0.0", unit="L/min")
         driver = _zone_driver(hass, flow_meter_sensor="sensor.flow")
-        hass.states.get = MagicMock(return_value=MagicMock(state="0.0"))
         await driver._attempt_leak_recovery()
         assert len(_calls_to(hass, "switch", "turn_off")) == 1
 
     async def test_flow_back_to_zero_is_recovery(self, hass):
+        _wire_meter(hass, "0.0", unit="L/min")
         driver = _zone_driver(hass, flow_meter_sensor="sensor.flow")
-        hass.states.get = MagicMock(return_value=MagicMock(state="0.0"))
         assert await driver._attempt_leak_recovery() is True
 
     async def test_water_still_running_is_not(self, hass):
+        """A rate sensor still reading above zero means water is moving."""
+        _wire_meter(hass, "4.2", unit="L/min")
         driver = _zone_driver(hass, flow_meter_sensor="sensor.flow")
-        hass.states.get = MagicMock(return_value=MagicMock(state="4.2"))
+        assert await driver._attempt_leak_recovery() is False
+
+    async def test_a_counter_that_stopped_climbing_is_recovery(self, hass):
+        """The defect this guards: a counter's total is always above any threshold.
+
+        Field case, 2026-08-18: a valve HA had recorded as closed was escalated
+        as stuck open because the meter read 646 — its lifetime litre count, not
+        a flow. Read as a level it never returns to zero, so recovery could never
+        succeed and every close risked an integration-wide emergency stop.
+        """
+        _wire_meter(hass, "646.0", unit="L")
+        driver = _zone_driver(hass, flow_meter_sensor="sensor.flow")
+        assert await driver._attempt_leak_recovery() is True
+
+    async def test_a_counter_still_climbing_is_a_real_leak(self, hass):
+        """Movement after the second close is the only honest evidence of a leak."""
+        meter = _wire_meter(hass, "646.0", unit="L")
+        driver = _zone_driver(hass, flow_meter_sensor="sensor.flow")
+        # Water keeps running while we re-issue the close: the counter advances.
+        driver._call_actuator = AsyncMock(side_effect=lambda **kw: meter.set("652.0"))
+        assert await driver._attempt_leak_recovery() is False
+
+    async def test_a_counter_with_no_baseline_is_not_recovery(self, hass):
+        """No before-reading is no basis for a verdict, so it is not recovery."""
+        meter = _wire_meter(hass, "unavailable", unit="L")
+        driver = _zone_driver(hass, flow_meter_sensor="sensor.flow")
+        driver._call_actuator = AsyncMock(side_effect=lambda **kw: meter.set("646.0"))
         assert await driver._attempt_leak_recovery() is False
 
     async def test_a_trickle_under_the_threshold_counts_as_closed(self, hass):
         """The threshold exists because a meter at rest rarely reads exactly zero."""
+        _wire_meter(hass, "0.4", unit="L/min")
         driver = _zone_driver(hass, flow_meter_sensor="sensor.flow", flow_zero_threshold=0.5)
-        hass.states.get = MagicMock(return_value=MagicMock(state="0.4"))
         assert await driver._attempt_leak_recovery() is True
 
     async def test_no_meter_means_no_evidence_of_recovery(self, hass):

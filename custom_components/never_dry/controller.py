@@ -700,6 +700,10 @@ class IrrigationController:
         if driver is None or not hasattr(driver, "record_flow_sample"):
             return
         driver.record_flow_sample(lpm)
+        # The step the test observed is the meter's limit of detection, and it
+        # is what makes the flow-verification window derivable for this zone.
+        if result.smallest_step:
+            driver.record_meter_resolution(result.smallest_step)
         _LOGGER.info(
             "Zone '%s': supervised test filed as a historical flow sample — %.0f L/h",
             zone.zone_name,

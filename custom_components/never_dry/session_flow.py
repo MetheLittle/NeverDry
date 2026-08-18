@@ -98,12 +98,35 @@ class SessionFlowWindow:
 
 
 class SessionFlowTracker:
-    """Persists one zone's learned flow rate across reloads and restarts."""
+    """Persists one zone's learned flow rate and meter resolution.
+
+    The resolution rides along with the flow rate because the two are only
+    useful together: ``resolution / flow`` is the time before the counter can
+    possibly move, which is what a flow-verification window has to be built
+    from and what decides whether a supervised test is even practicable.
+    """
 
     def __init__(self, hass: HomeAssistant, switch_entity_id: str) -> None:
         safe_id = switch_entity_id.replace(".", "_").replace("/", "_")
         self._store: Store = Store(hass, _STORAGE_VERSION, f"never_dry.session_flow.{safe_id}")
         self.window = SessionFlowWindow()
+        #: Smallest non-zero counter increment ever seen — the meter's limit of
+        #: detection. Learned by watching deliveries, so it needs no test.
+        self.resolution_l: float | None = None
+
+    def observe_step(self, step: float) -> bool:
+        """Record a counter increment; returns True when it lowers the estimate.
+
+        Takes the minimum rather than an average: a counter that reports 1 L
+        sometimes and 3 L other times has a resolution of 1 L and a cadence
+        that skips, and the smallest step is the one that bounds detection.
+        """
+        if step <= 0:
+            return False
+        if self.resolution_l is None or step < self.resolution_l:
+            self.resolution_l = step
+            return True
+        return False
 
     async def async_load(self) -> None:
         """Load persisted samples from HA storage."""
@@ -115,13 +138,18 @@ class SessionFlowTracker:
                 self.window.record(float(s))
             except (TypeError, ValueError):
                 continue
+        try:
+            if (res := data.get("resolution_l")) is not None:
+                self.resolution_l = float(res)
+        except (TypeError, ValueError):
+            pass
 
     async def async_save(self) -> None:
         """Persist the current window to HA storage."""
-        await self._store.async_save({"samples": list(self.window._samples)})
+        await self._store.async_save({"samples": list(self.window._samples), "resolution_l": self.resolution_l})
 
     def median_lpm(self) -> float | None:
         return self.window.median_lpm()
 
     def as_dict(self) -> dict[str, Any]:
-        return self.window.as_dict()
+        return {**self.window.as_dict(), "meter_resolution_l": self.resolution_l}
