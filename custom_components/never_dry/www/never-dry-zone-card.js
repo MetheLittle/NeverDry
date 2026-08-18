@@ -43,6 +43,7 @@ const I18N = {
     warn_no_guard_flow: "No design flow rate — the expected duration is unknown",
     designFlow: "Design flow (emitters)",
     measuredFlow: "Measured flow (real)",
+    awaitingValve: "opening the valve…",
     flowLearning: "learning",
     ofDesign: "of design",
     warn_valve_unreachable: "Valve not responding — check the radio link or the batteries",
@@ -98,6 +99,7 @@ const I18N = {
     warn_no_guard_flow: "Nessuna portata di progetto — la durata prevista è ignota",
     designFlow: "Portata di progetto (erogatori)",
     measuredFlow: "Portata misurata (reale)",
+    awaitingValve: "sto aprendo la valvola…",
     flowLearning: "in apprendimento",
     ofDesign: "del progetto",
     warn_valve_unreachable: "Valvola non raggiungibile — controlla il collegamento radio o le batterie",
@@ -785,6 +787,14 @@ class NeverDryZoneCard extends HTMLElement {
       : valveMeta(vState);
     const vLabel = notHeardFromYet ? t(hass, "waitingForValve") : valveStateLabel(hass, vState);
     chips.push(this._chip(vm.icon, `${t(hass, "valve")}: ${vLabel}`, vm.color));
+
+    // Command in flight — the press has been taken, the valve has not answered.
+    // Shown before "irrigating" because it is what precedes it, and because it
+    // is the state a failed open never leaves: without it, 48 s of retries look
+    // like a button that did nothing.
+    if (a.awaiting_valve === true) {
+      chips.push(this._chip("mdi:progress-clock", t(hass, "awaitingValve"), "var(--info-color, #2196f3)"));
+    }
 
     // Irrigating — only when active.
     if (a.irrigating === true) {

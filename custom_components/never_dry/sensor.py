@@ -1834,6 +1834,7 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._hw_max_duration_topic: str | None = zone_config.get(CONF_ZONE_HW_MAX_DURATION_TOPIC)
         self._hw_max_duration_payload: str = zone_config.get(CONF_ZONE_HW_MAX_DURATION_PAYLOAD, "{value}")
         self._irrigating = False
+        self._awaiting_valve = False
         self._no_guard_flow_warned = False
         # Reachability grace: when this zone was built, and whether its valve
         # has ever been seen alive. Monotonic, so a clock change cannot
@@ -2501,6 +2502,17 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         """True if this zone is currently being irrigated."""
         return self._irrigating
 
+    def set_awaiting_valve(self, state: bool) -> None:
+        """Mark that a valve command has been issued and has not yet resolved.
+
+        Between pressing *Irrigate* and the valve confirming, nothing on the
+        card changed: a zone whose valve took 48 s to give up looked exactly
+        like a button that did nothing (field, 'Giardino Pino', 2026-08-18).
+        The wait is the part worth showing — it is also the part that ends in
+        a failure often enough to matter.
+        """
+        self._awaiting_valve = state
+
     def set_irrigating(self, state: bool) -> None:
         """Set the irrigating state (called by controller)."""
         if state and not self._irrigating:
@@ -2640,6 +2652,7 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             "duration_s": self.duration_s,
             "deficit_mm": round(self._zone_deficit, 2),
             "irrigating": self._irrigating,
+            "awaiting_valve": self._awaiting_valve,
         }
         if self._delivery_mode != DELIVERY_MODE_ESTIMATED_FLOW:
             # Only where the timeout is actually the closing criterion: in
@@ -2740,6 +2753,7 @@ class ZoneDeficitSensor(SensorEntity):
         attrs = {
             "flow_rate_lpm": self._zone_sensor._flow_rate,
             "irrigating": self._zone_sensor._irrigating,
+            "awaiting_valve": self._zone_sensor._awaiting_valve,
         }
         if self._zone_sensor._last_irrigated:
             attrs["last_session_duration_s"] = self._zone_sensor._last_session_duration_s

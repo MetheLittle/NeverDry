@@ -1425,6 +1425,28 @@ class IrrigationController:
         """
         self._active_valve = entity_id
         _LOGGER.info("Attempting valve open: '%s'", entity_id)
+        # Announce the attempt before it can fail. Opening a valve is not
+        # instantaneous and does not always succeed: a sleeping Zigbee valve
+        # spends the better part of a minute in retries, and until now the card
+        # said nothing for that whole time — indistinguishable from a button
+        # that ignored the press.
+        zone = self._zone_for_valve(entity_id)
+        if zone is not None:
+            zone.set_awaiting_valve(True)
+            zone.async_write_ha_state()
+        try:
+            return await self._open_valve_inner(entity_id)
+        finally:
+            if zone is not None:
+                zone.set_awaiting_valve(False)
+                zone.async_write_ha_state()
+
+    def _zone_for_valve(self, entity_id: str):
+        """The zone driving this valve entity, if any."""
+        return next((z for z in self._zones.values() if z.valve == entity_id), None)
+
+    async def _open_valve_inner(self, entity_id: str) -> bool:
+        """Issue the open command and report whether the valve confirmed."""
         operator = self._valve_operators.get(entity_id)
         if operator is None:
             await _valve_call(self._hass, entity_id, on=True)

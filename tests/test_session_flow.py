@@ -337,3 +337,52 @@ class TestTheDriverIsWiredWithWhatItNeeds:
         driver._flow_rate_lpm = 0.0
         driver._session_flow.resolution_l = 1.0
         assert driver.time_to_first_tick_s() is None
+
+
+class TestThePressIsVisibleBeforeItsOutcome:
+    """A valve command announces itself, so a slow open is not a dead button.
+
+    Field, 2026-08-18: a sleeping Zigbee valve spent 48 s in retries before
+    failing. For all of that time the card was unchanged, which is exactly
+    what a press that went nowhere looks like.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_zone_is_flagged_while_the_valve_is_being_opened(self):
+        from never_dry.controller import IrrigationController
+
+        zone = MagicMock()
+        zone.valve = "switch.valve"
+        seen = []
+        zone.set_awaiting_valve = lambda v: seen.append(v)
+
+        ctrl = IrrigationController.__new__(IrrigationController)
+        ctrl._zones = {"z": zone}
+        ctrl._active_valve = None
+        ctrl._hass = MagicMock()
+        ctrl._open_valve_inner = AsyncMock(return_value=True)
+
+        await IrrigationController._open_valve(ctrl, "switch.valve")
+
+        assert seen == [True, False], "the flag must be raised before the attempt and cleared after"
+
+    @pytest.mark.asyncio
+    async def test_the_flag_is_cleared_even_when_the_open_fails(self):
+        """A failed open is precisely when a stuck flag would mislead most."""
+        from never_dry.controller import IrrigationController
+
+        zone = MagicMock()
+        zone.valve = "switch.valve"
+        seen = []
+        zone.set_awaiting_valve = lambda v: seen.append(v)
+
+        ctrl = IrrigationController.__new__(IrrigationController)
+        ctrl._zones = {"z": zone}
+        ctrl._active_valve = None
+        ctrl._hass = MagicMock()
+        ctrl._open_valve_inner = AsyncMock(side_effect=RuntimeError("radio down"))
+
+        with pytest.raises(RuntimeError):
+            await IrrigationController._open_valve(ctrl, "switch.valve")
+
+        assert seen == [True, False]
