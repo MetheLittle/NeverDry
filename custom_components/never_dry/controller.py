@@ -1068,24 +1068,87 @@ class IrrigationController:
         return estimate
 
     async def _deliver_estimated_flow(self, zone) -> float:
-        """Open valve, wait calculated duration, close valve."""
+        """Open the valve, wait the calculated duration, close it.
+
+        The duration is the dose here: the run always stops on the clock. What
+        the *meter* decides, when the zone has one, is how much water is then
+        credited — and the two are separate questions that used to be answered
+        by the same setting.
+
+        Crediting the planned volume back was tautological: it returned the
+        question as its own answer, so the deficit settled to zero whatever came
+        out of the ground. On a zone delivering 57% of its design rate — the gap
+        measured on this installation — the model believed the debt was paid
+        while more than a third of the water had never arrived. It also kept the
+        error alive, because without a measurement the flow rate can never be
+        learned, and the unlearned rate produces the same wrong volume next time.
+
+        So: if a meter is configured, the delta across the run is the answer;
+        otherwise the estimate stands, and a zone without a meter behaves
+        exactly as before.
+        """
         duration = zone.duration_s
         if duration <= 0:
             return 0.0
+
+        meter = zone.flow_meter_sensor
+        baseline = self._read_volume_liters(meter) if meter else None
 
         if not await self._open_valve(zone.valve):
             return 0.0
         zone.set_irrigating(True)
         zone.async_write_ha_state()
 
+        session_start = time.monotonic()
         elapsed = await self._wait_with_stop_check(duration, valve_entity=zone.valve, zone=zone)
+        session_s = time.monotonic() - session_start
 
         await self._close_valve(zone.valve)
         zone.set_irrigating(False)
         zone.async_write_ha_state()
-        # Credit the proportional fraction of planned volume based on actual
-        # elapsed time — preserves partial delivery data on emergency stop.
-        return zone.volume_liters * elapsed / duration
+
+        # Proportional to elapsed time, so an emergency stop still credits what
+        # ran. This is the fallback, not the answer, whenever a meter exists.
+        estimated = zone.volume_liters * elapsed / duration
+        if baseline is None:
+            return estimated
+
+        # The run also becomes a flow-rate sample, which is what eventually makes
+        # the estimate above unnecessary. Deferred inside the driver so the late
+        # ticks land first; the figure returned here cannot wait for them, and may
+        # therefore understate the volume by at most one counter step.
+        self._schedule_flow_sample(zone, meter, baseline, session_s)
+
+        current = self._read_volume_liters(meter)
+        if current is None:
+            _LOGGER.warning(
+                "Zone '%s': meter '%s' unreadable at close — crediting the estimate (%.1fL)",
+                zone.zone_name,
+                meter,
+                estimated,
+            )
+            return estimated
+        measured = current - baseline
+        if measured <= 0:
+            # Either nothing moved or the counter reset. A zone that ran with the
+            # valve open and measured nothing is far more likely a stalled meter
+            # than a dry pipe, so the estimate keeps the deficit settling.
+            _LOGGER.warning(
+                "Zone '%s': meter moved %.1fL over %.0fs with the valve open — crediting the estimate (%.1fL)",
+                zone.zone_name,
+                measured,
+                session_s,
+                estimated,
+            )
+            return estimated
+
+        _LOGGER.info(
+            "Zone '%s': delivered %.1fL measured by the meter (the time-based estimate was %.1fL)",
+            zone.zone_name,
+            measured,
+            estimated,
+        )
+        return measured
 
     async def _deliver_volume_preset(self, zone) -> float:
         """Arm the smart-valve dose, ensure it opens, wait for self-close.

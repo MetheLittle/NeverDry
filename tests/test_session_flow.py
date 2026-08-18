@@ -420,3 +420,91 @@ class TestTheSeamsAreThePublicOnes:
 
         src = inspect.getsource(controller_module)
         assert "driver._" not in src, "the controller must use the driver's public seams"
+
+
+class TestEstimatedFlowCreditsTheMeterWhenThereIsOne:
+    """The clock decides when to stop; the meter decides how much was delivered.
+
+    Field case, Melograno 2026-08-18: a zone in `estimated_flow` with a meter
+    configured credited `planned_volume * elapsed / duration` — the question
+    returned as its own answer — so the deficit settled to zero whatever came
+    out of the ground.
+    """
+
+    def _controller(self, zone, readings):
+        from never_dry.controller import IrrigationController
+
+        ctrl = IrrigationController.__new__(IrrigationController)
+        ctrl._hass = MagicMock()
+        ctrl._zones = {"z": zone}
+        ctrl._active_valve = None
+        ctrl._valve_operators = {}
+        ctrl._open_valve = AsyncMock(return_value=True)
+        ctrl._close_valve = AsyncMock()
+        ctrl._wait_with_stop_check = AsyncMock(return_value=zone.duration_s)
+        ctrl._schedule_flow_sample = MagicMock()
+        seq = list(readings)
+        ctrl._read_volume_liters = MagicMock(side_effect=lambda m: seq.pop(0) if len(seq) > 1 else seq[0])
+        return ctrl
+
+    def _zone(self, meter="sensor.meter"):
+        zone = MagicMock()
+        zone.duration_s = 600.0
+        zone.volume_liters = 100.0
+        zone.valve = "switch.v"
+        zone.zone_name = "Z"
+        zone.flow_meter_sensor = meter
+        return zone
+
+    @pytest.mark.asyncio
+    async def test_the_meter_delta_is_credited_not_the_plan(self):
+        """60 L measured against 100 L planned: the deficit must hear 60."""
+        from never_dry.controller import IrrigationController
+
+        zone = self._zone()
+        ctrl = self._controller(zone, [1000.0, 1060.0])
+
+        delivered = await IrrigationController._deliver_estimated_flow(ctrl, zone)
+
+        assert delivered == pytest.approx(60.0)
+
+    @pytest.mark.asyncio
+    async def test_a_zone_without_a_meter_is_unchanged(self):
+        """No meter, no measurement: the time-based estimate is all there is."""
+        from never_dry.controller import IrrigationController
+
+        zone = self._zone(meter=None)
+        ctrl = self._controller(zone, [None])
+
+        delivered = await IrrigationController._deliver_estimated_flow(ctrl, zone)
+
+        assert delivered == pytest.approx(100.0)
+
+    @pytest.mark.asyncio
+    async def test_a_stalled_meter_falls_back_to_the_estimate(self):
+        """A valve that ran and a counter that did not move is a dead sensor.
+
+        Crediting zero would leave the deficit unsettled and re-irrigate on the
+        next cycle, which is the worse failure of the two.
+        """
+        from never_dry.controller import IrrigationController
+
+        zone = self._zone()
+        ctrl = self._controller(zone, [1000.0, 1000.0])
+
+        delivered = await IrrigationController._deliver_estimated_flow(ctrl, zone)
+
+        assert delivered == pytest.approx(100.0)
+
+    @pytest.mark.asyncio
+    async def test_the_run_also_becomes_a_flow_sample(self):
+        """Measuring is what eventually makes the estimate unnecessary."""
+        from never_dry.controller import IrrigationController
+
+        zone = self._zone()
+        ctrl = self._controller(zone, [1000.0, 1060.0])
+
+        await IrrigationController._deliver_estimated_flow(ctrl, zone)
+
+        ctrl._schedule_flow_sample.assert_called_once()
+        assert ctrl._schedule_flow_sample.call_args.args[2] == 1000.0  # the baseline
