@@ -28,7 +28,6 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from .const import (
     ATTR_ZONE_NAME,
     DOMAIN,
-    SERVICE_APPLY_VALVE_TEST,
     SERVICE_IRRIGATE_ALL,
     SERVICE_IRRIGATE_ZONE,
     SERVICE_MARK_IRRIGATED,
@@ -54,7 +53,6 @@ _ZONE_SCOPED: dict[str, str] = {
     SERVICE_MARK_IRRIGATED: "_handle_mark_irrigated",
     SERVICE_RESET_VALVE: "_handle_reset_valve",
     SERVICE_TEST_VALVE: "_handle_test_valve",
-    SERVICE_APPLY_VALVE_TEST: "_handle_apply_valve_test",
     SERVICE_SET_DEFICIT: "_handle_set_deficit",
 }
 _GLOBAL: dict[str, str] = {

@@ -549,7 +549,7 @@ def _create_entities(
                 ZoneLinkedSensor(
                     hass,
                     zone_conf[CONF_ZONE_FLOW_METER_SENSOR],
-                    "Flow meter",
+                    "Water meter",
                     "mdi:gauge",
                     f"linked_flow_{slug}",
                     zone_device,
@@ -3055,7 +3055,7 @@ class ZoneFlowRateSensor(_ZoneTextSensor):
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
             zone_sensor,
-            "Flow rate",
+            "Design flow rate",
             "mdi:gauge",
             "flow_rate_zone",
             device_info,
@@ -3094,7 +3094,7 @@ class ZoneMeasuredFlowSensor(_ZoneTextSensor):
     test tells you the flow *at that moment*, while a run of them tells you the
     zone's flow and, at steady pressure, a slow decline is emitters clogging.
 
-    Sits beside the configured *Flow rate* on purpose. Seeing 360 next to 200 is
+    Sits beside the *Design flow rate* on purpose. Seeing 205 next to 360 is
     the whole argument for the feature, and no wording explains it as well.
     """
 
@@ -3125,35 +3125,60 @@ class ZoneMeasuredFlowSensor(_ZoneTextSensor):
 
     @property
     def native_value(self) -> float | None:
-        """`None` until a test has run — never a default that looks measured."""
-        test = self._zone_sensor.last_valve_test
-        lpm = (test or {}).get("measured_lpm")
+        """The median of what this zone has really delivered — `None` until it has.
+
+        Reads the rolling history rather than the last test on purpose. Flow
+        follows mains pressure, so a single run — supervised or not — reports
+        the flow *at that moment*; the median over sessions reports the zone.
+        A supervised test is not excluded, it is simply the first sample in the
+        same series.
+        """
+        operator = getattr(self._zone_sensor, "_operator", None)
+        lpm = getattr(operator, "measured_flow_lpm", None) if operator else None
         if not lpm:
             return None
         return round(lpm * (LPM_TO_GPH if self._is_imperial else LPM_TO_LPH), 1)
 
     @property
     def extra_state_attributes(self) -> dict:
-        """The rest of the run, so the number can be judged rather than trusted.
+        """The gap against the design rate, plus what the last test could see.
+
+        `vs_design_pct` is the diagnosis the pair exists for: the design rate is
+        the sum of the emitters' rated output, so a zone delivering well under it
+        is losing water to pressure or to clogged emitters. One number alone says
+        nothing — 205 L/h is only alarming next to a design figure of 360.
 
         `smallest_step` with `updates` is the limit of detection: a meter that
         changed once in a minute cannot describe a run that short, however
         precise its unit looks.
         """
-        test = self._zone_sensor.last_valve_test
-        if not test:
-            return {}
-        return {
-            "measured_volume_l": test.get("volume_l"),
-            "test_duration_s": test.get("duration_s"),
-            "smallest_step": test.get("smallest_step"),
-            "updates": test.get("updates"),
-            "open_confirm_s": test.get("open_confirm_s"),
-            "close_confirm_s": test.get("close_confirm_s"),
-            "meter_entity": test.get("meter_entity"),
-            "configured_flow_lph": round(self._zone_sensor._flow_rate * LPM_TO_LPH, 1),
-            "notes": test.get("notes"),
+        design_lpm = self._zone_sensor._flow_rate
+        attrs: dict = {
+            "design_flow_lph": round(design_lpm * LPM_TO_LPH, 1) if design_lpm else None,
         }
+        operator = getattr(self._zone_sensor, "_operator", None)
+        if operator is not None:
+            history = operator.session_flow_diagnostics
+            attrs["sample_count"] = history.get("sample_count")
+            attrs["min_lph"] = round(v * LPM_TO_LPH, 1) if (v := history.get("min_lpm")) else None
+            attrs["max_lph"] = round(v * LPM_TO_LPH, 1) if (v := history.get("max_lpm")) else None
+            measured = operator.measured_flow_lpm
+            if measured and design_lpm:
+                attrs["vs_design_pct"] = round(measured / design_lpm * 100.0, 1)
+
+        test = self._zone_sensor.last_valve_test
+        if test:
+            attrs.update(
+                {
+                    "last_test_volume_l": test.get("volume_l"),
+                    "last_test_duration_s": test.get("duration_s"),
+                    "smallest_step": test.get("smallest_step"),
+                    "updates": test.get("updates"),
+                    "meter_entity": test.get("meter_entity"),
+                    "notes": test.get("notes"),
+                }
+            )
+        return attrs
 
 
 class ZoneLastVolumeSensor(_ZoneTextSensor):

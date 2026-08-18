@@ -23,6 +23,10 @@ New contributors: see [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) first.
   a valve that has stopped answering — a dead battery mid-season — when every
   direct signal says it is fine. Judges each valve against its siblings rather
   than against a clock, with the estimators that were measured and rejected.
+- [`flow-rate-provenance.md`](flow-rate-provenance.md) — **Accepted (ADR)**: the
+  three flow rates (design, telemetered, historical), which one answers which
+  question, and why a still meter may qualify an action but never refuse one.
+  Read before touching flow verification, leak detection or delivery planning.
 - [`unit-system.md`](unit-system.md) — metric-internal architecture (SI core,
   imperial only at the edges).
 - [`dependency-management.md`](dependency-management.md) — **Accepted (ADR)**: why

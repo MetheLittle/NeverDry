@@ -237,7 +237,6 @@ SERVICE_RESET_VALVE = "reset_valve"
 #: Supervised one-minute valve test: measures what the guard flow rate only claims.
 SERVICE_TEST_VALVE = "test_valve"
 #: Write the flow rate the last supervised test measured into the zone's config.
-SERVICE_APPLY_VALVE_TEST = "apply_valve_test"
 EVENT_VALVE_TEST_COMPLETE = "never_dry_valve_test_complete"
 SERVICE_SET_DEFICIT = "set_deficit"
 

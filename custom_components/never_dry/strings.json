@@ -65,8 +65,8 @@
             "data": {
               "valve": "Valve switch (optional)",
               "delivery_mode": "Water delivery mode",
-              "flow_rate_lpm": "Valve flow rate (estimated_flow only)",
-              "flow_meter_sensor": "Delivery measurement sensor \u2014 counter or flow rate (flow_meter mode only)",
+              "flow_rate_lpm": "Design flow rate",
+              "flow_meter_sensor": "Delivery measurement sensor — counter or flow rate (flow_meter mode only)",
               "volume_entity": "Volume target entity (volume_preset only)",
               "system_type": "Irrigation system type",
               "efficiency": "Custom efficiency (overrides system type default)",
@@ -75,8 +75,8 @@
             "data_description": {
               "valve": "The switch entity that controls this zone's irrigation valve. Leave empty for monitoring mode (no valve)",
               "delivery_mode": "How your valve delivers water. Estimated flow: simple on/off valve, duration calculated from flow rate. Flow meter: valve with a flow sensor, closes at target volume. Volume preset: smart valve that accepts a volume target and closes itself.",
-              "flow_rate_lpm": "Water flow rate of the valve in liters per minute. Required for estimated_flow mode. Measure with a bucket and stopwatch",
-              "flow_meter_sensor": "Either kind works, and NeverDry tells them apart by the unit of measurement. A cumulative counter (L, gal, m\u00b3) is read before and after the run and the difference is the volume delivered \u2014 the more accurate of the two, because it does not depend on reporting frequency. An instantaneous flow rate (L/min, L/h, m\u00b3/h, gal/min, gal/h) is integrated over the run instead, so how often your valve reports its flow sets how good the number is. Required for flow_meter mode",
+              "flow_rate_lpm": "The sum of the rated output of everything this zone waters — sprinklers, drippers, micro-sprayers — in liters per hour (gal/h in imperial). Take it from the emitters' rating or your irrigation plan; you do not need to measure it. It is what the zone was built to deliver, and it is required: without it there is no way to turn a volume into a watering duration. What the zone actually delivers is measured separately from real sessions, and the gap between the two is worth watching.",
+              "flow_meter_sensor": "Either kind works, and NeverDry tells them apart by the unit of measurement. A cumulative counter (L, gal, m³) is read before and after the run and the difference is the volume delivered — the more accurate of the two, because it does not depend on reporting frequency. An instantaneous flow rate (L/min, L/h, m³/h, gal/min, gal/h) is integrated over the run instead, so how often your valve reports its flow sets how good the number is. Required for flow_meter mode",
               "volume_entity": "Number entity on the smart valve that accepts a volume target in liters. Required for volume_preset mode",
               "system_type": "Sets the zone's efficiency (drip 0.92, micro-sprinklers 0.80, pop-up 0.68, manual 0.55). Pick Custom to enter your own below.",
               "efficiency": "Used only when the system type is Custom. With any other type this field is ignored and the form will tell you so.",
@@ -117,7 +117,7 @@
       "zone_name_too_long": "Zone name is too long (max 64 characters)",
       "too_many_zones": "Maximum number of zones reached (50)",
       "flow_rate_required": "Flow rate is required for estimated_flow delivery mode",
-      "flow_meter_required": "A delivery measurement sensor \u2014 a cumulative counter or a flow rate \u2014 is required for flow_meter delivery mode",
+      "flow_meter_required": "A delivery measurement sensor — a cumulative counter or a flow rate — is required for flow_meter delivery mode",
       "volume_entity_required": "Volume entity is required for volume_preset delivery mode",
       "zone_already_exists": "A zone with this name already exists",
       "efficiency_required": "Choose an efficiency: the system type is set to Custom, which takes its value from that field",
@@ -193,7 +193,7 @@
             "data": {
               "valve": "Valve switch (optional)",
               "delivery_mode": "Water delivery mode",
-              "flow_rate_lpm": "Valve flow rate",
+              "flow_rate_lpm": "Design flow rate",
               "flow_meter_sensor": "Delivery measurement sensor (counter or flow rate)",
               "volume_entity": "Volume target entity",
               "system_type": "Irrigation system type",
@@ -260,7 +260,7 @@
             "data": {
               "valve": "Valve switch",
               "delivery_mode": "Water delivery mode",
-              "flow_rate_lpm": "Valve flow rate",
+              "flow_rate_lpm": "Design flow rate",
               "flow_meter_sensor": "Delivery measurement sensor (counter or flow rate)",
               "volume_entity": "Volume target entity",
               "system_type": "Irrigation system type",

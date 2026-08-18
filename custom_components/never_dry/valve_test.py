@@ -47,9 +47,13 @@ class _AbortRun(Exception):
     """Internal: stop the run early. The ``finally`` still closes the valve."""
 
 
-#: Default supervised duration. A minute is long enough for a coarse counter to
-#: step at least once on most installations and short enough to stand and watch.
-DEFAULT_TEST_DURATION_S = 60
+#: Default supervised duration. A minute was the original choice, on the
+#: assumption that a coarse counter steps at least once in that time. The field
+#: refuted it: on three of four zones a one-minute run recorded ``updates=0``,
+#: and on the fourth a single 28 L step produced a rate that was an artifact of
+#: the counter's resolution. Five minutes is the shortest run that describes a
+#: slow zone; the user can still ask for less and is told what it costs.
+DEFAULT_TEST_DURATION_S = 300
 
 #: How often the meter is read during the run. Not a device poll — just a look at
 #: whatever state the integration last published, so it costs nothing on the radio.

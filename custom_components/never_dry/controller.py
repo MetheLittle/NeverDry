@@ -31,9 +31,6 @@ from .const import (
     ANOMALY_DEFICIT_MULTIPLIER,
     ATTR_DEFICIT_MM,
     ATTR_ZONE_NAME,
-    CONF_ZONE_FLOW_RATE,
-    CONF_ZONE_NAME,
-    CONF_ZONES,
     DEFAULT_BATTERY_LOW_THRESHOLD,
     DEFAULT_INTER_ZONE_DELAY,
     DEFAULT_THRESHOLD,
@@ -639,7 +636,8 @@ class IrrigationController:
             _LOGGER.warning("test_valve: irrigation in progress, refusing to test zone '%s'", zone_name)
             return
 
-        duration = float(call.data.get("duration_s") or valve_test.DEFAULT_TEST_DURATION_S)
+        minutes = call.data.get("duration_min")
+        duration = float(minutes) * 60.0 if minutes else valve_test.DEFAULT_TEST_DURATION_S
         valve = zone.valve
         _LOGGER.info("Zone '%s': supervised valve test starting, %ss", zone_name, duration)
 
@@ -661,6 +659,7 @@ class IrrigationController:
             self._active_valve = None
 
         zone.record_valve_test(result.as_dict())
+        self._record_test_as_flow_sample(zone, result)
         self._hass.bus.async_fire(EVENT_VALVE_TEST_COMPLETE, result.as_dict())
         _LOGGER.info(
             "Zone '%s': valve test done — volume=%s L, measured=%s L/h, smallest step=%s, updates=%d%s",
@@ -672,70 +671,39 @@ class IrrigationController:
             "" if not result.notes else " | " + "; ".join(result.notes),
         )
 
-    async def _handle_apply_valve_test(self, call: ServiceCall) -> None:
-        """Write the measured flow rate into the zone's configuration.
+    def _record_test_as_flow_sample(self, zone, result) -> None:
+        """File a supervised test where it belongs: as the first historical sample.
 
-        Deliberately a separate, explicit action rather than something the test
-        does on its own. The test puts water on the ground and a person is
-        standing there; whether that minute was representative — the mains at
-        normal pressure, no other zone running, no hose being used — is a
-        judgement only that person can make. A test that silently rewrote the
-        configuration would turn one unlucky minute into a permanent number.
+        A test measures water that actually came out, so it is a measurement of
+        the same kind the sessions produce — not a correction to the design
+        figure. Writing it over the configured rate, as an earlier version did,
+        conflated two different quantities: what the zone was built to deliver
+        and what it delivers today. Kept apart, the pair is a diagnosis; merged,
+        both numbers are lost.
+
+        Its practical value is being *first*: a new zone has no session history,
+        and a single supervised minute gives the median something to start from.
         """
-        zone_name = call.data.get(ATTR_ZONE_NAME)
-        zone = self._zones.get(zone_name)
-        if zone is None:
-            _LOGGER.error("apply_valve_test: zone '%s' not found", zone_name)
-            return
-        result = zone.last_valve_test
-        if not result:
-            _LOGGER.error("apply_valve_test: zone '%s' has no test result yet — run the test first", zone_name)
-            return
-        lpm = result.get("measured_lpm")
+        lpm = result.measured_lpm
         if not lpm or lpm <= 0:
-            _LOGGER.error(
-                "apply_valve_test: zone '%s' measured no flow (%s) — nothing to apply. Check the meter",
-                zone_name,
-                lpm,
-            )
             return
-        # Same bounds the form enforces, so a service call cannot store a value
-        # the options flow would refuse to show.
         if not (UNUSUAL_FLOW_MIN_LPM <= lpm <= UNUSUAL_FLOW_MAX_LPM):
             _LOGGER.warning(
-                "apply_valve_test: zone '%s' measured %.2f L/min (%.0f L/h), outside the plausible range"
-                " — not applied. Re-run the test, or set it by hand if the value is genuinely right",
-                zone_name,
+                "Zone '%s': test measured %.2f L/min (%.0f L/h), outside the plausible range"
+                " — not recorded. On a coarse counter a short run reads high; re-run it longer",
+                zone.zone_name,
                 lpm,
                 lpm * 60,
             )
             return
-
-        entry = next(
-            (
-                e
-                for e in self._hass.config_entries.async_entries(DOMAIN)
-                if any(z.get(CONF_ZONE_NAME) == zone_name for z in e.data.get(CONF_ZONES, []))
-            ),
-            None,
-        )
-        if entry is None:
-            _LOGGER.error("apply_valve_test: no config entry owns zone '%s'", zone_name)
+        driver = self._valve_operators.get(zone.valve)
+        if driver is None or not hasattr(driver, "record_flow_sample"):
             return
-
-        previous = None
-        zones = []
-        for z in entry.data.get(CONF_ZONES, []):
-            if z.get(CONF_ZONE_NAME) == zone_name:
-                previous = z.get(CONF_ZONE_FLOW_RATE)
-                z = {**z, CONF_ZONE_FLOW_RATE: round(lpm, 3)}
-            zones.append(z)
-        self._hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_ZONES: zones})
+        driver.record_flow_sample(lpm)
         _LOGGER.info(
-            "Zone '%s': guard flow rate set from the supervised test — %.0f L/h (was %s)",
-            zone_name,
+            "Zone '%s': supervised test filed as a historical flow sample — %.0f L/h",
+            zone.zone_name,
             lpm * 60,
-            "unset" if previous is None else f"{previous * 60:.0f} L/h",
         )
 
     # ── Core irrigation logic ────────────────────────────

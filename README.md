@@ -262,15 +262,25 @@ fastest. Nobody can estimate this by eye — which is why NeverDry measures it.
 
 ### The one-minute test
 
-Each zone with a valve has two buttons in its **Diagnostic** section:
+NeverDry keeps three different flow rates apart, because they answer different
+questions (see
+[`docs/design/flow-rate-provenance.md`](docs/design/flow-rate-provenance.md)):
 
-1. **Valve test (1 min)** — opens the valve for sixty seconds, watches the meter,
-   closes it, and publishes what it found.
-2. **Save measured flow rate** — writes that figure into the zone's configuration.
+- **Design flow rate** — what you configure: the sum of the rated output of the
+  zone's emitters, from their datasheet or your irrigation plan. Required, since
+  without it a volume cannot become a watering duration.
+- **Measured flow rate** — the median of what the zone has really delivered,
+  collected automatically from every metered session. Shown beside the design
+  rate with the gap between them; a zone at 205 L/h against a design of 360 is
+  losing water to pressure or to clogged emitters.
+- **Water meter** — the raw cumulative counter, in litres.
 
-Between them sits **Measured flow rate**, a diagnostic sensor showing the result
-next to the value you configured. Seeing *360* beside *200* is the whole point;
-you never save a number you have not seen.
+Each zone with a valve also has a **Valve test** button in its **Diagnostic**
+section: it opens the valve for a chosen number of minutes (1–5, five by
+default), watches the meter and publishes what it found. Its result becomes the
+first sample of the measured history — useful on a new zone, which has no
+sessions yet. It is never written over the design rate: those two numbers only
+mean something as a pair.
 
 The test also answers two questions you cannot get from a config file:
 

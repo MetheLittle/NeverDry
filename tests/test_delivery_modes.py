@@ -1054,15 +1054,17 @@ class TestTheCapVerdictIsAboutTheJobNotItsHeadroom:
         assert self._zone_needing(hass_mock, di_sensor, between).timeout_caps_duration is False
 
 
-class TestTheMeasuredFlowIsVisibleBeforeItIsSaved:
-    """Without this sensor, pressing *Save measured flow rate* is a blind act.
+class TestTheMeasuredFlowShowsTheHistoryNotTheLastRun:
+    """The sensor reports the median of real sessions, next to the design rate.
 
-    Reported straight after the first live run: the test produced 360 L/h against
-    a configured 200, and the only place that number existed was the log. A
-    button that writes a value you never saw is not a feature, it is a dare.
+    It used to read the last supervised test, and a button wrote that one run
+    over the configured value. Two things were wrong with that: flow follows
+    mains pressure, so a single run describes a moment rather than a zone; and
+    overwriting the design rate destroyed the only pair that means anything —
+    what the zone was built to deliver against what it delivers.
     """
 
-    def _zone_with_test(self, hass_mock, di_sensor, **test):
+    def _zone_with_history(self, hass_mock, di_sensor, samples=(), **test):
         from never_dry.const import CONF_ZONE_DELIVERY_MODE, CONF_ZONE_FLOW_METER_SENSOR, DELIVERY_MODE_FLOW_METER
 
         zone = _make_zone(
@@ -1073,31 +1075,49 @@ class TestTheMeasuredFlowIsVisibleBeforeItIsSaved:
                 CONF_ZONE_FLOW_METER_SENSOR: "sensor.meter",
             },
         )
+        if samples:
+            from never_dry.session_flow import SessionFlowWindow
+
+            window = SessionFlowWindow()
+            for value in samples:
+                window.record(value)
+            operator = MagicMock()
+            operator.measured_flow_lpm = window.median_lpm()
+            operator.session_flow_diagnostics = window.as_dict()
+            zone.set_operator(operator)
         if test:
             zone.record_valve_test(test)
         return zone
 
-    def test_no_test_yet_reads_none_and_not_a_zero(self, hass_mock, di_sensor):
+    def test_no_history_yet_reads_none_and_not_a_zero(self, hass_mock, di_sensor):
         """A zero would look like a measurement of no flow. Absence is not zero."""
         from never_dry.sensor import ZoneMeasuredFlowSensor
 
-        sensor = ZoneMeasuredFlowSensor(self._zone_with_test(hass_mock, di_sensor))
+        sensor = ZoneMeasuredFlowSensor(self._zone_with_history(hass_mock, di_sensor))
         assert sensor.native_value is None
-        assert sensor.extra_state_attributes == {}
 
-    def test_it_reports_the_measured_rate_in_litres_per_hour(self, hass_mock, di_sensor):
+    def test_a_single_session_is_not_enough_to_report(self, hass_mock, di_sensor):
+        """One run is an anecdote — the median stays silent below its minimum."""
         from never_dry.sensor import ZoneMeasuredFlowSensor
 
-        zone = self._zone_with_test(hass_mock, di_sensor, measured_lpm=6.0, volume_l=6.0)
+        zone = self._zone_with_history(hass_mock, di_sensor, samples=(6.0,))
+        assert ZoneMeasuredFlowSensor(zone).native_value is None
+
+    def test_it_reports_the_median_in_litres_per_hour(self, hass_mock, di_sensor):
+        from never_dry.sensor import ZoneMeasuredFlowSensor
+
+        zone = self._zone_with_history(hass_mock, di_sensor, samples=(6.0, 6.0, 6.0))
         assert ZoneMeasuredFlowSensor(zone).native_value == 360.0
 
-    def test_it_carries_the_configured_value_beside_it(self, hass_mock, di_sensor):
-        """Seeing 360 next to 200 is the argument; the sensor must hold both."""
+    def test_it_carries_the_design_rate_and_the_gap_beside_it(self, hass_mock, di_sensor):
+        """Seeing 205 next to 360 is the argument; the sensor must hold both."""
         from never_dry.sensor import ZoneMeasuredFlowSensor
 
-        zone = self._zone_with_test(hass_mock, di_sensor, measured_lpm=6.0, updates=6, smallest_step=1.0)
+        zone = self._zone_with_history(hass_mock, di_sensor, samples=(6.0, 6.0, 6.0), updates=6, smallest_step=1.0)
         attrs = ZoneMeasuredFlowSensor(zone).extra_state_attributes
-        assert attrs["configured_flow_lph"] == pytest.approx(zone._flow_rate * 60.0, abs=0.1)
+        assert attrs["design_flow_lph"] == pytest.approx(zone._flow_rate * 60.0, abs=0.1)
+        assert attrs["vs_design_pct"] == pytest.approx(6.0 / zone._flow_rate * 100.0, abs=0.1)
+        assert attrs["sample_count"] == 3
         assert attrs["smallest_step"] == 1.0
         assert attrs["updates"] == 6
 
@@ -1107,6 +1127,6 @@ class TestTheMeasuredFlowIsVisibleBeforeItIsSaved:
         from homeassistant.const import EntityCategory
         from never_dry.sensor import ZoneMeasuredFlowSensor
 
-        sensor = ZoneMeasuredFlowSensor(self._zone_with_test(hass_mock, di_sensor))
+        sensor = ZoneMeasuredFlowSensor(self._zone_with_history(hass_mock, di_sensor))
         assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
         assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
