@@ -16,7 +16,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import ClassVar
 
 from homeassistant.core import HomeAssistant, ServiceCall, callback
@@ -46,9 +46,19 @@ from .const import (
     UNUSUAL_FLOW_MIN_LPM,
 )
 from .driver import Driver, OperationStatus, ValveCommandAdapter
+from .environment import Reachability
+from .reachability_watch import FleetSilenceWatch
 from .scheduler import Decision, Scheduler, SkipReason
 from .valve_fsm import ValveState
 from .valve_notifier import NotificationKind, Severity, ValveNotifier
+
+#: How often the fleet's silence is measured. Hourly on purpose: the silence
+#: that means "off the mesh" is measured in hours (the floor derived from live
+#: fleets sits between 9 and 16), so a tighter poll buys nothing.
+REACHABILITY_POLL = timedelta(hours=1)
+#: Quiet period after warning about one valve. The notification persists until
+#: dismissed, so repeating it daily adds noise, not information.
+REACHABILITY_ALERT_INTERVAL_S: float = 24 * 3600
 
 
 def _valve_level(hass, entity_id: str | None) -> str:
@@ -130,6 +140,8 @@ class IrrigationController:
         self._monitoring_mode = not any(zs.valve for zs in zone_sensors)
         self._unsub_monitor = None
         self._unsubs: list = []
+        self._reachability = FleetSilenceWatch(hass)
+        self._reachability_alerted: dict[str, float] = {}
         self._last_service_call: dict[str, float] = {}
         self._current_source: str | None = None
         # Manual valve tracking: valve_entity_id → flow meter reading at valve open
@@ -265,6 +277,66 @@ class IrrigationController:
                 timedelta(hours=6),
             )
             self._unsubs.append(self._unsub_monitor)
+
+        # Reachability watch: notice a valve that has stopped answering *before*
+        # the evening it was needed. Hourly because the thing being detected is
+        # measured in hours — the floor derived from real fleets sits between 9
+        # and 16 — and a tighter poll would only add cost to the same answer.
+        if not self._monitoring_mode:
+            self._unsubs.append(
+                async_track_time_interval(
+                    self._hass,
+                    self._check_reachability,
+                    REACHABILITY_POLL,
+                )
+            )
+
+    async def _check_reachability(self, _now=None) -> None:
+        """Judge every valve's silence against its siblings, and warn once a day.
+
+        The verdict feeds the machinery that already exists: the zone's
+        ``valve_reachable`` flag (hence the card's amber chip and its warning
+        text) and a single notification. It never touches irrigation — a valve
+        judged silent is still commanded when its time comes, because the
+        judgement is evidence about the mesh, not proof about the valve, and
+        refusing to try on statistical grounds would turn a warning into an
+        outage.
+        """
+        valves = {name: zone.valve for name, zone in self._zones.items() if zone.valve}
+        if len(valves) < 2:
+            return  # nothing to compare against; the criterion needs siblings
+        verdicts = self._reachability.observe(valves)
+        now = time.monotonic()
+        for zone_name, verdict in verdicts.items():
+            zone = self._zones.get(zone_name)
+            if zone is None:
+                continue
+            silent = verdict.status == Reachability.SILENT
+            zone.set_silence_verdict(silent if verdict.status != Reachability.UNKNOWN else None)
+            zone.async_write_ha_state()
+            if not silent:
+                self._reachability_alerted.pop(zone_name, None)
+                continue
+            # One alert per valve per day. The notification persists until it is
+            # dismissed, so repeating it adds noise without adding information.
+            last = self._reachability_alerted.get(zone_name)
+            if last is not None and (now - last) < REACHABILITY_ALERT_INTERVAL_S:
+                continue
+            self._reachability_alerted[zone_name] = now
+            _LOGGER.warning(
+                "Zone '%s': valve silent for %.0f min while its siblings are not "
+                "(threshold %.0f min) — likely off the mesh",
+                zone_name,
+                verdict.silence_s / 60,
+                (verdict.threshold_s or 0) / 60,
+            )
+            if self._notifier is not None:
+                await self._notifier.notify(
+                    zone_name,
+                    NotificationKind.UNREACHABLE_PASSIVE,
+                    Severity.WARNING,
+                    context={"duration": f"{verdict.silence_s / 3600:.1f} h"},
+                )
 
     # ── Scheduled irrigation ────────────────────────────────
 

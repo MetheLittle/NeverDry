@@ -19,10 +19,11 @@ New contributors: see [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) first.
   machine and the `ValveOperator` (open/close, verification, failure handling).
 - [`controller-reliability.md`](controller-reliability.md) — the controller layer
   above the FSM: hardening applied and the invariants to preserve.
-- [`valve-reachability.md`](valve-reachability.md) — **Proposed (RFC)**: noticing
-  a valve that has stopped answering — a dead battery mid-season — when every
-  direct signal says it is fine. Judges each valve against its siblings rather
-  than against a clock, with the estimators that were measured and rejected.
+- [`valve-reachability.md`](valve-reachability.md) — **Accepted (ADR)**: noticing
+  a valve that has stopped answering — a dead battery, or a device off the mesh —
+  when every direct signal says it is fine. Judges each valve against its
+  siblings rather than against a clock, with the estimators that were measured
+  and rejected, and the field case of 2026-08-18 that confirmed it.
 - [`flow-rate-provenance.md`](flow-rate-provenance.md) — **Accepted (ADR)**: the
   three flow rates (design, telemetered, historical), which one answers which
   question, and why a still meter may qualify an action but never refuse one.

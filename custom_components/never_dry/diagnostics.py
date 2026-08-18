@@ -25,6 +25,14 @@ _LOG_TAIL_LINES = 500
 _REDACT_KEYS = {"password", "token", "api_key", "secret", "access_token"}
 
 
+def _reachability_diagnostics(hass, entry) -> dict:
+    """What the fleet-silence watch has learned, if a controller owns one."""
+    for key, value in hass.data.get(DOMAIN, {}).items():
+        if key.startswith("_controller") and hasattr(value, "_reachability"):
+            return value._reachability.diagnostics()
+    return {}
+
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -86,6 +94,7 @@ async def async_get_config_entry_diagnostics(
         "entity_states": entity_states,
         "valve_latency": valve_latency,
         "session_flow": session_flow,
+        "reachability_watch": _reachability_diagnostics(hass, entry),
         "activity_log": {
             "path": log_path,
             "total_lines": log_total_lines,

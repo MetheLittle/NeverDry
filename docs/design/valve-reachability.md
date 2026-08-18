@@ -1,8 +1,11 @@
 # Valve reachability — noticing a valve that has stopped answering
 
-**Status:** Proposed (RFC)
-Implementation: `custom_components/never_dry/environment.py`, `sensor.py` (`valve_reachable`)
-Tests: `tests/test_silence_judgement.py`, `tests/test_valve_reachability.py`
+**Status:** Accepted (ADR), 2026-08-18
+Implementation: `environment.py` (the criterion), `reachability_watch.py` (the
+measurement), `controller.py` (`_check_reachability`, hourly), `sensor.py`
+(`valve_reachable`)
+Tests: `tests/test_silence_judgement.py`, `tests/test_valve_reachability.py`,
+`tests/test_reachability_watch.py`
 
 ## The failure this is about
 
@@ -283,5 +286,79 @@ measurement.
 
 That seam is why the rule lives in `environment.py` and is pure: it can be
 exercised over lists of numbers, including every failure shape above, without a
-Home Assistant runtime. Wiring it belongs with the driver work, alongside
-`Driver.async_ping`, which will finally have a source worth polling.
+Home Assistant runtime.
+
+## The measurement, as built
+
+`reachability_watch.py` supplies the numbers the judge consumes. It is
+deliberately the only part that touches Home Assistant.
+
+**The union is resolved through the registries**, exactly as sketched above:
+valve entity → entity registry → `device_id` → every entity of that device. The
+members are never inspected. A valve whose entity has no device degrades to
+watching itself — less signal, no error, no special case.
+
+**The floor is learned rather than configured.** Each hourly tick records how
+long a device has been quiet; when the device finally reports, that peak becomes
+one sample of *silence that ended*, which is the only honest evidence of what
+"normally quiet" looks like on this mesh. Until at least one silence has ended,
+every verdict is `UNKNOWN`: with no observed cadence there is nothing to derive
+a floor from, and judging would be guessing.
+
+**Hourly, not tighter.** What is being detected is measured in hours — the floor
+observed on live fleets sits between 9 and 16 — so a faster poll would spend
+more to reach the same answer.
+
+### One correction to the notification policy above
+
+The policy section says a persisting fault does not re-notify because
+`ValveNotifier` deduplicates on `(zone, kind)`. That is true only when the
+*context* is also unchanged, and the passive warning carries the silence
+duration in its context — which grows at every tick. Deduplication would
+therefore never fire, and the warning would repeat hourly.
+
+The controller holds a **24-hour quiet period per valve** for this reason. It is
+not redundancy with the notifier: it is what makes the stated policy — *"raised
+once per episode"* — actually true. Escalation by consequence
+(`UNREACHABLE_AT_IRRIGATION` when a watering is genuinely lost) is unchanged.
+
+### The verdict never blocks watering
+
+A valve judged silent is still commanded when its time comes. The judgement is
+evidence about the mesh, not proof about the valve, and refusing to try on
+statistical grounds would turn a warning into an outage. It changes what the
+user is *told*, never what the system *does*.
+
+## Confirmed in the field, 2026-08-18
+
+The shape the rule was designed for occurred on the reference installation, and
+this is what moved the note from Proposed to Accepted.
+
+Two of four valves (`Giardino Pino`, `Giardino Melograno`) were off the Zigbee
+mesh — confirmed by the owner, who could not reach them from Zigbee2MQTT either.
+The other two (`Melino`, `Ortensia`) answered normally.
+
+Every direct signal called all four healthy:
+
+| Signal | Dead valves | Healthy valves |
+|---|---|---|
+| `switch.*` state | `off` | `off` |
+| entity `unavailable`? | no | no |
+| battery sensor | 100% | 100% |
+| `valve_reachable` (before this work) | `True` | `True` |
+| notifications | none | none |
+
+The only signal that separated them was the one this note argues for: the
+freshest `last_reported` across each device's entities — 16:14:29 for both dead
+valves against 16:43 for both healthy ones, a gap that widened for as long as
+they stayed off the mesh.
+
+It also confirmed dead end #1 concretely: Zigbee2MQTT availability was enabled
+throughout, and never marked either device unavailable.
+
+Two failures of the *active* evidence path were recorded the same day and are
+worth keeping: a valve that had failed six commands correctly read
+`valve_reachable: False` — and then `reset_valve` cleared `last_failure`,
+returning the zone to "healthy" while the valve was still dead. The reset clears
+the symptom along with the state. The comparative signal does not have this
+weakness, because it is re-derived from the mesh at every tick.

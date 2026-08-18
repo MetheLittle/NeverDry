@@ -1835,6 +1835,7 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._hw_max_duration_payload: str = zone_config.get(CONF_ZONE_HW_MAX_DURATION_PAYLOAD, "{value}")
         self._irrigating = False
         self._awaiting_valve = False
+        self._silence_verdict: bool | None = None
         self._no_guard_flow_warned = False
         # Reachability grace: when this zone was built, and whether its valve
         # has ever been seen alive. Monotonic, so a clock change cannot
@@ -2495,12 +2496,28 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             return None if self._within_startup_grace else False
         if self._operator is not None and self._operator.state == ValveState.UNREACHABLE:
             return None if self._within_startup_grace else False
-        return True
+        # 3. **Comparative** — the valve has been far quieter than its siblings.
+        #    Weaker than a failed command and weaker than an unavailable entity,
+        #    so it is consulted last; but it is the only one that speaks *before*
+        #    an irrigation is due, which is the whole point of watching. A device
+        #    off the mesh keeps publishing a stale, perfectly ordinary `off`, so
+        #    the first two never fire for it (field: two valves off the mesh,
+        #    2026-08-18).
+        silent_vs_siblings = self._silence_verdict is True and not self._within_startup_grace
+        return not silent_vs_siblings
 
     @property
     def is_irrigating(self) -> bool:
         """True if this zone is currently being irrigated."""
         return self._irrigating
+
+    def set_silence_verdict(self, silent: bool | None) -> None:
+        """Record what the fleet-silence watch concluded about this valve.
+
+        ``None`` means the watch could not tell — one valve, or a fleet with no
+        observed cadence yet — and must not be drawn as either state.
+        """
+        self._silence_verdict = silent
 
     def set_awaiting_valve(self, state: bool) -> None:
         """Mark that a valve command has been issued and has not yet resolved.
