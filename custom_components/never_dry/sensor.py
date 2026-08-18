@@ -510,6 +510,7 @@ def _create_entities(
         entities.append(ZoneLastSourceSensor(zone_sensor, zone_device))
         entities.append(ZoneLastVolumeSensor(zone_sensor, zone_device))
         entities.append(ZoneFlowRateSensor(zone_sensor, zone_device))
+        entities.append(ZoneMeasuredFlowSensor(zone_sensor, zone_device))
         entities.append(ZoneDurationSensor(zone_sensor, zone_device))
         entities.append(ZoneLastDurationSensor(zone_sensor, zone_device))
         entities.append(ZoneKcSensor(zone_sensor, zone_device))
@@ -1820,6 +1821,7 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._volume_entity = zone_config.get(CONF_ZONE_VOLUME_ENTITY)
         self._flow_meter_sensor = zone_config.get(CONF_ZONE_FLOW_METER_SENSOR)
         self._delivery_timeout = zone_config.get(CONF_ZONE_DELIVERY_TIMEOUT, DEFAULT_DELIVERY_TIMEOUT_S)
+        self._last_valve_test: dict | None = None
         self._battery_sensor = zone_config.get(CONF_ZONE_BATTERY_SENSOR)
         self._irrigation_mode = zone_config.get(CONF_ZONE_IRRIGATION_MODE, "manual")
         self._irrigation_time = zone_config.get(CONF_ZONE_IRRIGATION_TIME)
@@ -2090,6 +2092,20 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
                     self._last_volume_delivered = float(last.attributes.get("last_volume_delivered", 0.0))
                     self._last_irrigation_source = last.attributes.get("last_irrigation_source")
                     self._last_session_duration_s = int(last.attributes.get("last_session_duration_s", 0))
+            # The supervised test result, rebuilt from the attributes it published.
+            # Without this, *saving* the measured flow rate destroyed the evidence
+            # for it: writing the config reloads the entry, the entity is recreated,
+            # and the number you had just read vanished from the screen — on every
+            # zone, not only the one saved. It also meant the statistics series lost
+            # a point each time somebody acted on it.
+            restored_test = {
+                key[len("valve_test_") :]: value
+                for key, value in last.attributes.items()
+                if key.startswith("valve_test_")
+            }
+            if restored_test:
+                self._last_valve_test = {"zone_name": self._zone_name, **restored_test}
+
             with contextlib.suppress(ValueError, TypeError):
                 self._total_water_delivered = float(last.attributes.get("total_water_delivered_l", 0.0))
             with contextlib.suppress(ValueError, TypeError):
@@ -2269,7 +2285,11 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         if expected_s <= 0:
             return self._delivery_timeout
         bound_s = round(expected_s * DELIVERY_DURATION_MARGIN)
-        if bound_s > self._delivery_timeout and not self._timeout_caps_job_warned:
+        # Same comparison as `timeout_caps_duration`, and for the same reason:
+        # the log used to fire on `bound_s`, so it announced that irrigation
+        # "will stop short" whenever the allowance was tighter than twice the
+        # job — including when the job fitted with room to spare.
+        if expected_s > self._delivery_timeout and not self._timeout_caps_job_warned:
             # The cap bites: the zone needs more time than the user allows, so
             # it will stop short. Silence here would under-water the zone every
             # cycle with nothing to show for it — the failure this whole bound
@@ -2286,6 +2306,84 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
                 self._delivery_timeout,
             )
         return min(self._delivery_timeout, bound_s)
+
+    @property
+    def timeout_caps_duration(self) -> bool:
+        """True when the safety timeout is shorter than the job needs.
+
+        The zone will stop short: it opens, it runs out of allowance, and it
+        closes having delivered less than the deficit asked for. Nothing is
+        broken and nothing errors — the garden is simply under-watered every
+        cycle, which is the quietest failure this project has.
+
+        Published so the card can flag it without re-deriving the rule. The
+        comparison lives here, next to the clamp it describes, because a second
+        copy in JavaScript would be a second source of truth for a safety
+        bound — and the two would drift the first time the margin changed.
+        """
+        expected_s = self._guard_duration_s
+        if expected_s <= 0:
+            return False
+        # The JOB against the allowance, not the job plus its headroom. The
+        # earlier version compared `expected * DELIVERY_DURATION_MARGIN`, which
+        # is the bound used to *tighten* a short job's timeout — a different
+        # quantity. It fired on zones that finish comfortably: with a 4969 s job
+        # and a 5400 s allowance it claimed the zone would stop short, and the
+        # zone stops short of nothing. Found in the field the same afternoon the
+        # warning became visible, which is the argument for making it visible.
+        return expected_s > self._delivery_timeout
+
+    @property
+    def last_valve_test(self) -> dict | None:
+        """The last supervised test result, or ``None`` if never tested."""
+        return self._last_valve_test
+
+    def record_valve_test(self, result: dict) -> None:
+        """Keep the last supervised test result and publish it.
+
+        Kept on the zone rather than in a store of its own because it is a fact
+        *about this zone's plumbing*, and because the place people look for it is
+        the zone they just tested. One result, not a history: the history is worth
+        having (a delivery that decays over weeks is how clogged emitters
+        announce themselves) and is deliberately out of this first delivery.
+        """
+        self._last_valve_test = result
+        # `getattr`, not `self.hass`: the attribute does not exist until Home
+        # Assistant adds the entity, and a test can complete during startup.
+        # The same guard is used elsewhere in this file for the same reason.
+        if getattr(self, "hass", None) is not None:
+            self.async_write_ha_state()
+
+    @property
+    def active_warnings(self) -> list[str]:
+        """Conditions that change how much water this zone gets, as codes.
+
+        Codes and not sentences: the card owns the wording and the translation,
+        the entity owns the truth. A rendered string here would need a second
+        home for every language and would put user-facing copy in the layer
+        that decides irrigation.
+
+        Only conditions derivable from the current configuration and state
+        belong here. The one-shot ``_warned`` flags elsewhere in this file mark
+        things that happened *once* to a reading; those need their own carrier
+        and are deliberately not folded in.
+        """
+        out: list[str] = []
+        # Reachability first, and outside the mode gate: a valve that stopped
+        # answering is not a configuration nuance, and it applies to every
+        # delivery mode including monitoring. `None` means "not judged yet" and
+        # must not read as trouble.
+        if self.valve_reachable is False:
+            out.append("valve_unreachable")
+        if self._delivery_mode == DELIVERY_MODE_ESTIMATED_FLOW:
+            return out
+        if self.timeout_caps_duration:
+            out.append("timeout_caps_duration")
+        if self._flow_rate <= 0:
+            # Same condition as the once-per-boot log below: no guard flow means
+            # the expected duration is unknown and the timeout sits at its floor.
+            out.append("no_guard_flow")
+        return out
 
     @property
     def watchdog_timeout(self) -> int:
@@ -2537,6 +2635,25 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             "deficit_mm": round(self._zone_deficit, 2),
             "irrigating": self._irrigating,
         }
+        if self._delivery_mode != DELIVERY_MODE_ESTIMATED_FLOW:
+            # Only where the timeout is actually the closing criterion: in
+            # estimated mode the valve opens for a computed duration and the
+            # bound never bites, so flagging it would warn about a limit that
+            # does not apply. `delivery_timeout_s` is published further down by
+            # the block that already owned it — one home per attribute.
+            attrs["timeout_caps_duration"] = self.timeout_caps_duration
+            warnings = self.active_warnings
+            if warnings:
+                attrs["warnings"] = warnings
+
+        if self._last_valve_test:
+            # Prefixed and flat: the card and the report block read these, and a
+            # nested dict in an attribute is awkward for both.
+            for key, value in self._last_valve_test.items():
+                if key == "zone_name":
+                    continue
+                attrs[f"valve_test_{key}"] = value
+
         if self._probe_vwc is not None:
             # Published, not used: the raw material for observing field capacity
             # and the soil's dynamics, and for spotting a delivery that moved no
@@ -2963,6 +3080,80 @@ class ZoneFlowRateSensor(_ZoneTextSensor):
         if self._is_imperial:
             return round(lpm * LPM_TO_GPH, 1)
         return round(lpm * LPM_TO_LPH, 1)
+
+
+class ZoneMeasuredFlowSensor(_ZoneTextSensor):
+    """What the last supervised test actually measured, next to what was declared.
+
+    Two reasons this exists rather than living only in the log. The first is
+    immediate: without it, pressing *Save measured flow rate* is a blind act —
+    you would be writing a number you never saw. The second is the one that
+    lasts: with a `measurement` state class Home Assistant keeps the series, and
+    a series is worth more than any single reading here. Flow depends on mains
+    pressure, so it depends on the hour and on who else is drawing water; one
+    test tells you the flow *at that moment*, while a run of them tells you the
+    zone's flow and, at steady pressure, a slow decline is emitters clogging.
+
+    Sits beside the configured *Flow rate* on purpose. Seeing 360 next to 200 is
+    the whole argument for the feature, and no wording explains it as well.
+    """
+
+    _attr_device_class = SensorDeviceClass.VOLUME_FLOW_RATE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, zone_sensor, device_info=None):
+        super().__init__(
+            zone_sensor,
+            "Measured flow rate",
+            "mdi:gauge-full",
+            "measured_flow_zone",
+            device_info,
+            diagnostic=True,
+        )
+
+    @property
+    def _is_imperial(self) -> bool:
+        units = getattr(getattr(self, "hass", None), "config", None)
+        units = getattr(units, "units", None)
+        return getattr(units, "volume_unit", None) == UnitOfVolume.GALLONS
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        if self._is_imperial:
+            return UnitOfVolumeFlowRate.GALLONS_PER_HOUR
+        return UnitOfVolumeFlowRate.LITERS_PER_HOUR
+
+    @property
+    def native_value(self) -> float | None:
+        """`None` until a test has run — never a default that looks measured."""
+        test = self._zone_sensor.last_valve_test
+        lpm = (test or {}).get("measured_lpm")
+        if not lpm:
+            return None
+        return round(lpm * (LPM_TO_GPH if self._is_imperial else LPM_TO_LPH), 1)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """The rest of the run, so the number can be judged rather than trusted.
+
+        `smallest_step` with `updates` is the limit of detection: a meter that
+        changed once in a minute cannot describe a run that short, however
+        precise its unit looks.
+        """
+        test = self._zone_sensor.last_valve_test
+        if not test:
+            return {}
+        return {
+            "measured_volume_l": test.get("volume_l"),
+            "test_duration_s": test.get("duration_s"),
+            "smallest_step": test.get("smallest_step"),
+            "updates": test.get("updates"),
+            "open_confirm_s": test.get("open_confirm_s"),
+            "close_confirm_s": test.get("close_confirm_s"),
+            "meter_entity": test.get("meter_entity"),
+            "configured_flow_lph": round(self._zone_sensor._flow_rate * LPM_TO_LPH, 1),
+            "notes": test.get("notes"),
+        }
 
 
 class ZoneLastVolumeSensor(_ZoneTextSensor):

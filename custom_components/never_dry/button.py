@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -18,12 +19,14 @@ from .const import (
     CONF_ZONE_NAME,
     CONF_ZONES,
     DOMAIN,
+    SERVICE_APPLY_VALVE_TEST,
     SERVICE_IRRIGATE_ZONE,
     SERVICE_MARK_IRRIGATED,
     SERVICE_RESET_VALVE,
     SERVICE_RESET_YEARLY_RAIN,
     SERVICE_RESET_YEARLY_WATER,
     SERVICE_STOP_ZONE,
+    SERVICE_TEST_VALVE,
 )
 
 
@@ -72,6 +75,8 @@ def _create_buttons(hass: HomeAssistant, config: dict, entry_id: str = "yaml") -
         if zone_conf.get("valve"):
             buttons.append(StopButton(hass, zone_name, device_info))
             buttons.append(ResetMaintenanceButton(hass, zone_name, device_info))
+            buttons.append(ValveTestButton(hass, zone_name, device_info))
+            buttons.append(ApplyValveTestButton(hass, zone_name, device_info))
     # System-wide reset buttons live on the NeverDry hub device, not on any
     # single zone: yearly rain is one value for the whole garden, and the
     # water reset fans out across every zone (AI-206).
@@ -129,6 +134,59 @@ class IrrigateButton(ButtonEntity):
         await self._hass.services.async_call(
             DOMAIN,
             SERVICE_IRRIGATE_ZONE,
+            {ATTR_ZONE_NAME: self._zone_name},
+        )
+
+
+class ValveTestButton(ButtonEntity):
+    """Run the supervised one-minute test on this zone.
+
+    Diagnostic category on purpose: it is not part of watering, and it puts water
+    on the ground — it belongs where a user goes deliberately, not next to the
+    buttons they press every day.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:stopwatch-start"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, hass: HomeAssistant, zone_name: str, device_info: DeviceInfo | None = None) -> None:
+        self._hass = hass
+        self._zone_name = zone_name
+        slug = zone_name.lower().replace(" ", "_")
+        self._attr_name = "Valve test (1 min)"
+        self._attr_unique_id = f"valve_test_{slug}"
+        if device_info:
+            self._attr_device_info = device_info
+
+    async def async_press(self) -> None:
+        await self._hass.services.async_call(
+            DOMAIN,
+            SERVICE_TEST_VALVE,
+            {ATTR_ZONE_NAME: self._zone_name},
+        )
+
+
+class ApplyValveTestButton(ButtonEntity):
+    """Write the flow rate the last supervised test measured into this zone."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:content-save-move-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, hass: HomeAssistant, zone_name: str, device_info: DeviceInfo | None = None) -> None:
+        self._hass = hass
+        self._zone_name = zone_name
+        slug = zone_name.lower().replace(" ", "_")
+        self._attr_name = "Save measured flow rate"
+        self._attr_unique_id = f"apply_valve_test_{slug}"
+        if device_info:
+            self._attr_device_info = device_info
+
+    async def async_press(self) -> None:
+        await self._hass.services.async_call(
+            DOMAIN,
+            SERVICE_APPLY_VALVE_TEST,
             {ATTR_ZONE_NAME: self._zone_name},
         )
 

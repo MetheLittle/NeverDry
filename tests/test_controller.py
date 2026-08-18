@@ -839,11 +839,14 @@ class TestExternalSessionMonitor:
         await controller._external_session_monitor("switch.valve_orto", "Orto")
 
         assert sleeps == [1]
+        # No explicit ``blocking``: the close now goes through the adapter, which
+        # relies on Home Assistant's own default rather than restating it. The
+        # domain and service are what matter — and they are what change for a
+        # ``valve.*`` entity.
         hass_mock.services.async_call.assert_called_with(
             "switch",
             "turn_off",
             {"entity_id": "switch.valve_orto"},
-            blocking=False,
         )
 
     @pytest.mark.asyncio

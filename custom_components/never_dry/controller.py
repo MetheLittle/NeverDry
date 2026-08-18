@@ -26,11 +26,14 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 
-from . import flow_utils
+from . import flow_utils, valve_test
 from .const import (
     ANOMALY_DEFICIT_MULTIPLIER,
     ATTR_DEFICIT_MM,
     ATTR_ZONE_NAME,
+    CONF_ZONE_FLOW_RATE,
+    CONF_ZONE_NAME,
+    CONF_ZONES,
     DEFAULT_BATTERY_LOW_THRESHOLD,
     DEFAULT_INTER_ZONE_DELAY,
     DEFAULT_THRESHOLD,
@@ -39,13 +42,43 @@ from .const import (
     DELIVERY_MODE_VOLUME_PRESET,
     DOMAIN,
     EVENT_IRRIGATION_COMPLETE,
+    EVENT_VALVE_TEST_COMPLETE,
     FLOW_METER_POLL_INTERVAL_S,
     MIN_SERVICE_INTERVAL_S,
+    UNUSUAL_FLOW_MAX_LPM,
+    UNUSUAL_FLOW_MIN_LPM,
 )
-from .driver import Driver, OperationStatus
+from .driver import Driver, OperationStatus, ValveCommandAdapter
 from .scheduler import Decision, Scheduler, SkipReason
 from .valve_fsm import ValveState
 from .valve_notifier import NotificationKind, Severity, ValveNotifier
+
+
+def _valve_level(hass, entity_id: str | None) -> str:
+    """The valve's position in one vocabulary, whatever domain it lives in.
+
+    A ``switch.*`` says ``on``/``off``; a ``valve.*`` says ``open``/``closed``
+    and can also say ``opening``/``closing``. Comparing raw states works for one
+    and silently fails for the other — a `valve.*` never equals ``"off"``, so
+    every "did it close?" check would answer no for ever.
+
+    Routed through the same adapter the driver uses, so there is one place that
+    knows the difference rather than a dozen that assume there is none.
+    """
+    state = hass.states.get(entity_id) if entity_id else None
+    return ValveCommandAdapter.interpret_state(state.state if state else None)
+
+
+async def _valve_call(hass, entity_id: str, *, on: bool) -> None:
+    """Open or close ``entity_id``, using the services its own domain provides.
+
+    ``blocking`` is deliberately not passed: Home Assistant already defaults it
+    to false, every call site here relied on that default, and adding it would
+    change the call shape for no behavioural gain.
+    """
+    domain, service = ValveCommandAdapter(entity_id).command(on=on)
+    await hass.services.async_call(domain, service, {"entity_id": entity_id})
+
 
 MONITORING_INTERVAL = 6 * 3600  # 6 hours in seconds
 AUTO_OPEN_GRACE_S = 3.0  # volume_preset: wait this long for smart-valve auto-open
@@ -472,8 +505,7 @@ class IrrigationController:
                 if mtask and not mtask.done():
                     mtask.cancel()
                 continue
-            state = self._hass.states.get(entity_id)
-            if state is not None and state.state == "on":
+            if _valve_level(self._hass, entity_id) == "on":
                 _LOGGER.info(
                     "Unload with manual session open: zone='%s' — closing valve and settling",
                     zone_name,
@@ -584,6 +616,127 @@ class IrrigationController:
         await operator.async_reset_maintenance()
         zone.async_write_ha_state()
         _LOGGER.info("Valve maintenance reset: zone='%s'", zone_name)
+
+    async def _handle_test_valve(self, call: ServiceCall) -> None:
+        """Run the supervised one-minute test on one zone and publish the result.
+
+        Refuses while anything is irrigating: the point is to attribute what moves
+        to this valve and nothing else. The three valve operations are handed to
+        ``valve_test`` as callables so that module names no service and no entity
+        domain — the adapter stays the only place that knows (GH #94).
+        """
+        zone_name = call.data.get(ATTR_ZONE_NAME)
+        if self._is_throttled("test_valve", zone_name):
+            return
+        zone = self._zones.get(zone_name)
+        if zone is None:
+            _LOGGER.error("test_valve: zone '%s' not found. Available: %s", zone_name, list(self._zones))
+            return
+        if not zone.valve:
+            _LOGGER.error("test_valve: zone '%s' has no valve configured", zone_name)
+            return
+        if self._running:
+            _LOGGER.warning("test_valve: irrigation in progress, refusing to test zone '%s'", zone_name)
+            return
+
+        duration = float(call.data.get("duration_s") or valve_test.DEFAULT_TEST_DURATION_S)
+        valve = zone.valve
+        _LOGGER.info("Zone '%s': supervised valve test starting, %ss", zone_name, duration)
+
+        self._running = True
+        self._active_valve = valve
+        try:
+            result = await valve_test.run_valve_test(
+                self._hass,
+                zone_name=zone_name,
+                valve_entity=valve,
+                meter_entity=zone.flow_meter_sensor,
+                duration_s=duration,
+                open_valve=lambda: _valve_call(self._hass, valve, on=True),
+                close_valve=lambda: _valve_call(self._hass, valve, on=False),
+                read_level=lambda: _valve_level(self._hass, valve),
+            )
+        finally:
+            self._running = False
+            self._active_valve = None
+
+        zone.record_valve_test(result.as_dict())
+        self._hass.bus.async_fire(EVENT_VALVE_TEST_COMPLETE, result.as_dict())
+        _LOGGER.info(
+            "Zone '%s': valve test done — volume=%s L, measured=%s L/h, smallest step=%s, updates=%d%s",
+            zone_name,
+            result.volume_l,
+            result.measured_lph,
+            result.smallest_step,
+            result.updates,
+            "" if not result.notes else " | " + "; ".join(result.notes),
+        )
+
+    async def _handle_apply_valve_test(self, call: ServiceCall) -> None:
+        """Write the measured flow rate into the zone's configuration.
+
+        Deliberately a separate, explicit action rather than something the test
+        does on its own. The test puts water on the ground and a person is
+        standing there; whether that minute was representative — the mains at
+        normal pressure, no other zone running, no hose being used — is a
+        judgement only that person can make. A test that silently rewrote the
+        configuration would turn one unlucky minute into a permanent number.
+        """
+        zone_name = call.data.get(ATTR_ZONE_NAME)
+        zone = self._zones.get(zone_name)
+        if zone is None:
+            _LOGGER.error("apply_valve_test: zone '%s' not found", zone_name)
+            return
+        result = zone.last_valve_test
+        if not result:
+            _LOGGER.error("apply_valve_test: zone '%s' has no test result yet — run the test first", zone_name)
+            return
+        lpm = result.get("measured_lpm")
+        if not lpm or lpm <= 0:
+            _LOGGER.error(
+                "apply_valve_test: zone '%s' measured no flow (%s) — nothing to apply. Check the meter",
+                zone_name,
+                lpm,
+            )
+            return
+        # Same bounds the form enforces, so a service call cannot store a value
+        # the options flow would refuse to show.
+        if not (UNUSUAL_FLOW_MIN_LPM <= lpm <= UNUSUAL_FLOW_MAX_LPM):
+            _LOGGER.warning(
+                "apply_valve_test: zone '%s' measured %.2f L/min (%.0f L/h), outside the plausible range"
+                " — not applied. Re-run the test, or set it by hand if the value is genuinely right",
+                zone_name,
+                lpm,
+                lpm * 60,
+            )
+            return
+
+        entry = next(
+            (
+                e
+                for e in self._hass.config_entries.async_entries(DOMAIN)
+                if any(z.get(CONF_ZONE_NAME) == zone_name for z in e.data.get(CONF_ZONES, []))
+            ),
+            None,
+        )
+        if entry is None:
+            _LOGGER.error("apply_valve_test: no config entry owns zone '%s'", zone_name)
+            return
+
+        previous = None
+        zones = []
+        for z in entry.data.get(CONF_ZONES, []):
+            if z.get(CONF_ZONE_NAME) == zone_name:
+                previous = z.get(CONF_ZONE_FLOW_RATE)
+                z = {**z, CONF_ZONE_FLOW_RATE: round(lpm, 3)}
+            zones.append(z)
+        self._hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_ZONES: zones})
+        _LOGGER.info(
+            "Zone '%s': guard flow rate set from the supervised test — %.0f L/h (was %s)",
+            zone_name,
+            lpm * 60,
+            "unset" if previous is None else f"{previous * 60:.0f} L/h",
+        )
 
     # ── Core irrigation logic ────────────────────────────
 
@@ -830,8 +983,7 @@ class IrrigationController:
         poll for the full timeout would pin the zone 'irrigating' for up to
         an hour. A confirmed 'off' is treated as end-of-session.
         """
-        state = self._hass.states.get(zone.valve)
-        return state is not None and state.state == "off"
+        return _valve_level(self._hass, zone.valve) == "off"
 
     def _fallback_volume_estimate(self, zone, elapsed_s: float, measured: float) -> float:
         """Estimate delivered volume when the flow sensor measured nothing.
@@ -893,10 +1045,10 @@ class IrrigationController:
         Sequence:
           1. ``number.set_value`` arms the volume target on the smart valve.
           2. Wait ``AUTO_OPEN_GRACE_S`` to see if the valve auto-opens.
-          3. If still closed after the grace window, send ``switch.turn_on``
+          3. If still closed after the grace window, send the open command
              (idempotent if the valve has just auto-opened in the gap).
           4. Poll for self-close (existing behaviour); on stop or timeout
-             we force ``switch.turn_off``.
+             we force the close command.
 
         Note: this delivery mode bypasses the driver on purpose.
         Smart valves with auto-close behaviour drive their own state and
@@ -941,18 +1093,18 @@ class IrrigationController:
         auto_opened = await self._wait_for_auto_open(zone.valve, grace_s)
         if not auto_opened:
             _LOGGER.info(
-                "Zone '%s': smart valve did not auto-open within %.1fs, sending switch.turn_on",
+                "Zone '%s': smart valve did not auto-open within %.1fs, sending the open command",
                 zone.zone_name,
                 grace_s,
             )
-            await self._hass.services.async_call("switch", "turn_on", {"entity_id": zone.valve})
+            await _valve_call(self._hass, zone.valve, on=True)
 
         # 4) Wait for the smart valve to finish (monitor switch state)
         timeout = zone.delivery_timeout
         elapsed = 0
         while elapsed < timeout:
             if self._should_abort(zone):
-                await self._hass.services.async_call("switch", "turn_off", {"entity_id": zone.valve})
+                await _valve_call(self._hass, zone.valve, on=False)
                 zone.set_irrigating(False)
                 zone.async_write_ha_state()
                 # Credit the water dispensed before the stop — the smart valve
@@ -962,8 +1114,7 @@ class IrrigationController:
             elapsed += FLOW_METER_POLL_INTERVAL_S
 
             # Check if the valve switch has turned off (valve closed itself)
-            valve_state = self._hass.states.get(zone.valve)
-            if valve_state and valve_state.state == "off":
+            if _valve_level(self._hass, zone.valve) == "off":
                 break
         else:
             _LOGGER.warning(
@@ -971,7 +1122,7 @@ class IrrigationController:
                 zone.zone_name,
                 timeout,
             )
-            await self._hass.services.async_call("switch", "turn_off", {"entity_id": zone.valve})
+            await _valve_call(self._hass, zone.valve, on=False)
 
         zone.set_irrigating(False)
         zone.async_write_ha_state()
@@ -1246,15 +1397,13 @@ class IrrigationController:
         for elapsed in range(duration_s):
             if self._stop_requested or (zone is not None and self._stop_zone == zone.zone_name):
                 return elapsed
-            if valve_entity is not None:
-                state = self._hass.states.get(valve_entity)
-                if state is not None and state.state == "off":
-                    _LOGGER.info(
-                        "Valve '%s' closed externally after %ds — aborting estimated_flow wait",
-                        valve_entity,
-                        elapsed,
-                    )
-                    return elapsed
+            if valve_entity is not None and _valve_level(self._hass, valve_entity) == "off":
+                _LOGGER.info(
+                    "Valve '%s' closed externally after %ds — aborting estimated_flow wait",
+                    valve_entity,
+                    elapsed,
+                )
+                return elapsed
             await asyncio.sleep(1)
         return duration_s
 
@@ -1262,14 +1411,14 @@ class IrrigationController:
         """Open a valve switch. Returns True on success, False on failure.
 
         Uses the :class:`~.driver.Driver` when one is registered for the
-        entity; otherwise falls back to a direct ``switch.turn_on`` call
+        entity; otherwise falls back to a direct open command
         (used for valves without an operator, including the test harness).
         """
         self._active_valve = entity_id
         _LOGGER.info("Attempting valve open: '%s'", entity_id)
         operator = self._valve_operators.get(entity_id)
         if operator is None:
-            await self._hass.services.async_call("switch", "turn_on", {"entity_id": entity_id})
+            await _valve_call(self._hass, entity_id, on=True)
             return True
         result = await operator.async_turn_on()
         if result.status != OperationStatus.OK:
@@ -1288,7 +1437,7 @@ class IrrigationController:
         """Close a valve switch. Returns True on success, False on failure."""
         operator = self._valve_operators.get(entity_id)
         if operator is None:
-            await self._hass.services.async_call("switch", "turn_off", {"entity_id": entity_id})
+            await _valve_call(self._hass, entity_id, on=False)
             if self._active_valve == entity_id:
                 self._active_valve = None
             return True
@@ -1315,15 +1464,14 @@ class IrrigationController:
         Used by ``volume_preset`` to detect smart-valves that open
         themselves after receiving the volume target. If the grace
         window elapses without the switch reporting ``"on"``, the caller
-        is expected to send ``switch.turn_on`` explicitly.
+        is expected to send the open command explicitly.
         """
         waited = 0.0
         step = min(0.5, max(0.01, grace_s / 6))
         while waited < grace_s:
             await asyncio.sleep(step)
             waited += step
-            state = self._hass.states.get(entity_id)
-            if state and state.state == "on":
+            if _valve_level(self._hass, entity_id) == "on":
                 return True
         return False
 
@@ -1371,7 +1519,8 @@ class IrrigationController:
         if zone is None:
             return
 
-        if old_state.state == "off" and new_state.state == "on":
+        _level = ValveCommandAdapter.interpret_state
+        if _level(old_state.state) == "off" and _level(new_state.state) == "on":
             # Valve opened manually — record baseline
             if zone.flow_meter_sensor:
                 is_rate = self._is_flow_rate_sensor(zone.flow_meter_sensor)
@@ -1402,7 +1551,7 @@ class IrrigationController:
                 zone.delivery_timeout,
             )
 
-        elif old_state.state == "on" and new_state.state == "off":
+        elif _level(old_state.state) == "on" and _level(new_state.state) == "off":
             if entity_id in self._controller_closing:
                 return  # NeverDry-initiated close — not a manual event
             if entity_id not in self._manual_valve_open:
@@ -1531,7 +1680,7 @@ class IrrigationController:
            as the upper bound, so a forgotten-open valve cannot run
            indefinitely.
 
-        The final ``switch.turn_off`` triggers the OFF transition that
+        The final close command triggers the OFF transition that
         :meth:`_on_valve_state_change` uses to finalise the session
         (deficit, ``last_irrigated``, ``is_irrigating``). If the user
         closes the valve first, the OFF transition cancels this task
@@ -1582,15 +1731,10 @@ class IrrigationController:
         if state is None or state.state != "on":
             return
         _LOGGER.info(
-            "Manual valve '%s' auto-close: target reached or timeout — sending switch.turn_off",
+            "Manual valve '%s' auto-close: target reached or timeout — sending the close command",
             zone_name,
         )
-        await self._hass.services.async_call(
-            "switch",
-            "turn_off",
-            {"entity_id": entity_id},
-            blocking=False,
-        )
+        await _valve_call(self._hass, entity_id, on=False)
 
     async def _monitor_via_flow_meter(
         self,

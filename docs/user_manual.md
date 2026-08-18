@@ -260,7 +260,7 @@ For each zone, the wizard asks:
 | Field | Required | Description |
 |-------|----------|-------------|
 | **Zone name** | Yes | Display name (e.g., "Vegetable Garden") |
-| **Valve** | No | The `switch` entity that controls this zone's valve. Leave empty for monitoring mode. |
+| **Valve** | No | The entity that controls this zone's valve — either a `switch.*` or a `valve.*` entity. Leave empty for monitoring mode. |
 | **Area (m²)** | Yes | Irrigated area in square meters |
 | **System type** | Yes | Irrigation method — sets the efficiency. Pick *Custom* to enter your own. |
 | **Efficiency override** | For *Custom* | Your own efficiency (0.1–1.0). Used **only** when the system type is *Custom*, and required in that case. |
@@ -268,6 +268,32 @@ For each zone, the wizard asks:
 | **Custom Kc** | For *Custom* | One fixed Kc (0.1–2.0). Used **only** when the plant family is *Custom*, and required in that case. |
 | **Site exposure** | No | How much sun and wind this zone gets compared to an open site. Multiplies the Kc. Default *Full sun, open* (×1.00) changes nothing. See table below. |
 | **Custom microclimate factor** | For *Custom* | Your own exposure factor (0.1–1.5). Used **only** when site exposure is *Custom*, and required in that case. |
+
+#### Which valve entities work
+
+The dropdown lists both `switch.*` and `valve.*` entities, and either one works
+the same way. Which of the two your hardware gives you is not a choice you made
+— it is how the integration that owns the device decided to expose it. Zigbee
+valves flashed through Zigbee2MQTT or ZHA usually appear as switches; Orbit
+B-hyve timers and most cloud-backed controllers appear as valves.
+
+NeverDry looks at the domain of the entity you picked and sends the commands
+that domain understands: `switch.turn_on` / `switch.turn_off` for a switch,
+`valve.open_valve` / `valve.close_valve` for a valve. Everything downstream is
+identical — the same open confirmation, the same flow checks, the same safety
+timeout, the same three protection layers. Reading state works the same way in
+reverse: a switch reports `on`/`off`, a valve reports `open`/`closed`, and both
+are understood, including the intermediate `opening` and `closing` a valve may
+pass through.
+
+Two limits are worth knowing before you wire something unusual:
+
+- **Valves are driven fully open or fully closed.** A valve that supports a
+  *position* (30 % open) is commanded open, not to a position. Partial opening
+  would change what a litre means, and the water balance is measured in litres.
+- **The entity must be the valve itself**, not a scene, script, or a group of
+  several valves. NeverDry watches the entity it commanded to confirm the valve
+  actually moved, and a script confirms nothing about water.
 | **Guard flow rate (L/min)** | For `estimated_flow` | Measured valve flow rate. Required for `estimated_flow`; strongly recommended for `flow_meter` and `volume_preset` too — it drives the expected-duration estimate, and that estimate is what bounds a delivery — without it the only bound is the safety timeout, an hour by default, regardless of how long the zone was ever going to take (it will become required in a future release). Measure with a bucket and stopwatch. |
 | **Threshold (mm)** | No | Deficit threshold for Mode A triggering (default: 20.0 mm) |
 
@@ -535,7 +561,7 @@ This diagram shows the complete irrigation decision flow, from weather data to v
 └────────┬────────┘  │  estimated duration,       │
          │           │  delivery_timeout          │
 ┌────────▼────────┐  │ )                          │
-│ Close valve     │  │ → switch.turn_off          │
+│ Close valve     │  │ → close command            │
 │ (target reached │  └─────┬──────────────────────┘
 │  / stop /       │        │
 │  timeout)       │        │ OR user closes manually

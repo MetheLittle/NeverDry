@@ -317,6 +317,73 @@ design.
 | `driver.py` | HA layer | One actuator: entity adapter, confirmed commands, safety layers |
 | `sensor.py` | HA layer | Entities, and the seam that builds each model's reading |
 
+### The outer boundary: entities in, entities out
+
+The two layers above describe the *inside*. There is a third line, further out, and
+it is the one that decides what belongs in this package at all:
+
+> **NeverDry consumes Home Assistant entities. It does not speak to hardware.**
+
+No MQTT client, no Zigbee knowledge, no device JSON parsing, no vendor cloud API —
+ever. The HA layer talks to `hass.states` and `hass.services`; what sits behind
+those is not this project's business. Full reasoning, and the recipes users apply
+on their side of the line, are in [`hardware-interface.md`](hardware-interface.md)
+(Accepted ADR).
+
+What this buys, and why it is worth refusing convenient exceptions:
+
+- **Every ecosystem is equal.** Zigbee2MQTT, ZHA, Matter, ESPHome and cloud
+  integrations all produce entities, so all are first-class. The first protocol the
+  integration learns makes the others second-class, served by a code path nobody
+  tests on hardware nobody here owns.
+- **No safety path depends on a broker.** Closing a valve must not be able to fail
+  because a message bus is down.
+- **Firmware trivia stays out of releases.** Which firmware renames which entity,
+  whether an amount is litres or gallons: that belongs in a document anyone can
+  correct, not in code.
+
+The practical rule when a device hides something: **write a recipe, not a feature.**
+Volume dosing is the worked example — writable on every valve tested and reachable
+on none, because the target sits inside a Zigbee2MQTT composite. The answer is ten
+lines of user YAML that produce a `number.*` entity, not an MQTT client in here.
+
+### The valve's domain is known in exactly one place
+
+`ValveCommandAdapter` (in `driver.py`) is the only code that knows a valve can
+be a `switch.*` or a `valve.*` entity. Two module-level helpers in
+`controller.py` route everything through it:
+
+```python
+_valve_level(hass, entity_id)      # -> "on" | "off" | "opening" | "closing" | "unknown"
+await _valve_call(hass, entity_id, on=True)   # picks the domain's service
+```
+
+`_valve_level` normalises the raw state — a `valve.*` says `open`/`closed`,
+a `switch.*` says `on`/`off`, and both arrive as the same two words — so every
+comparison downstream reads the normalised level, never `state.state`.
+
+**Never compare a valve state to a literal, and never name a service.** A line
+like `if state.state == "on"` or `services.async_call("switch", "turn_off", ...)`
+is correct for half the installed base and silently wrong for the other half:
+the valve saves without an error and never opens. That is exactly what GH #94
+reported, and it is why the adapter came before the selector was widened. The
+count matters — there were **twelve** such sites in `controller.py` alone,
+including both bypass paths and the leak-recovery path, and eleven fixed sites
+plus one missed site is still a broken install.
+
+Two guards in `test_architecture.py` hold this, and both are static:
+
+- **No production module outside `driver.py` may name a valve service.** Any
+  `async_call` whose domain is `switch`/`valve`, or whose service is
+  `turn_on`/`turn_off`/`open_valve`/`close_valve`, fails the build. Tests are
+  exempt: asserting which service reached HA is precisely their job.
+- **Every domain the adapter can drive is offered by the config-flow selector**,
+  checked in both directions — a domain offered but not drivable fails too, since
+  that is the #94 failure with the arrow reversed.
+
+When you add a third actuator domain, the adapter plus `EntityDomain` is the
+whole change, and the second guard tells you if you forgot the form.
+
 ### const.py
 
 All configuration keys (`CONF_*`), service names (`SERVICE_*`), system types, plant families, anchor days, and default values. Single source of truth for magic strings.
@@ -348,7 +415,7 @@ All configuration keys (`CONF_*`), service names (`SERVICE_*`), system types, pl
 
 | # | Trigger | Entry point | Source string | `is_irrigating` toggled | Flow meter integrated |
 |---|---|---|---|---|---|
-| 1 | External switch open (physical button on the valve, ZHA, HA switch) | `_on_valve_state_change` (callback on `switch` state changes) + `_external_session_monitor` (asyncio task) | `"manual"` | yes (on open / on close) | yes (cumulative or rate) |
+| 1 | External open (physical button on the valve, ZHA, HA switch/valve entity) | `_on_valve_state_change` (callback on the configured entity's state changes, whatever its domain) + `_external_session_monitor` (asyncio task) | `"manual"` | yes (on open / on close) | yes (cumulative or rate) |
 | 2 | "Irrigate" button / `irrigate_zone` service / `irrigate_all` service | `_handle_irrigate_zone` / `_handle_irrigate_all` → `_irrigate_zones` → `_deliver_water` | `"button"` | yes (inside `_deliver_*` modes) | yes (in `flow_meter` and `flow_rate` modes) |
 | 3 | Scheduler (Mode A reactive, Mode B scheduled) | `_make_reactive_handler` / `_make_scheduled_handler` → `_irrigate_zones` → `_deliver_water` | `"reactive"` / `"scheduled"` | yes | yes |
 | 4 | `mark_irrigated` service / "Mark irrigated" button | `_handle_mark_irrigated` → `reset_deficit("mark_irrigated")` | `"mark_irrigated"` | **no** (no physical irrigation through the tracked valve) | no |
@@ -424,7 +491,7 @@ Services are registered in `IrrigationController.register_services()`.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Zone display name |
-| `valve` | No | Valve or switch entity controlling the valve (omit for monitoring mode) |
+| `valve` | No | Entity controlling the valve, `switch.*` or `valve.*` (omit for monitoring mode) |
 | `area_m2` | Yes | Irrigated area [m²] |
 | `system_type` | Yes | Irrigation system → sets default efficiency |
 | `efficiency` | No | Override efficiency [0.1–1.0] |
@@ -644,6 +711,42 @@ the watering silently — the class of defect the guards in §8b exist to preven
 With the model in charge, a dead probe degrades to the estimate every zone always
 has.
 
+#### The exception, and why it is not an exception at all: indoors
+
+**Decided 2026-08-17.** The rule above is stated for the outdoors. It **inverts**
+for an indoor zone: there, if a probe exists, the probe is in charge and the model
+supports *it*.
+
+That reads like a contradiction and is not, because both halves follow from one
+question — **how much of the root zone does the probe actually see?**
+
+- **Outdoors**, a probe samples one point of a heterogeneous field. The empirical
+  argument above is exactly this: two zones on the same soil, different readings,
+  for reasons that are about plumbing and shade rather than about need.
+- **In a pot**, the probe samples essentially *the whole root zone*. The locality
+  objection does not shrink — it disappears. Same device, opposite standing.
+
+And the model loses its footing in the same move. Indoors there is no rain, no
+solar radiation, no wind, and a temperature that barely moves; FAO-56 without its
+drivers is not a conservative estimate, it is a constant. Preferring a constant
+over a direct measurement of the thing you care about would be method worship.
+
+A greenhouse sits with the outdoors, not with the indoors: no rain and attenuated
+radiation, but transpiration is real and often high, so the model keeps the
+balance and the probe supports it.
+
+| Zone type | Owns the balance | The other one |
+|---|---|---|
+| outdoor | the model | probe supports: calibration, observed field capacity, anomalies |
+| greenhouse | the model | same |
+| indoor | **the probe**, when one exists | the model supports, and takes over if the probe dies |
+
+The practical consequence is that **ownership is a property of the zone type**, so
+the type has to exist before this can be implemented — it is the same field that
+decides whether a zone irrigates through a valve or only raises an alert. Until
+then the unconditional overwrite that motivated all of this is simply a bug in
+every mode.
+
 What the probe is for, and what to build on it:
 
 | Use | Why it generalises from one spot |
@@ -683,6 +786,8 @@ because the property it holds was lost at least once, in production.
 | **`const` mirrors** | A scaffold claiming to mirror `const.py` actually does | A stale mirror reintroduces the bug the shipped side had deliberately removed |
 | **Form/runtime agreement** | What the config flow accepts is what `build_model` runs | A drift here is silent by construction: setup succeeds, the model degrades, and the user believes a tier is running that is not |
 | **Every offered method runs** | Each dropdown entry survives a real update on a site equipped for it | Construction was never the hard part. Two methods built correctly and raised on their first reading |
+| **One valve vocabulary** | No production module outside `driver.py` names a valve domain or service | Eleven fixed sites and one missed looks exactly like a fix, until the zone that stops watering is the missed one (GH #94) |
+| **Form offers what the driver drives** | Every `EntityDomain` the adapter can command is listed in the valve selector, both directions | A capability that works and is unreachable from the form is the #94 failure with the arrow reversed |
 | **Select options are lists** | `SelectSelectorConfig(options=...)` is list-shaped | The suite stubs Home Assistant, so nothing validates selector config: a form that cannot open in the real product passed 1286 tests |
 
 The last row is the general lesson, and worth carrying into any new test: **the

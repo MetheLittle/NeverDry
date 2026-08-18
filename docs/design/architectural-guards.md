@@ -97,6 +97,28 @@ hour, so the window was discarded and every tier exercised the warm-up fallback
 — passing, while testing the same formula four times. **A test that cannot fail
 is worse than no test**, because it is counted.
 
+### One valve vocabulary, and a form that offers it
+
+No production module outside `driver.py` may name a valve domain or one of its
+services; and every domain the adapter can command must appear in the config-flow
+selector, checked in both directions.
+
+**Lost as:** GH #94 — a user with an Orbit B-hyve timer could not select their
+valve, because the form listed switches only. The adapter that fixed it was
+written first and deliberately left unwired, and that ordering is the point: had
+the selector been widened first, the entity would have saved without an error
+and never opened.
+
+**Why the count is what matters:** `controller.py` alone held **twelve** sites
+that assumed the switch domain, two of them on bypass paths and one on leak
+recovery. Eleven fixed sites and one missed is not a partial fix, it is a broken
+install for whoever lands on the twelfth — and nothing about it looks wrong until
+that zone dries out.
+
+**And the reverse direction, which is the newer half:** once the adapter handles
+a domain, leaving it out of the form is a capability nobody can reach. Both
+halves ship together or the feature is a claim, not a feature.
+
 ### Select options are lists
 
 `SelectSelectorConfig(options=...)` must be list-shaped, checked statically.

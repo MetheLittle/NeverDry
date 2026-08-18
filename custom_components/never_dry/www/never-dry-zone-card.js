@@ -38,6 +38,11 @@ const I18N = {
     maintenance: "Maintenance",
     unreachable: "Valve not responding",
     waitingForValve: "waiting for first contact",
+    secWarnings: "Needs attention",
+    warn_timeout_caps_duration: "Beyond the timeout — this zone will stop short of its target",
+    warn_no_guard_flow: "No guard flow rate — the expected duration is unknown",
+    warn_valve_unreachable: "Valve not responding — check the radio link or the batteries",
+    measuredMoisture: "Measured moisture",
     unreachableHint: "check the radio link or the batteries",
     valve: "Valve",
     modelRate: "Reference ET rate",
@@ -84,6 +89,11 @@ const I18N = {
     maintenance: "Manutenzione",
     unreachable: "Valvola non raggiungibile",
     waitingForValve: "in attesa di risposta",
+    secWarnings: "Da guardare",
+    warn_timeout_caps_duration: "Oltre il timeout — la zona si fermerà prima di arrivare all'obiettivo",
+    warn_no_guard_flow: "Nessuna portata di guardia — la durata prevista è ignota",
+    warn_valve_unreachable: "Valvola non raggiungibile — controlla il collegamento radio o le batterie",
+    measuredMoisture: "Umidità misurata",
     unreachableHint: "controlla il collegamento radio o le batterie",
     valve: "Valvola",
     modelRate: "Tasso ET di riferimento",
@@ -415,6 +425,10 @@ class NeverDryZoneCard extends HTMLElement {
           <div class="nd-sec-title"></div><div class="nd-grid"></div>
         </div>
 
+        <div class="nd-section nd-warnbox" data-key="warnings">
+          <div class="nd-sec-title"></div><div class="nd-grid"></div>
+        </div>
+
         <div class="nd-actions"></div>
       </ha-card>`;
 
@@ -497,6 +511,13 @@ class NeverDryZoneCard extends HTMLElement {
 
     // --- temporal sections (label = localized friendly_name, value = formatEntityState) ---
     // Current state (deficit) lives in the bar above; here we group by horizon.
+    // The backend decides whether the safety timeout is shorter than the job
+    // needs; the card only draws it. Same carrier merge as the exposure cell:
+    // the configuration attributes live on the Volume sensor.
+    const _zoneAttrs = {
+      ...((ents.volume && ents.volume.attributes) || {}),
+      ...((ents.deficit && ents.deficit.attributes) || {}),
+    };
     this._fillSection("next", t(hass, "secNext"), [
       ["mdi:cup-water", ents.volume, "Volume"],
       ["mdi:timer-sand", ents.duration, "Duration", "duration"],
@@ -522,6 +543,7 @@ class NeverDryZoneCard extends HTMLElement {
       ["mdi:weather-rainy", ents.rain, "Rain"],
     ]);
     // Static / config parameters last.
+    this._fillWarnings(_zoneAttrs.warnings);
     this._fillSection("params", t(hass, "secParams"), [
       ["mdi:target", ents.threshold, "Threshold"],
       ["mdi:speedometer", ents.flowRate, "Flow rate"],
@@ -530,7 +552,7 @@ class NeverDryZoneCard extends HTMLElement {
       ["mdi:percent", ents.efficiency, "Efficiency"],
       ["mdi:cog", ents.irrigationMode, "Mode"],
       ["mdi:clock-time-six", ents.irrigationTime, "Irrigation time"],
-    ], this._exposureCell(ents));
+    ], this._exposureCell(ents) + this._moistureCell(_zoneAttrs));
 
     this._updateConfigLink(ents);
 
@@ -580,6 +602,26 @@ class NeverDryZoneCard extends HTMLElement {
     link.hidden = !carrier;
   }
 
+  /**
+   * The probe's reading, when a zone has one. Shown as a PERCENTAGE and never as
+   * millimetres: it is a measurement of the soil, not a term of the balance —
+   * the balance belongs to the model (see the developer manual). Absent when no
+   * probe is configured, which is most zones.
+   */
+  _moistureCell(a) {
+    const vwc = a && a.probe_water_content;
+    if (typeof vwc !== "number") return "";
+    const pct = (vwc <= 1 ? vwc * 100 : vwc).toFixed(1);
+    return `
+      <div class="nd-cell">
+        <ha-icon icon="mdi:water-percent"></ha-icon>
+        <div class="nd-cell-txt">
+          <span class="nd-cell-lbl">${escapeHtml(t(this._hass, "measuredMoisture"))}</span>
+          <span class="nd-cell-val">${escapeHtml(pct)}%</span>
+        </div>
+      </div>`;
+  }
+
   _exposureCell(ents) {
     // The main zone entity, not the deficit projection: the configuration
     // attributes live on the Volume sensor, while the deficit carries only the
@@ -616,6 +658,30 @@ class NeverDryZoneCard extends HTMLElement {
             <span class="nd-cell-val">${escapeHtml(value)}</span>
           </div>
         </div>`;
+  }
+
+  /**
+   * The warnings box. It reuses the ordinary two-column grid and the ordinary
+   * section machinery, which already hides a section whose content is empty —
+   * so "collapses when there is nothing wrong" costs no extra code. The list
+   * arrives as codes; the wording and the language live here.
+   */
+  _fillWarnings(codes) {
+    const box = this.querySelector('.nd-section[data-key="warnings"]');
+    if (!box) return;
+    const list = Array.isArray(codes) ? codes : [];
+    const html = list
+      .map((code) => {
+        const text = t(this._hass, "warn_" + code) || code;
+        return `<div class="nd-cell">
+          <ha-icon icon="mdi:alert-outline"></ha-icon>
+          <div class="nd-cell-txt"><span class="nd-warn-txt">${escapeHtml(text)}</span></div>
+        </div>`;
+      })
+      .join("");
+    box.querySelector(".nd-sec-title").textContent = t(this._hass, "secWarnings");
+    box.querySelector(".nd-grid").innerHTML = html;
+    box.style.display = html ? "" : "none";
   }
 
   _fillSection(key, title, items, extraHtml = "") {
@@ -691,6 +757,10 @@ class NeverDryZoneCard extends HTMLElement {
         const v = fmt === "duration" ? fmtDuration(this._hass, st) : fmtState(this._hass, st);
         if (v === null) return "";
         const label = this._label(st, fallback);
+        // The backend decides whether the timeout bites; the card only draws it.
+        // Read from whichever entity carries the zone attributes — the same
+        // carrier the exposure cell uses — so this works no matter which of the
+        // zone's sensors happens to be present.
         return `
         <div class="nd-cell">
           <ha-icon icon="${icon}"></ha-icon>
@@ -814,11 +884,23 @@ const CARD_CSS = `
   .nd-cell-lbl { font-size:.72rem; color:var(--secondary-text-color); }
   .nd-cell-val { font-size:.95rem; font-weight:500;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* The triangle sits inline after the duration, small enough not to shout and
+     coloured warning rather than error: the zone still waters, it just stops
+     short. The tooltip carries the sentence; the icon alone would only puzzle. */
   .nd-section { margin-top:6px; }
   .nd-section + .nd-section { border-top:1px solid var(--divider-color);
     margin-top:12px; padding-top:12px; }
   .nd-sec-title { font-size:.7rem; font-weight:700; letter-spacing:.05em;
     text-transform:uppercase; color:var(--secondary-text-color); margin-bottom:8px; }
+  /* Yellow, not red: every condition in here changes how much water a zone gets,
+     and none of them is a failure — the zone still waters. The box is invisible
+     when empty rather than shown empty, so its presence is itself the signal. */
+  .nd-warnbox { background:color-mix(in srgb, var(--warning-color, #f0a30a) 12%, transparent);
+    border:1px solid var(--warning-color, #f0a30a); border-radius:10px;
+    padding:10px 12px; margin-top:14px; }
+  .nd-warnbox .nd-sec-title { color:var(--warning-color, #f0a30a); margin-bottom:6px; }
+  .nd-warnbox ha-icon { color:var(--warning-color, #f0a30a); --mdc-icon-size:18px; }
+  .nd-warn-txt { font-size:.82rem; line-height:1.25; }
   .nd-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
   .nd-btn { display:inline-flex; align-items:center; gap:6px; cursor:pointer;
     border:none; border-radius:18px; padding:8px 14px; font-size:.85rem;

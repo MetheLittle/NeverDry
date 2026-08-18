@@ -253,6 +253,21 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
                     mode="dropdown",
                 )
             ),
+            vol.Optional(CONF_D_MAX, default=d_max_default): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.5 if is_imperial else 10.0,
+                    max=20.0 if is_imperial else 500.0,
+                    step=0.01 if is_imperial else 10.0,
+                    mode="box",
+                    unit_of_measurement=d_unit,
+                )
+            ),
+            # The method comes immediately before alpha, and that adjacency is the
+            # whole design: a form cannot show or hide a field in reaction to a
+            # dropdown within one step, so the only way to express "this box
+            # belongs to that choice" is to put it underneath it. The label says
+            # which method uses it; the confirm step says so again if it is inert.
+            **_et_method_field(),
             vol.Optional(CONF_ALPHA, default=DEFAULT_ALPHA): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0.05,
@@ -271,17 +286,7 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
                     unit_of_measurement=t_unit,
                 )
             ),
-            vol.Optional(CONF_D_MAX, default=d_max_default): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.5 if is_imperial else 10.0,
-                    max=20.0 if is_imperial else 500.0,
-                    step=0.01 if is_imperial else 10.0,
-                    mode="box",
-                    unit_of_measurement=d_unit,
-                )
-            ),
             **_extra_sensor_fields(),
-            **_et_method_field(),
         }
     )
 
@@ -315,6 +320,16 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
                     mode="dropdown",
                 )
             ),
+            vol.Optional(CONF_D_MAX, default=d_display): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.5 if is_imperial else 10.0,
+                    max=20.0 if is_imperial else 500.0,
+                    step=0.01 if is_imperial else 10.0,
+                    mode="box",
+                    unit_of_measurement=d_unit,
+                )
+            ),
+            **_et_method_field(current),
             vol.Optional(CONF_ALPHA, default=current.get(CONF_ALPHA, DEFAULT_ALPHA)): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0.05,
@@ -333,17 +348,7 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
                     unit_of_measurement=t_unit,
                 )
             ),
-            vol.Optional(CONF_D_MAX, default=d_display): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.5 if is_imperial else 10.0,
-                    max=20.0 if is_imperial else 500.0,
-                    step=0.01 if is_imperial else 10.0,
-                    mode="box",
-                    unit_of_measurement=d_unit,
-                )
-            ),
             **_extra_sensor_fields(current),
-            **_et_method_field(current),
         }
     )
 
@@ -414,8 +419,15 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
             vol.Required(SECTION_VALVE): section(
                 vol.Schema(
                     {
+                        # Both domains: a `valve.*` entity is driven with valve
+                        # services by the same adapter the driver uses, so the
+                        # selector no longer has to lie about what is supported
+                        # (GH #94). Widened only after the command path and the
+                        # controller's own state checks went through that adapter
+                        # — offering it earlier would have shown a valve that
+                        # saved without error and never opened.
                         vol.Optional(CONF_ZONE_VALVE): selector.EntitySelector(
-                            selector.EntitySelectorConfig(domain="switch")
+                            selector.EntitySelectorConfig(domain=["switch", "valve"])
                         ),
                         vol.Optional(CONF_ZONE_DELIVERY_MODE, default=DEFAULT_DELIVERY_MODE): selector.SelectSelector(
                             selector.SelectSelectorConfig(
@@ -1013,7 +1025,10 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         ]
         pf_opts = list(PLANT_FAMILIES.keys())
         ex_opts = list(EXPOSURES.keys())
-        ent_sw = selector.EntitySelectorConfig(domain="switch")
+        # Both domains, as in the creation form: the adapter drives a `valve.*`
+        # with valve services, so restricting this to switches would hide a
+        # capability that works (GH #94).
+        ent_sw = selector.EntitySelectorConfig(domain=["switch", "valve"])
         ent_sn = selector.EntitySelectorConfig(domain="sensor")
         ent_nr = selector.EntitySelectorConfig(domain="number")
 

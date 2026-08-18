@@ -33,7 +33,7 @@ installation NeverDry knows only what the user typed into the config flow:
 
 | Field | Required | |
 |---|---|---|
-| `valve` | **yes**, for any zone that irrigates | the on/off switch |
+| `valve` | **yes**, for any zone that irrigates | the valve entity, `switch.*` or `valve.*` |
 | `battery_sensor` | no | |
 | `flow_meter_sensor` | no | |
 
@@ -53,8 +53,8 @@ already uses to find the on-device timer.
 
 It degrades cleanly:
 
-- **a switch with no device** (template or YAML switches) — no `device_id`, so
-  the union is the configured switch alone. Less signal, no error;
+- **an entity with no device** (template or YAML switches) — no `device_id`, so
+  the union is the configured entity alone. Less signal, no error;
 - **a device with one entity** — same, with no special case to write;
 - **a multi-valve controller** — and this one is a real limit, not a degradation.
   Four zones on one physical controller share one device, so they share one

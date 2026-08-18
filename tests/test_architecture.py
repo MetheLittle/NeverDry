@@ -427,3 +427,85 @@ def test_the_developer_manual_does_not_place_the_formulas_in_the_entity_layer():
     assert "All formulas live in `sensor.py`" not in manual, (
         "the formulas live in water_balance_model.py — the manual is describing the code from before the wiring"
     )
+
+
+def test_the_valve_selector_offers_both_domains_the_driver_can_drive():
+    """What the form offers must match what the actuator can actually command.
+
+    The two halves of `valve.*` support arrived a day apart: the adapter first,
+    the selector second, and the gap was deliberate — offering a valve the
+    command path could not open would have produced an entity that saves without
+    error and never waters. This test is the other direction of the same care:
+    once the adapter handles a domain, hiding it in the form is a capability
+    nobody can reach.
+    """
+    import ast
+
+    from never_dry.driver import EntityDomain
+
+    drivable = {d.value for d in EntityDomain}
+    tree = ast.parse((PACKAGE / "config_flow.py").read_text(encoding="utf-8"))
+
+    offered: set[str] = set()
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "EntitySelectorConfig"
+        ):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "domain":
+                continue
+            if isinstance(kw.value, ast.List):
+                values = {e.value for e in kw.value.elts if isinstance(e, ast.Constant)}
+                if values & drivable:
+                    offered |= values
+
+    assert drivable <= offered, (
+        f"the driver can command {sorted(drivable)} but the valve selector only offers {sorted(offered)}"
+    )
+
+
+def test_only_the_adapter_names_a_valve_service():
+    """`switch.turn_on` written anywhere else is a half-broken install.
+
+    GH #94 is what this costs when it is missed: a `valve.*` entity that the
+    form accepts, that saves without an error, and that never opens. The
+    dangerous shape is not one wrong site — it is eleven fixed sites and one
+    missed, because eleven-twelfths of a fix looks exactly like a fix until the
+    zone in question is the one that stops watering.
+
+    So the domain lives in `ValveCommandAdapter` and the rest of production asks
+    it. Production only — the tests below name services deliberately, because
+    asserting the right service reached HA is their job.
+    """
+    import ast
+
+    ALLOWED = {"driver.py", "valve_operator.py"}  # the adapter, and the module it superseded
+    SERVICES = {"turn_on", "turn_off", "open_valve", "close_valve"}
+
+    offenders: list[str] = []
+    for module in sorted(PACKAGE.glob("*.py")):
+        if module.name in ALLOWED:
+            continue
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "async_call"
+                and node.args
+            ):
+                continue
+            domain = node.args[0]
+            service = node.args[1] if len(node.args) > 1 else None
+            named_domain = isinstance(domain, ast.Constant) and domain.value in {"switch", "valve"}
+            named_service = isinstance(service, ast.Constant) and service.value in SERVICES
+            if named_domain or named_service:
+                offenders.append(f"{module.name}:{node.lineno}")
+
+    assert not offenders, (
+        "these sites name a valve service directly instead of asking ValveCommandAdapter, "
+        f"so they work for one entity domain and silently fail for the other: {offenders}"
+    )
