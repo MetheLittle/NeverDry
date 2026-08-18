@@ -631,9 +631,19 @@ class NeverDryZoneCard extends HTMLElement {
    * the balance belongs to the model (see the developer manual). Absent when no
    * probe is configured, which is most zones.
    */
+  /**
+   * The probe reading, or a placeholder holding its place.
+   *
+   * The grid is two columns and this cell sits top-right, so letting it vanish
+   * would shift every following cell up one slot. Two zones side by side would
+   * then disagree about where "Area" lives, and the card is read by scanning
+   * position, not by reading labels. The placeholder keeps a zone's layout
+   * identical whether or not it has a probe — the cost is a small gap on
+   * installations that use none.
+   */
   _moistureCell(a) {
     const vwc = a && a.probe_water_content;
-    if (typeof vwc !== "number") return "";
+    if (typeof vwc !== "number") return `<div class="nd-cell nd-cell-hold" aria-hidden="true"></div>`;
     const pct = (vwc <= 1 ? vwc * 100 : vwc).toFixed(1);
     return `
       <div class="nd-cell">
@@ -933,6 +943,8 @@ const CARD_CSS = `
     transition: width .4s ease, background .4s ease; }
   .nd-bar-sub { font-size:.75rem; color:var(--secondary-text-color); margin-top:4px; }
   .nd-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; }
+  /* Holds a grid slot so zones with and without a probe line up. */
+  .nd-cell-hold { visibility:hidden; }
   .nd-config { margin-left:auto; color:var(--secondary-text-color); text-decoration:none; opacity:.7; }
   .nd-config:hover { opacity:1; color:var(--primary-color); }
   .nd-cell { display:flex; align-items:center; gap:8px; min-width:0; }
