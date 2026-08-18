@@ -43,6 +43,8 @@ const I18N = {
     warn_no_guard_flow: "No design flow rate — the expected duration is unknown",
     designFlow: "Design flow (emitters)",
     measuredFlow: "Measured flow (real)",
+    flowLearning: "learning",
+    ofDesign: "of design",
     warn_valve_unreachable: "Valve not responding — check the radio link or the batteries",
     measuredMoisture: "Measured moisture",
     unreachableHint: "check the radio link or the batteries",
@@ -96,6 +98,8 @@ const I18N = {
     warn_no_guard_flow: "Nessuna portata di progetto — la durata prevista è ignota",
     designFlow: "Portata di progetto (erogatori)",
     measuredFlow: "Portata misurata (reale)",
+    flowLearning: "in apprendimento",
+    ofDesign: "del progetto",
     warn_valve_unreachable: "Valvola non raggiungibile — controlla il collegamento radio o le batterie",
     measuredMoisture: "Umidità misurata",
     unreachableHint: "controlla il collegamento radio o le batterie",
@@ -550,16 +554,28 @@ class NeverDryZoneCard extends HTMLElement {
     ]);
     // Static / config parameters last.
     this._fillWarnings(_zoneAttrs.warnings);
-    this._fillSection("params", t(hass, "secParams"), [
-      ["mdi:target", ents.threshold, "Threshold"],
-      ["mdi:speedometer", ents.flowRate, t(hass, "designFlow")],
-      ["mdi:gauge-full", ents.measuredFlow, t(hass, "measuredFlow")],
-      ["mdi:texture-box", ents.area, "Area"],
-      ["mdi:leaf", ents.kc, "Kc"],
-      ["mdi:percent", ents.efficiency, "Efficiency"],
-      ["mdi:cog", ents.irrigationMode, "Mode"],
-      ["mdi:clock-time-six", ents.irrigationTime, "Irrigation time"],
-    ], this._exposureCell(ents) + this._moistureCell(_zoneAttrs));
+    // Order is deliberate. The probe reading sits top-right, beside the
+    // threshold it is judged against — a measurement next to its yardstick.
+    // The two flow rates close the grid as a pair: design and measured mean
+    // little apart and are a diagnosis together, so they must not be separated
+    // by the rows between them. Where there is no probe the cell collapses and
+    // the grid simply closes up.
+    this._fillSection(
+      "params",
+      t(hass, "secParams"),
+      [["mdi:target", ents.threshold, "Threshold"]],
+      this._moistureCell(_zoneAttrs) +
+        this._rows([
+          ["mdi:texture-box", ents.area, "Area"],
+          ["mdi:leaf", ents.kc, "Kc"],
+          ["mdi:percent", ents.efficiency, "Efficiency"],
+          ["mdi:cog", ents.irrigationMode, "Mode"],
+          ["mdi:clock-time-six", ents.irrigationTime, "Irrigation time"],
+        ]) +
+        this._exposureCell(ents) +
+        this._rows([["mdi:speedometer", ents.flowRate, t(hass, "designFlow")]]) +
+        this._measuredFlowCell(ents),
+    );
 
     this._updateConfigLink(ents);
 
@@ -627,6 +643,41 @@ class NeverDryZoneCard extends HTMLElement {
           <span class="nd-cell-val">${escapeHtml(pct)}%</span>
         </div>
       </div>`;
+  }
+
+  /**
+   * The measured flow, and while it is still being learned, how far along it is.
+   *
+   * A plain row would vanish here: the sensor reads `unknown` until enough real
+   * sessions have been collected, and an absent cell is indistinguishable from a
+   * feature that does not exist. Since this is the number the user is waiting
+   * for — the one that says whether the zone delivers what it was designed to —
+   * the cell stays and reports its own progress instead of disappearing.
+   */
+  _measuredFlowCell(ents) {
+    const st = ents.measuredFlow;
+    if (!st) return "";
+    const a = st.attributes || {};
+    const known = st.state !== "unknown" && st.state !== "unavailable";
+    let value;
+    if (known) {
+      value = fmtState(this._hass, st);
+      // The gap against the design rate is the whole reason both are shown.
+      const pct = Number(a.vs_design_pct);
+      if (Number.isFinite(pct)) value += ` (${pct.toFixed(0)}% ${t(this._hass, "ofDesign")})`;
+    } else {
+      const n = Number(a.sample_count) || 0;
+      const need = Number(a.min_samples_required) || 3;
+      value = `${t(this._hass, "flowLearning")} (${n}/${need})`;
+    }
+    return `
+        <div class="nd-cell">
+          <ha-icon icon="mdi:gauge-full"></ha-icon>
+          <div class="nd-cell-txt">
+            <span class="nd-cell-lbl">${escapeHtml(t(this._hass, "measuredFlow"))}</span>
+            <span class="nd-cell-val">${escapeHtml(value)}</span>
+          </div>
+        </div>`;
   }
 
   _exposureCell(ents) {

@@ -684,6 +684,11 @@ def _setup_controller(
             hass,
             zs.valve,
             flow_meter_sensor=zs.flow_meter_sensor,
+            # The design rate, even though the delivery loop still lives in the
+            # controller: the driver needs it to size the flow-verification
+            # window (resolution / flow rate — GH #173). Without it that window
+            # falls back to a blanket constant, which is the defect being fixed.
+            flow_rate_lpm=zs._flow_rate,
             name=zs.zone_name,
             notifier=notifier,
             # Callable, not snapshot: re-evaluated at every valve open so the
@@ -3161,6 +3166,7 @@ class ZoneMeasuredFlowSensor(_ZoneTextSensor):
         if operator is not None:
             history = operator.session_flow_diagnostics
             attrs["sample_count"] = history.get("sample_count")
+            attrs["min_samples_required"] = history.get("min_samples_required")
             attrs["min_lph"] = round(v * LPM_TO_LPH, 1) if (v := history.get("min_lpm")) else None
             attrs["max_lph"] = round(v * LPM_TO_LPH, 1) if (v := history.get("max_lpm")) else None
             measured = operator.measured_flow_lpm

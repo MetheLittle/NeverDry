@@ -1141,6 +1141,12 @@ class IrrigationController:
         zone.set_irrigating(True)
         zone.async_write_ha_state()
 
+        # Kept apart from ``initial_reading``, which the loop rebases on a meter
+        # reset: a rebased baseline would file the reset as delivered water.
+        flow_baseline = initial_reading
+        last_reading = initial_reading
+        session_start = time.monotonic()
+
         timeout = zone.delivery_timeout
         elapsed = 0
         delivered = 0.0
@@ -1176,6 +1182,13 @@ class IrrigationController:
                 )
                 continue
 
+            if current_reading > last_reading:
+                # Every delivery teaches the meter's step for free; the smallest
+                # increment ever seen is its limit of detection, and that is what
+                # makes the flow-verification window derivable (GH #173).
+                self._observe_meter_step(zone, current_reading - last_reading)
+            last_reading = current_reading
+
             delivered = current_reading - initial_reading
             if delivered < 0:
                 _LOGGER.warning("Flow meter reset detected, adjusting baseline")
@@ -1196,10 +1209,34 @@ class IrrigationController:
                 volume_target,
             )
 
+        session_s = time.monotonic() - session_start
         await self._close_valve(zone.valve)
         zone.set_irrigating(False)
         zone.async_write_ha_state()
+        self._schedule_flow_sample(zone, meter_entity, flow_baseline, session_s)
         return self._fallback_volume_estimate(zone, elapsed, delivered)
+
+    def _driver_for(self, zone):
+        """The driver that owns this zone's valve, if the zone has one."""
+        return self._valve_operators.get(zone.valve) if zone.valve else None
+
+    def _observe_meter_step(self, zone, step: float) -> None:
+        """Teach the zone's driver the smallest counter increment seen."""
+        driver = self._driver_for(zone)
+        if driver is not None and hasattr(driver, "record_meter_resolution"):
+            driver.record_meter_resolution(step)
+
+    def _schedule_flow_sample(self, zone, meter_entity: str, baseline: float | None, session_s: float) -> None:
+        """Ask the driver to file this session's real flow rate, once it settles.
+
+        Deferred inside the driver by design: the meter's last tick routinely
+        lands after the valve is already shut, so the reading is taken a little
+        later. The delivery has to return now regardless.
+        """
+        driver = self._driver_for(zone)
+        if driver is None or baseline is None or not hasattr(driver, "_schedule_flow_sample"):
+            return
+        driver._schedule_flow_sample(meter_entity, baseline, session_s)
 
     async def _deliver_flow_rate(
         self,

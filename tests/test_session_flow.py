@@ -308,3 +308,32 @@ class TestTheMeterTeachesItsOwnResolution:
         tracker = SessionFlowTracker(hass, "switch.valve")
         assert tracker.observe_step(0.0) is False
         assert tracker.resolution_l is None
+
+
+class TestTheDriverIsWiredWithWhatItNeeds:
+    """Field-found: the driver was built without the zone's flow rate.
+
+    Everything derived from `resolution / flow rate` silently fell back to a
+    blanket constant, because the driver's rate was 0 and the derivation
+    returned nothing. The unit tests all passed — they constructed the driver
+    themselves and passed the rate. Only a live session showed the gap, so the
+    wiring itself is asserted here.
+    """
+
+    def test_the_zone_setup_passes_the_design_flow_rate(self):
+        import inspect
+
+        from never_dry import sensor as sensor_module
+
+        src = inspect.getsource(sensor_module._setup_controller)
+        assert "flow_rate_lpm=" in src, (
+            "ZoneDriver is built without flow_rate_lpm: the flow-verification "
+            "window cannot be derived and falls back to a constant"
+        )
+
+    def test_without_a_rate_the_derivation_declines_instead_of_guessing(self):
+        hass = _hass_with_meter([0.0])
+        driver = _driver(hass)
+        driver._flow_rate_lpm = 0.0
+        driver._session_flow.resolution_l = 1.0
+        assert driver.time_to_first_tick_s() is None
