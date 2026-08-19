@@ -307,18 +307,25 @@ class NeverDryZoneCard extends HTMLElement {
         // ("<entry_id>_irrigate_<zone>"): strip the entry prefix before
         // matching, but keep trying the raw uid for unmigrated installs.
         const bare = uid.slice(uid.indexOf("_") + 1);
-        let matched = false;
         for (const [role, prefix] of uidRoles) {
           if (!out[role] && (uid.startsWith(prefix) || bare.startsWith(prefix))) {
             out[role] = st;
-            matched = true;
             break;
           }
         }
-        if (matched) continue;
+        // Known unique_id and no role wants it: this entity is none of them.
+        // Falling through to the suffix match would let it impersonate a role
+        // whose suffix its own contains — a removed button left orphaned in the
+        // registry as `..._save_measured_flow_rate` ends with
+        // `_measured_flow_rate`, so it answered for the Measured flow sensor and
+        // reported 0 samples for ever (field, 2026-08-19). Both maps cover the
+        // same 22 roles, so nothing legitimate needs the fallback here.
+        continue;
       }
 
-      // 2) Fallback: entity_id suffix (longest-match).
+      // 2) Fallback: entity_id suffix (longest-match). Only for entities whose
+      // unique_id could not be read at all — an unmigrated install, or a
+      // registry fetch that failed.
       const objectId = (ent.entity_id.split(".")[1] || "").toLowerCase();
       for (const [role, suffix] of suffixRoles) {
         if (!out[role] && objectId.endsWith(suffix)) {

@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import monotonic
+from typing import ClassVar
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -3062,7 +3063,33 @@ class ZoneLastIrrigatedSensor(_ZoneTextSensor):
 
 
 class ZoneLastSourceSensor(_ZoneTextSensor):
-    """How the zone was last irrigated."""
+    """How the zone was last irrigated.
+
+    An ``enum`` device class with a translation key, rather than a plain string:
+    the raw value is an internal token (``mark_irrigated``, ``scheduled``) and it
+    was reaching the user verbatim. Translating it here means Home Assistant
+    renders it everywhere — card, history, logbook, voice — instead of only in
+    the places we remembered to handle.
+
+    Every value the controller can write must be listed in ``options`` or Home
+    Assistant rejects the state, so this list is the authoritative enumeration:
+    the four ``Trigger`` members, plus ``button`` for the card's actions,
+    ``automatic`` as the controller's fallback, and the two ``reset_deficit``
+    reasons that also surface here.
+    """
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_translation_key = "last_source"
+    _attr_options: ClassVar[list[str]] = [
+        "scheduled",
+        "reactive",
+        "manual",
+        "service",
+        "button",
+        "automatic",
+        "mark_irrigated",
+        "service_reset",
+    ]
 
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
@@ -3075,7 +3102,21 @@ class ZoneLastSourceSensor(_ZoneTextSensor):
 
     @property
     def native_value(self) -> str | None:
-        return self._zone_sensor._last_irrigation_source
+        """The raw token, or ``None`` when it is one we never declared.
+
+        Returning an undeclared value would make Home Assistant log the state as
+        invalid on every write; a gap is quieter than a broken entity, and the
+        log line below says which token is missing from ``options``.
+        """
+        value = self._zone_sensor._last_irrigation_source
+        if value is None or value in self._attr_options:
+            return value
+        _LOGGER.warning(
+            "Zone '%s': irrigation source '%s' is not a declared option — add it to ZoneLastSourceSensor",
+            self._zone_sensor.zone_name,
+            value,
+        )
+        return None
 
 
 class ZoneFlowRateSensor(_ZoneTextSensor):

@@ -508,3 +508,38 @@ class TestEstimatedFlowCreditsTheMeterWhenThereIsOne:
 
         ctrl._schedule_flow_sample.assert_called_once()
         assert ctrl._schedule_flow_sample.call_args.args[2] == 1000.0  # the baseline
+
+
+class TestTheLastSourceReadsAsWords:
+    """`mark_irrigated` was reaching the card verbatim (field, 2026-08-19)."""
+
+    def test_every_trigger_the_scheduler_can_emit_is_a_declared_option(self):
+        """An undeclared value makes Home Assistant reject the state."""
+        from never_dry.scheduler import Trigger
+        from never_dry.sensor import ZoneLastSourceSensor
+
+        for trigger in Trigger:
+            assert str(trigger) in ZoneLastSourceSensor._attr_options, (
+                f"Trigger.{trigger.name} is not declared in ZoneLastSourceSensor._attr_options"
+            )
+
+    def test_the_controller_own_source_tokens_are_declared(self):
+        """Values the controller writes directly, outside the Trigger enum."""
+        from never_dry.sensor import ZoneLastSourceSensor
+
+        for token in ("button", "automatic", "mark_irrigated", "service_reset"):
+            assert token in ZoneLastSourceSensor._attr_options
+
+    def test_every_option_has_a_translation_in_both_languages(self):
+        """A declared option with no translation still shows the raw token."""
+        import json
+        from pathlib import Path
+
+        from never_dry.sensor import ZoneLastSourceSensor
+
+        root = Path(__file__).resolve().parent.parent / "custom_components" / "never_dry"
+        for rel in ("strings.json", "translations/en.json", "translations/it.json"):
+            data = json.loads((root / rel).read_text(encoding="utf-8"))
+            states = data["entity"]["sensor"]["last_source"]["state"]
+            missing = [o for o in ZoneLastSourceSensor._attr_options if o not in states]
+            assert not missing, f"{rel} is missing: {missing}"

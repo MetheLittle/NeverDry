@@ -402,6 +402,18 @@
       },
       "model_input_derived_wind_2m_m_s": {
         "name": "Velocità del vento a 2 m"
+      },
+      "last_source": {
+        "state": {
+          "scheduled": "Programmata",
+          "reactive": "Soglia di deficit",
+          "manual": "Manuale",
+          "service": "Chiamata di servizio",
+          "button": "Pulsante",
+          "automatic": "Automatica",
+          "mark_irrigated": "Segnata come irrigata",
+          "service_reset": "Azzeramento"
+        }
       }
     }
   },

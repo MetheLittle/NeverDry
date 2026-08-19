@@ -399,6 +399,18 @@
       },
       "model_input_derived_wind_2m_m_s": {
         "name": "Wind speed at 2 m"
+      },
+      "last_source": {
+        "state": {
+          "scheduled": "Scheduled",
+          "reactive": "Deficit threshold",
+          "manual": "Manual",
+          "service": "Service call",
+          "button": "Button",
+          "automatic": "Automatic",
+          "mark_irrigated": "Marked as irrigated",
+          "service_reset": "Reset"
+        }
       }
     }
   },
