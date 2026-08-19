@@ -2076,8 +2076,20 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         return self._zone.credit_delivery(_LitersDelivered(liters)).value_mm
 
     def settle_cycle(self, liters: float, *, source: str, at: datetime, duration_s: int = 0) -> float:
-        """Close a cycle: credit the final figure, stamp it, drop the snapshot."""
+        """Close a cycle: credit the final figure, stamp it, drop the snapshot.
+
+        The session listeners are fired **here** rather than at ``set_irrigating``
+        because this is where the session's figures are written. Closing the
+        valve happens first and would notify too early: the last-session sensors
+        would refresh while still holding the previous run's numbers, and then
+        wait for the next ET tick to catch up. That left a window of minutes in
+        which the card described the previous irrigation as if it were the one
+        that had just ended, with nothing to say the value was stale — and the
+        minutes right after a run are exactly when somebody looks (field,
+        2026-08-19: a 6039 s session reading "2" for six minutes).
+        """
         deficit = self._zone.settle(_LitersDelivered(liters, duration_s), source=source, at=at)
+        self.notify_session_listeners()
         return deficit.value_mm
 
     async def async_added_to_hass(self) -> None:
@@ -2993,8 +3005,15 @@ class ZoneLastDurationSensor(SensorEntity):
         if device_info:
             self._attr_device_info = device_info
         zone_sensor._dryness.register_zone_listener(self._on_update)
+        # Also on session close, so the figure is right the moment it changes
+        # rather than at the next ET tick.
+        zone_sensor.register_session_listener(self._on_session_update)
 
     def _on_update(self, dt_h: float, et_h: float, rain: float) -> None:
+        if getattr(self, "hass", None):
+            self.async_write_ha_state()
+
+    def _on_session_update(self) -> None:
         if getattr(self, "hass", None):
             self.async_write_ha_state()
 

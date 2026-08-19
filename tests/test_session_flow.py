@@ -543,3 +543,37 @@ class TestTheLastSourceReadsAsWords:
             states = data["entity"]["sensor"]["last_source"]["state"]
             missing = [o for o in ZoneLastSourceSensor._attr_options if o not in states]
             assert not missing, f"{rel} is missing: {missing}"
+
+
+class TestTheLastSessionFiguresRefreshWhenTheSessionEnds:
+    """A 6039 s session read "2" for six minutes (field, 2026-08-19).
+
+    `ZoneLastDurationSensor` does not poll and listened only to the ET tick, so
+    between the end of a run and the next tick it kept showing the previous
+    session's duration — with nothing to say the value was stale, in the very
+    minutes somebody goes to look.
+    """
+
+    def test_settling_a_cycle_notifies_the_session_listeners(self):
+        from never_dry.sensor import IrrigationZoneSensor
+
+        zone = MagicMock()
+        zone.settle.return_value = MagicMock(value_mm=0.0)
+        sensor = IrrigationZoneSensor.__new__(IrrigationZoneSensor)
+        sensor._zone = zone
+        fired = []
+        sensor._session_listeners = [lambda: fired.append(True)]
+
+        IrrigationZoneSensor.settle_cycle(sensor, 10.0, source="scheduled", at=MagicMock(year=2026), duration_s=6039)
+
+        assert fired, "the last-session sensors must be told the moment the figures change"
+
+    def test_the_last_duration_sensor_is_on_the_session_channel(self):
+        """It cannot poll, so the notification is its only way to stay current."""
+        import inspect
+
+        from never_dry.sensor import ZoneLastDurationSensor
+
+        src = inspect.getsource(ZoneLastDurationSensor)
+        assert ZoneLastDurationSensor._attr_should_poll is False
+        assert "register_session_listener" in src
