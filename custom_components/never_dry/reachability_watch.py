@@ -27,15 +27,12 @@ state write, whether or not the value changed.
 
 from __future__ import annotations
 
-import logging
 from collections import deque
 from dataclasses import dataclass, field
 
 from homeassistant.core import HomeAssistant
 
 from .environment import Reachability, SilenceVerdict, judge_fleet, silence_floor
-
-_LOGGER = logging.getLogger(__name__)
 
 #: How many ended silences to keep per device for deriving the floor. The floor
 #: is a high quantile, so it needs enough samples to have a tail at all.

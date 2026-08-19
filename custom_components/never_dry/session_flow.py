@@ -142,6 +142,9 @@ class SessionFlowTracker:
             if (res := data.get("resolution_l")) is not None:
                 self.resolution_l = float(res)
         except (TypeError, ValueError):
+            # A corrupt stored resolution is not worth failing a reload over:
+            # leaving it unset means the flow-verification window falls back to
+            # its conservative default and the next delivery relearns the step.
             pass
 
     async def async_save(self) -> None:

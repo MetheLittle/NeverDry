@@ -159,7 +159,10 @@ def main() -> None:
     elif args.ha_url and args.token:
         devices = asyncio.run(fetch_from_ha(args.ha_url, args.token))
     else:
+        # `parser.error` exits, but saying so keeps both the reader and the
+        # static analyser from wondering whether `devices` can be unbound.
         parser.error("give either --from-file, or both --ha-url and --token")
+        return
 
     reported = 0
     for device in devices:
