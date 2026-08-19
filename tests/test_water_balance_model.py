@@ -12,7 +12,12 @@ import pytest
 from never_dry.water_balance_model import (
     DEFAULT_ALPHA,
     DEFAULT_T_BASE,
+    MODEL_CATALOGUE,
+    RUNNABLE_INPUTS,
+    W_M2_TO_MJ_DAY,
+    DailySolarEnergy,
     Deficit,
+    DiurnalRange,
     ETModel,
     ETStep,
     HargreavesModel,
@@ -23,6 +28,10 @@ from never_dry.water_balance_model import (
     VWCPerZoneModel,
     VWCReading,
     VWCSystemModel,
+    build_model,
+    models_offered_by,
+    net_radiation_mj,
+    solar_radiation_from_range,
     vwc_to_fraction,
 )
 
@@ -262,7 +271,6 @@ class TestCapabilityMatch:
     """
 
     def test_every_catalogued_model_declares_what_it_needs(self):
-        from never_dry.water_balance_model import MODEL_CATALOGUE
 
         for model in MODEL_CATALOGUE:
             assert isinstance(model.required_sensors, frozenset), model.__name__
@@ -270,7 +278,6 @@ class TestCapabilityMatch:
 
     def test_identifiers_are_unique(self):
         """The id is stored in the config entry: a collision would silently swap models."""
-        from never_dry.water_balance_model import MODEL_CATALOGUE
 
         ids = [m.method_id for m in MODEL_CATALOGUE]
         assert len(ids) == len(set(ids))
@@ -282,7 +289,6 @@ class TestCapabilityMatch:
         what they read.
         """
         from never_dry.environment import Environment
-        from never_dry.water_balance_model import ETModel, HargreavesModel, models_offered_by
 
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
         assert set(models_offered_by(env)) == {ETModel, HargreavesModel}
@@ -296,7 +302,6 @@ class TestCapabilityMatch:
         wants a specific method names it.
         """
         from never_dry.environment import Environment
-        from never_dry.water_balance_model import HargreavesModel, build_model
 
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
         assert isinstance(build_model(env), HargreavesModel)
@@ -310,7 +315,6 @@ class TestCapabilityMatch:
         not look at the range.
         """
         from never_dry.environment import Environment
-        from never_dry.water_balance_model import ETModel, build_model
 
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
         assert isinstance(build_model(env, diurnal_range_c=0.7), ETModel)
@@ -321,14 +325,12 @@ class TestCapabilityMatch:
         and it is honoured.
         """
         from never_dry.environment import Environment
-        from never_dry.water_balance_model import HargreavesModel, build_model
 
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
         assert isinstance(build_model(env, method_id="hargreaves", diurnal_range_c=0.7), HargreavesModel)
 
     def test_it_can_still_be_chosen_explicitly(self):
         from never_dry.environment import Environment
-        from never_dry.water_balance_model import HargreavesModel, build_model
 
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
         assert isinstance(build_model(env, method_id="hargreaves"), HargreavesModel)
@@ -345,7 +347,6 @@ class TestCapabilityMatch:
         from dataclasses import dataclass
 
         from never_dry.environment import Environment
-        from never_dry.water_balance_model import ETModel, models_offered_by
 
         @dataclass(frozen=True)
         class UnbuildableReading:
@@ -370,7 +371,6 @@ class TestCapabilityMatch:
     def test_a_probe_wins_over_the_weather_tiers(self):
         """A measured soil is better evidence than an estimate, so it leads the order."""
         from never_dry.environment import Environment
-        from never_dry.water_balance_model import VWCSystemModel, models_offered_by
 
         env = Environment(
             temperature_sensor="sensor.t",
@@ -389,40 +389,34 @@ class TestBuildModel:
         return Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r")
 
     def test_without_a_preference_it_takes_the_best_supported(self):
-        from never_dry.water_balance_model import HargreavesModel, build_model
 
         assert isinstance(build_model(self._bare_site()), HargreavesModel)
 
     def test_a_site_with_a_probe_gets_the_probe_model(self):
         from never_dry.environment import Environment
-        from never_dry.water_balance_model import VWCSystemModel, build_model
 
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r", soil_moisture_sensor="sensor.vwc")
         assert isinstance(build_model(env), VWCSystemModel)
 
     def test_a_choice_the_site_cannot_support_degrades_instead_of_failing(self):
         """A sensor can be removed after the choice was stored. Watering must not stop."""
-        from never_dry.water_balance_model import HargreavesModel, build_model
 
         model = build_model(self._bare_site(), method_id="penman_monteith")
         assert isinstance(model, HargreavesModel)
 
     def test_an_unknown_identifier_falls_back_rather_than_raising(self):
         """A config entry from a future version must not break setup."""
-        from never_dry.water_balance_model import build_model
 
         assert isinstance(build_model(self._bare_site(), method_id="no_such_model"), HargreavesModel)
 
     def test_a_supported_choice_is_honoured_over_the_default_order(self):
         """The user's preference beats the ranking — that is the point of asking."""
         from never_dry.environment import Environment
-        from never_dry.water_balance_model import ETModel, build_model
 
         env = Environment(temperature_sensor="sensor.t", rain_sensor="sensor.r", soil_moisture_sensor="sensor.vwc")
         assert isinstance(build_model(env, method_id="et_simple"), ETModel)
 
     def test_the_configured_values_reach_the_model(self):
-        from never_dry.water_balance_model import build_model
 
         model = build_model(self._bare_site(), alpha=0.5, t_base=5.0, d_max=42.0)
         assert model.d_max == 42.0
@@ -456,7 +450,6 @@ def test_the_form_options_mirror_the_catalogue():
     does *not* run is an option that raises when chosen.
     """
     from never_dry.const import ET_METHOD_AUTO, ET_METHOD_OPTIONS
-    from never_dry.water_balance_model import MODEL_CATALOGUE, RUNNABLE_INPUTS
 
     runnable = tuple(m.method_id for m in MODEL_CATALOGUE if m.input_type in RUNNABLE_INPUTS)
     expected = (ET_METHOD_AUTO, *runnable)
@@ -481,7 +474,6 @@ class TestDiurnalRange:
             tracker.observe(h, t)
 
     def test_a_fragment_of_a_day_refuses_to_answer(self):
-        from never_dry.water_balance_model import DiurnalRange
 
         tracker = DiurnalRange()
         self._fill(tracker, range(5), [15.0, 18.0, 22.0, 25.0, 21.0])
@@ -489,7 +481,6 @@ class TestDiurnalRange:
         assert not tracker.is_ready
 
     def test_a_full_day_reports_its_extremes(self):
-        from never_dry.water_balance_model import DiurnalRange
 
         tracker = DiurnalRange()
         temps = [12.0, 11.5, 11.0, 12.0, 14.0, 17.0, 20.0, 23.0, 26.0, 28.0, 30.0, 31.0]
@@ -499,7 +490,6 @@ class TestDiurnalRange:
 
     def test_several_readings_in_one_hour_widen_that_hour(self):
         """The bucket keeps the hour's own min and max, not the last value seen."""
-        from never_dry.water_balance_model import DiurnalRange
 
         tracker = DiurnalRange()
         for h in range(24):
@@ -510,7 +500,6 @@ class TestDiurnalRange:
 
     def test_yesterday_falls_out_of_the_window(self):
         """Rolling, not cumulative: a heatwave three days ago is not today's range."""
-        from never_dry.water_balance_model import DiurnalRange
 
         tracker = DiurnalRange()
         tracker.observe(0, 40.0)
@@ -520,7 +509,6 @@ class TestDiurnalRange:
 
     def test_storage_stays_bounded_however_often_it_is_observed(self):
         """The caller observes on every sensor change, which is often."""
-        from never_dry.water_balance_model import DiurnalRange
 
         tracker = DiurnalRange()
         for i in range(5000):
@@ -529,7 +517,6 @@ class TestDiurnalRange:
 
     def test_a_sensor_that_never_sees_the_sky_is_called_out(self):
         """An indoor or sheltered probe gives a flat day, and a flat day is not weather."""
-        from never_dry.water_balance_model import DiurnalRange
 
         tracker = DiurnalRange()
         for h in range(24):
@@ -538,7 +525,6 @@ class TestDiurnalRange:
         assert tracker.is_implausible()
 
     def test_a_real_day_is_not_called_out(self):
-        from never_dry.water_balance_model import DiurnalRange
 
         tracker = DiurnalRange()
         for h in range(24):
@@ -550,12 +536,10 @@ class TestNetRadiation:
     """Rn is computed, never asked for — and the two halves pull opposite ways."""
 
     def _ra(self, doy=196, lat=45.0):
-        from never_dry.water_balance_model import HargreavesModel
 
         return HargreavesModel.extraterrestrial_radiation(doy, lat)
 
     def test_a_bright_day_keeps_most_of_what_arrives(self):
-        from never_dry.water_balance_model import net_radiation_mj
 
         ra = self._ra()
         rn = net_radiation_mj(solar_mj=0.75 * ra, ra_mj=ra, tmax_c=31.0, tmin_c=19.0, rh_pct=50.0)
@@ -563,7 +547,6 @@ class TestNetRadiation:
 
     def test_an_overcast_day_keeps_less(self):
         """Same site, same day, a third of the radiation: the balance must follow."""
-        from never_dry.water_balance_model import net_radiation_mj
 
         ra = self._ra()
         bright = net_radiation_mj(solar_mj=0.75 * ra, ra_mj=ra, tmax_c=31.0, tmin_c=19.0, rh_pct=50.0)
@@ -572,7 +555,6 @@ class TestNetRadiation:
 
     def test_dry_air_loses_more_to_the_sky(self):
         """Water vapour is what sends the ground's heat back; without it, more escapes."""
-        from never_dry.water_balance_model import net_radiation_mj
 
         ra = self._ra()
         humid = net_radiation_mj(solar_mj=0.7 * ra, ra_mj=ra, tmax_c=30.0, tmin_c=18.0, rh_pct=80.0)
@@ -588,7 +570,6 @@ class TestNetRadiation:
         reversed. Night-time cooling therefore goes uncredited, which understates
         nothing that matters — evapotranspiration at night is near zero anyway.
         """
-        from never_dry.water_balance_model import net_radiation_mj
 
         ra = self._ra()
         rn = net_radiation_mj(solar_mj=0.0, ra_mj=ra, tmax_c=25.0, tmin_c=15.0, rh_pct=60.0)
@@ -596,7 +577,6 @@ class TestNetRadiation:
 
     def test_a_site_without_a_pyranometer_estimates_the_radiation(self):
         """The fallback: the same diurnal range, used to produce a radiation."""
-        from never_dry.water_balance_model import solar_radiation_from_range
 
         ra = self._ra()
         clear = solar_radiation_from_range(ra, tmax_c=32.0, tmin_c=16.0)
@@ -606,7 +586,6 @@ class TestNetRadiation:
 
     def test_the_estimate_is_in_the_same_range_as_a_measurement(self):
         """It stands in for Rs, so it has to be comparable to one, not merely ordered."""
-        from never_dry.water_balance_model import solar_radiation_from_range
 
         ra = self._ra()
         estimated = solar_radiation_from_range(ra, tmax_c=31.0, tmin_c=19.0)
@@ -623,7 +602,6 @@ class TestDailySolarEnergy:
     """
 
     def test_a_thin_window_refuses_to_answer(self):
-        from never_dry.water_balance_model import DailySolarEnergy
 
         acc = DailySolarEnergy()
         for h in range(5):
@@ -632,7 +610,6 @@ class TestDailySolarEnergy:
 
     def test_a_full_day_sums_to_a_plausible_summer_total(self):
         """A clear August day at mid-latitude delivers roughly 20-30 MJ/m2."""
-        from never_dry.water_balance_model import DailySolarEnergy
 
         acc = DailySolarEnergy()
         profile = [0, 0, 0, 0, 0, 20, 120, 300, 500, 680, 810, 880]
@@ -645,7 +622,6 @@ class TestDailySolarEnergy:
 
     def test_night_hours_count_as_zero_and_are_needed(self):
         """Dropping them would make the average a daytime average, inflating the day."""
-        from never_dry.water_balance_model import DailySolarEnergy
 
         with_night = DailySolarEnergy()
         for h in range(24):
@@ -655,7 +631,6 @@ class TestDailySolarEnergy:
 
     def test_repeated_readings_in_an_hour_average_rather_than_add(self):
         """The station reports every minute; adding them would multiply the day by sixty."""
-        from never_dry.water_balance_model import DailySolarEnergy
 
         acc = DailySolarEnergy()
         for h in range(24):
@@ -665,7 +640,6 @@ class TestDailySolarEnergy:
 
     def test_an_evening_reading_alone_is_not_mistaken_for_a_day(self):
         """The defect this class exists to remove, stated as a test."""
-        from never_dry.water_balance_model import W_M2_TO_MJ_DAY, DailySolarEnergy
 
         naive = 65.9 * W_M2_TO_MJ_DAY
 

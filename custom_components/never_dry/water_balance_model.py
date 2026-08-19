@@ -1043,9 +1043,6 @@ MODEL_CATALOGUE: tuple[type[WaterBalanceModel], ...] = (
 #: last step of wiring a tier, not the first.
 RUNNABLE_INPUTS: frozenset[type] = frozenset({ETStep, HargreavesStep, PenmanStep, VWCReading})
 
-#: Fallback when the site declares nothing at all — the model that needs least.
-DEFAULT_METHOD_ID: str = ETModel.method_id
-
 
 def models_offered_by(env) -> tuple[type[WaterBalanceModel], ...]:
     """The models this installation may choose, richest first.
