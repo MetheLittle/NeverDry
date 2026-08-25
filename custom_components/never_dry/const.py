@@ -1,7 +1,7 @@
 """Constants for the NeverDry integration."""
 
 DOMAIN = "never_dry"
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 
 # ── Sensor inputs ─────────────────────────────────────────
 CONF_TEMP_SENSOR = "temperature_sensor"
@@ -38,6 +38,8 @@ CONF_ZONE_THRESHOLD = "threshold"
 CONF_ZONE_SYSTEM_TYPE = "system_type"
 CONF_ZONE_PLANT_FAMILY = "plant_family"
 CONF_ZONE_KC = "kc"
+CONF_ZONE_EXPOSURE = "exposure"
+CONF_ZONE_MICROCLIMATE_FACTOR = "microclimate_factor"
 CONF_ZONE_DELIVERY_MODE = "delivery_mode"
 CONF_ZONE_VOLUME_ENTITY = "volume_entity"
 CONF_ZONE_FLOW_METER_SENSOR = "flow_meter_sensor"
@@ -62,12 +64,27 @@ SYSTEM_TYPE_DRIP = "drip"
 SYSTEM_TYPE_MICRO_SPRINKLER = "micro_sprinkler"
 SYSTEM_TYPE_SPRINKLER = "sprinkler"
 SYSTEM_TYPE_MANUAL = "manual"
+SYSTEM_TYPE_CUSTOM = "custom"
 
+# ── The preset/override contract ─────────────────────────
+# Three zone settings work the same way: a dropdown of presets, plus a box
+# for a value the presets do not cover. THE DROPDOWN DECIDES. A ``None``
+# preset value marks the "custom" entry, and only then is the box read.
+# Picking a preset while the box holds a value is not an error — the value
+# is ignored and the form says so — but picking custom without one is.
+#
+#   system type   -> default_efficiency    (box: efficiency)
+#   plant family  -> kc_seasonal           (box: manual Kc)
+#   exposure      -> factor                (box: microclimate factor)
+#
+# Within a pair it is always one or the other, never both. Across pairs the
+# results compose: Kc = base x kmc.
 SYSTEM_TYPES = {
     SYSTEM_TYPE_DRIP: {"label": "Drip irrigation", "default_efficiency": 0.92},
     SYSTEM_TYPE_MICRO_SPRINKLER: {"label": "Micro-sprinklers", "default_efficiency": 0.80},
     SYSTEM_TYPE_SPRINKLER: {"label": "Pop-up sprinklers", "default_efficiency": 0.68},
     SYSTEM_TYPE_MANUAL: {"label": "Manual / hose", "default_efficiency": 0.55},
+    SYSTEM_TYPE_CUSTOM: {"label": "Custom (set the efficiency)", "default_efficiency": None},
 }
 
 # ── Plant families (seasonal Kc profiles) ───────────────
@@ -85,9 +102,48 @@ PLANT_FAMILIES = {
     "succulents": {"label": "Succulents / Cacti", "kc_seasonal": (0.15, 0.25, 0.35, 0.20)},
     "native_ground_cover": {"label": "Native ground cover", "kc_seasonal": (0.25, 0.45, 0.55, 0.35)},
     "mixed_garden": {"label": "Mixed garden (default)", "kc_seasonal": (0.40, 0.70, 0.90, 0.55)},
+    # No curve: the zone follows the manual Kc instead. See the preset/override
+    # contract above.
+    "custom": {"label": "Custom (set the Kc)", "kc_seasonal": None},
 }
 
+PLANT_FAMILY_CUSTOM = "custom"
+
 KC_ANCHOR_DAYS = (15, 105, 196, 288)
+
+# ── Site exposure (microclimate factor, kmc) ─────────────
+# Landscape coefficient method: KL = ks * kd * kmc (Costello et al. 2000).
+# The plant family is ks, this is kmc — multiplied onto the Kc so a shaded
+# zone keeps its seasonal curve instead of being frozen by a constant Kc
+# override (#146). Above 1.0 is intentional: paving and walls push a zone
+# past reference ET.
+EXPOSURE_DEEP_SHADE = "deep_shade"
+EXPOSURE_MORNING_SUN = "morning_sun"
+EXPOSURE_AFTERNOON_SUN = "afternoon_sun"
+EXPOSURE_FULL_SUN = "full_sun"
+EXPOSURE_WINDY = "windy"
+EXPOSURE_REFLECTED_HEAT = "reflected_heat"
+EXPOSURE_CUSTOM = "custom"
+
+# ``factor: None`` marks the custom entry, per the preset/override contract
+# above. ``label`` is developer-facing only, as in PLANT_FAMILIES: the
+# dropdown text comes from selector.exposure in the translations.
+EXPOSURES = {
+    EXPOSURE_DEEP_SHADE: {"label": "Deep / all-day shade", "factor": 0.60},
+    EXPOSURE_MORNING_SUN: {"label": "Morning sun, afternoon shade", "factor": 0.75},
+    EXPOSURE_AFTERNOON_SUN: {"label": "Morning shade, afternoon sun", "factor": 0.85},
+    EXPOSURE_FULL_SUN: {"label": "Full sun, open", "factor": 1.00},
+    EXPOSURE_WINDY: {"label": "Windy / exposed", "factor": 1.15},
+    EXPOSURE_REFLECTED_HEAT: {"label": "Reflected heat (paving, south-facing wall)", "factor": 1.20},
+    EXPOSURE_CUSTOM: {"label": "Custom (set the factor)", "factor": None},
+}
+
+DEFAULT_EXPOSURE = EXPOSURE_FULL_SUN
+DEFAULT_MICROCLIMATE_FACTOR = 1.0
+# Floored above zero: at 0 the deficit never accrues, so every irrigation
+# trigger goes silent with nothing in the UI to explain why.
+MICROCLIMATE_FACTOR_MIN = 0.1
+MICROCLIMATE_FACTOR_MAX = 1.5
 
 # ── Valve delivery modes ────────────────────────────────
 DELIVERY_MODE_VOLUME_PRESET = "volume_preset"
@@ -101,11 +157,29 @@ DELIVERY_MODES = {
     DELIVERY_MODE_VOLUME_PRESET: "Smart valve with volume dosing",
 }
 
-DEFAULT_DELIVERY_TIMEOUT_S = 3600  # 1 hour safety timeout
+DEFAULT_DELIVERY_TIMEOUT_S = 3600  # 1 hour safety timeout — the ceiling, not the job
 FLOW_METER_POLL_INTERVAL_S = 2
+
+# How far past the expected job duration a delivery may run before the safety
+# timeout cuts it. The job duration comes from the *declared* guard flow rate,
+# which is an approximation — real flow moves with pressure, emitter fouling and
+# water temperature — so the margin has to absorb an honest shortfall without
+# cutting a healthy run short. 2.0 tolerates a real flow half the declared one.
+# Tighten this only once the flow rate is measured rather than declared.
+DELIVERY_DURATION_MARGIN = 2.0
+
+# Spacing between the three safety layers. Each one exists to catch the failure
+# of the one before it — the delivery loop stops a normal run, the watchdog
+# stops a loop that is stuck or gone, the on-device timer stops a valve when
+# Home Assistant itself is gone — so each must fire *after* the one it protects,
+# or it steals the ending instead of catching a failure. A quarter more each
+# step: delivery bound → x1.25 watchdog → x1.25 hardware timer.
+SAFETY_LAYER_SPREAD = 1.25
 
 # ── Services ─────────────────────────────────────────────
 SERVICE_RESET = "reset"
+SERVICE_RESET_YEARLY_RAIN = "reset_yearly_rain"
+SERVICE_RESET_YEARLY_WATER = "reset_yearly_water"
 SERVICE_IRRIGATE_ZONE = "irrigate_zone"
 SERVICE_IRRIGATE_ALL = "irrigate_all"
 SERVICE_STOP = "stop"
@@ -141,6 +215,16 @@ CONF_BACKFILL_DAYS = "backfill_days"
 ET_BUFFER_SIZE = 10  # rolling window of valid readings
 ET_BUFFER_MIN_READINGS = 1  # minimum readings before median is trusted
 ET_TEMP_VALID_RANGE = (-50.0, 70.0)  # °C physical bounds
+
+# ── Valve reachability ───────────────────────────────────
+# How long after setup a valve that has never been seen is reported as
+# "unknown" rather than "not responding". Zigbee entities are not available
+# for the first minute or two after a restart, and every options-flow save is
+# a reload: without this, three zones out of four raise a warning on every
+# restart, which is the surest way to teach the user to ignore it.
+# The window closes early the moment the valve is first seen alive — it is a
+# grace for the absence of evidence, not a blanket delay.
+VALVE_STARTUP_GRACE_S = 300  # 5 minutes
 
 # ── Runtime safety limits ────────────────────────────────
 MAX_ZONES = 50

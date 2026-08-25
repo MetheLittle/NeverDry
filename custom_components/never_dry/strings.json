@@ -27,37 +27,67 @@
         "title": "Add irrigation zone",
         "description": "Configure zone #{zone_count}. You can add more zones after this.",
         "data": {
-          "name": "Zone name",
-          "valve": "Valve switch (optional)",
-          "delivery_mode": "Water delivery mode",
-          "area_m2": "Irrigated area",
-          "system_type": "Irrigation system type",
-          "efficiency": "Custom efficiency (overrides system type default)",
-          "plant_family": "Plant family",
-          "kc": "Custom crop coefficient Kc (overrides plant family)",
-          "flow_rate_lpm": "Valve flow rate (estimated_flow only)",
-          "flow_meter_sensor": "Flow meter sensor (flow_meter only)",
-          "volume_entity": "Volume target entity (volume_preset only)",
-          "delivery_timeout": "Safety timeout",
-          "irrigation_mode": "Irrigation mode",
-          "threshold": "Irrigation threshold",
-          "irrigation_time": "Daily irrigation time"
+          "name": "Zone name"
         },
         "data_description": {
-          "name": "Display name for this zone (e.g., Vegetable Garden, Lawn)",
-          "valve": "The switch entity that controls this zone's irrigation valve. Leave empty for monitoring mode (no valve)",
-          "delivery_mode": "How your valve delivers water. Estimated flow: simple on/off valve, duration calculated from flow rate. Flow meter: valve with a flow sensor, closes at target volume. Volume preset: smart valve that accepts a volume target and closes itself.",
-          "area_m2": "Surface area of this irrigation zone in square meters",
-          "system_type": "Type of irrigation system — sets default efficiency",
-          "efficiency": "Leave empty to use the system type default. Set to override",
-          "plant_family": "Select the type of plants in this zone. Sets a seasonal crop coefficient (Kc) that adjusts water demand throughout the year",
-          "kc": "Leave empty to use the plant family seasonal profile. Set to override with a fixed Kc value (0.1–2.0)",
-          "flow_rate_lpm": "Water flow rate of the valve in liters per minute. Required for estimated_flow mode. Measure with a bucket and stopwatch",
-          "flow_meter_sensor": "Sensor entity that reports cumulative liters delivered. Required for flow_meter mode",
-          "volume_entity": "Number entity on the smart valve that accepts a volume target in liters. Required for volume_preset mode",
-          "delivery_timeout": "Maximum time to wait for flow_meter or volume_preset delivery before forcing valve close (safety limit)",
-          "threshold": "Deficit level (mm) that triggers automatic irrigation for this zone",
-          "irrigation_time": "Time of day when NeverDry checks the deficit and irrigates if above threshold. Leave empty to disable automatic scheduling"
+          "name": "Display name for this zone (e.g., Vegetable Garden, Lawn)"
+        },
+        "sections": {
+          "ground_and_location": {
+            "name": "Ground and location",
+            "description": "What is watered here: how big the zone is, what grows in it, and how exposed it is.",
+            "data": {
+              "area_m2": "Irrigated area",
+              "plant_family": "Plant family",
+              "kc": "Custom crop coefficient Kc (overrides plant family)",
+              "exposure": "Site exposure",
+              "microclimate_factor": "Custom microclimate factor (Advanced only)"
+            },
+            "data_description": {
+              "area_m2": "Surface area of this irrigation zone in square meters",
+              "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
+              "kc": "Used only when the plant family is Custom. With any other family the seasonal curve applies and this field is ignored.",
+              "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value. Pick Custom to enter your own factor below.",
+              "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground."
+            }
+          },
+          "valve_and_pipe": {
+            "name": "Valve and pipe",
+            "description": "What waters it: the valve, how delivery is measured, and the irrigation system.",
+            "data": {
+              "valve": "Valve switch (optional)",
+              "delivery_mode": "Water delivery mode",
+              "flow_rate_lpm": "Valve flow rate (estimated_flow only)",
+              "flow_meter_sensor": "Flow meter sensor (flow_meter only)",
+              "volume_entity": "Volume target entity (volume_preset only)",
+              "system_type": "Irrigation system type",
+              "efficiency": "Custom efficiency (overrides system type default)",
+              "delivery_timeout": "Safety timeout"
+            },
+            "data_description": {
+              "valve": "The switch entity that controls this zone's irrigation valve. Leave empty for monitoring mode (no valve)",
+              "delivery_mode": "How your valve delivers water. Estimated flow: simple on/off valve, duration calculated from flow rate. Flow meter: valve with a flow sensor, closes at target volume. Volume preset: smart valve that accepts a volume target and closes itself.",
+              "flow_rate_lpm": "Water flow rate of the valve in liters per minute. Required for estimated_flow mode. Measure with a bucket and stopwatch",
+              "flow_meter_sensor": "Sensor entity that reports cumulative liters delivered. Required for flow_meter mode",
+              "volume_entity": "Number entity on the smart valve that accepts a volume target in liters. Required for volume_preset mode",
+              "system_type": "Sets the zone's efficiency (drip 0.92, micro-sprinklers 0.80, pop-up 0.68, manual 0.55). Pick Custom to enter your own below.",
+              "efficiency": "Used only when the system type is Custom. With any other type this field is ignored and the form will tell you so.",
+              "delivery_timeout": "Maximum time to wait for flow_meter or volume_preset delivery before forcing valve close (safety limit)"
+            }
+          },
+          "scheduling": {
+            "name": "Scheduling",
+            "description": "When it waters: on a timer, on a deficit threshold, or only on request.",
+            "data": {
+              "irrigation_mode": "Irrigation mode",
+              "irrigation_time": "Daily irrigation time",
+              "threshold": "Irrigation threshold"
+            },
+            "data_description": {
+              "irrigation_time": "Time of day when NeverDry checks the deficit and irrigates if above threshold. Leave empty to disable automatic scheduling",
+              "threshold": "Deficit level that triggers automatic irrigation for this zone"
+            }
+          }
         }
       },
       "confirm_zone": {
@@ -81,7 +111,10 @@
       "flow_rate_required": "Flow rate is required for estimated_flow delivery mode",
       "flow_meter_required": "Flow meter sensor is required for flow_meter delivery mode",
       "volume_entity_required": "Volume entity is required for volume_preset delivery mode",
-      "zone_already_exists": "A zone with this name already exists"
+      "zone_already_exists": "A zone with this name already exists",
+      "efficiency_required": "Choose an efficiency: the system type is set to Custom, which takes its value from that field",
+      "kc_required": "Choose a Kc: the plant family is set to Custom, which takes its value from that field",
+      "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field"
     },
     "abort": {
       "already_configured": "NeverDry is already configured"
@@ -112,21 +145,53 @@
       "add_zone": {
         "title": "Add irrigation zone",
         "data": {
-          "name": "Zone name",
-          "valve": "Valve switch (optional)",
-          "delivery_mode": "Water delivery mode",
-          "area_m2": "Irrigated area",
-          "system_type": "Irrigation system type",
-          "efficiency": "Custom efficiency",
-          "plant_family": "Plant family",
-          "kc": "Custom crop coefficient Kc",
-          "flow_rate_lpm": "Valve flow rate",
-          "flow_meter_sensor": "Flow meter sensor",
-          "volume_entity": "Volume target entity",
-          "delivery_timeout": "Safety timeout",
-          "irrigation_mode": "Irrigation mode",
-          "threshold": "Irrigation threshold",
-          "irrigation_time": "Daily irrigation time"
+          "name": "Zone name"
+        },
+        "sections": {
+          "ground_and_location": {
+            "name": "Ground and location",
+            "description": "What is watered here: how big the zone is, what grows in it, and how exposed it is.",
+            "data": {
+              "area_m2": "Irrigated area",
+              "plant_family": "Plant family",
+              "kc": "Custom crop coefficient Kc",
+              "exposure": "Site exposure",
+              "microclimate_factor": "Custom microclimate factor (Advanced only)"
+            },
+            "data_description": {
+              "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
+              "kc": "Used only when the plant family is Custom. With any other family the seasonal curve applies and this field is ignored.",
+              "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value. Pick Custom to enter your own factor below.",
+              "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground."
+            }
+          },
+          "valve_and_pipe": {
+            "name": "Valve and pipe",
+            "description": "What waters it: the valve, how delivery is measured, and the irrigation system.",
+            "data": {
+              "valve": "Valve switch (optional)",
+              "delivery_mode": "Water delivery mode",
+              "flow_rate_lpm": "Valve flow rate",
+              "flow_meter_sensor": "Flow meter sensor",
+              "volume_entity": "Volume target entity",
+              "system_type": "Irrigation system type",
+              "efficiency": "Custom efficiency",
+              "delivery_timeout": "Safety timeout"
+            },
+            "data_description": {
+              "system_type": "Sets the zone's efficiency (drip 0.92, micro-sprinklers 0.80, pop-up 0.68, manual 0.55). Pick Custom to enter your own below.",
+              "efficiency": "Used only when the system type is Custom. With any other type this field is ignored and the form will tell you so."
+            }
+          },
+          "scheduling": {
+            "name": "Scheduling",
+            "description": "When it waters: on a timer, on a deficit threshold, or only on request.",
+            "data": {
+              "irrigation_mode": "Irrigation mode",
+              "irrigation_time": "Daily irrigation time",
+              "threshold": "Irrigation threshold"
+            }
+          }
         }
       },
       "confirm_zone": {
@@ -145,21 +210,53 @@
       "edit_zone_detail": {
         "title": "Edit zone: {zone_name}",
         "data": {
-          "name": "Zone name",
-          "valve": "Valve switch",
-          "delivery_mode": "Water delivery mode",
-          "area_m2": "Irrigated area",
-          "system_type": "Irrigation system type",
-          "efficiency": "Custom efficiency",
-          "plant_family": "Plant family",
-          "kc": "Custom crop coefficient Kc",
-          "flow_rate_lpm": "Valve flow rate",
-          "flow_meter_sensor": "Flow meter sensor",
-          "volume_entity": "Volume target entity",
-          "delivery_timeout": "Safety timeout",
-          "irrigation_mode": "Irrigation mode",
-          "threshold": "Irrigation threshold",
-          "irrigation_time": "Daily irrigation time"
+          "name": "Zone name"
+        },
+        "sections": {
+          "ground_and_location": {
+            "name": "Ground and location",
+            "description": "What is watered here: how big the zone is, what grows in it, and how exposed it is.",
+            "data": {
+              "area_m2": "Irrigated area",
+              "plant_family": "Plant family",
+              "kc": "Custom crop coefficient Kc",
+              "exposure": "Site exposure",
+              "microclimate_factor": "Custom microclimate factor (Advanced only)"
+            },
+            "data_description": {
+              "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
+              "kc": "Used only when the plant family is Custom. With any other family the seasonal curve applies and this field is ignored.",
+              "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value. Pick Custom to enter your own factor below.",
+              "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground."
+            }
+          },
+          "valve_and_pipe": {
+            "name": "Valve and pipe",
+            "description": "What waters it: the valve, how delivery is measured, and the irrigation system.",
+            "data": {
+              "valve": "Valve switch",
+              "delivery_mode": "Water delivery mode",
+              "flow_rate_lpm": "Valve flow rate",
+              "flow_meter_sensor": "Flow meter sensor",
+              "volume_entity": "Volume target entity",
+              "system_type": "Irrigation system type",
+              "efficiency": "Custom efficiency",
+              "delivery_timeout": "Safety timeout"
+            },
+            "data_description": {
+              "system_type": "Sets the zone's efficiency (drip 0.92, micro-sprinklers 0.80, pop-up 0.68, manual 0.55). Pick Custom to enter your own below.",
+              "efficiency": "Used only when the system type is Custom. With any other type this field is ignored and the form will tell you so."
+            }
+          },
+          "scheduling": {
+            "name": "Scheduling",
+            "description": "When it waters: on a timer, on a deficit threshold, or only on request.",
+            "data": {
+              "irrigation_mode": "Irrigation mode",
+              "irrigation_time": "Daily irrigation time",
+              "threshold": "Irrigation threshold"
+            }
+          }
         }
       },
       "check_zones": {
@@ -172,6 +269,11 @@
           "zone_to_remove": "Zone to remove"
         }
       }
+    },
+    "error": {
+      "efficiency_required": "Choose an efficiency: the system type is set to Custom, which takes its value from that field",
+      "kc_required": "Choose a Kc: the plant family is set to Custom, which takes its value from that field",
+      "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field"
     },
     "abort": {
       "no_zones": "No zones configured"
@@ -196,7 +298,8 @@
         "drip": "Drip irrigation (η=0.92)",
         "micro_sprinkler": "Micro-sprinklers (η=0.80)",
         "sprinkler": "Pop-up sprinklers (η=0.68)",
-        "manual": "Manual / hose (η=0.55)"
+        "manual": "Manual / hose (η=0.55)",
+        "custom": "Custom (set the efficiency below)"
       }
     },
     "plant_family": {
@@ -210,7 +313,8 @@
         "roses": "Roses",
         "succulents": "Succulents / Cacti",
         "native_ground_cover": "Native ground cover",
-        "mixed_garden": "Mixed garden (default)"
+        "mixed_garden": "Mixed garden (default)",
+        "custom": "Custom (set the Kc below)"
       }
     },
     "delivery_mode": {
@@ -218,6 +322,17 @@
         "estimated_flow": "Simple on/off — timer-based (default)",
         "flow_meter": "Valve with flow meter sensor",
         "volume_preset": "Smart valve with volume dosing"
+      }
+    },
+    "exposure": {
+      "options": {
+        "deep_shade": "Deep / all-day shade (×0.60)",
+        "morning_sun": "Morning sun, afternoon shade (×0.75)",
+        "afternoon_sun": "Morning shade, afternoon sun (×0.85)",
+        "full_sun": "Full sun, open (×1.00 — default)",
+        "windy": "Windy / exposed (×1.15)",
+        "reflected_heat": "Reflected heat — paving, south-facing wall (×1.20)",
+        "custom": "Custom (set the factor below)"
       }
     }
   }

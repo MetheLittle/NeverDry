@@ -347,6 +347,30 @@ class IrrigationController:
             zs.reset_deficit("service_reset")
             zs.async_write_ha_state()
 
+    async def _handle_reset_yearly_rain(self, call: ServiceCall) -> None:
+        """Clear the year-to-date rain total [mm] — system-wide.
+
+        The total lives on the Dryness Index as a restore attribute and the
+        per-zone "Rain Yearly [L]" sensors derive from it, so resetting it
+        here re-anchors every zone's yearly-rain display to zero.
+        """
+        if self._is_throttled("reset_yearly_rain"):
+            return
+        self._dryness.reset_yearly_rain()
+        self._dryness.async_write_ha_state()
+
+    async def _handle_reset_yearly_water(self, call: ServiceCall) -> None:
+        """Clear the year-to-date irrigated-water total [L] for every zone.
+
+        The counter is per-zone, so this fans out across all zones of this
+        controller; the lifetime total is preserved.
+        """
+        if self._is_throttled("reset_yearly_water"):
+            return
+        for zs in self._zones.values():
+            zs.reset_yearly_water()
+            zs.async_write_ha_state()
+
     async def _handle_set_deficit(self, call: ServiceCall) -> None:
         """Set deficit to a specific value [mm] — for testing and manual correction."""
         deficit_mm = float(call.data.get(ATTR_DEFICIT_MM, 0.0))
@@ -441,6 +465,21 @@ class IrrigationController:
                 with contextlib.suppress(Exception):
                     await self._close_valve(entity_id)
             self._finalize_manual_session(entity_id, zone_name, zone)
+
+        # Detach the per-valve operators last — the settle loop above may still
+        # need one to close a valve through its FSM.
+        #
+        # Each operator holds HA state listeners on its switch and flow sensor,
+        # an absolute watchdog task and the FSM timers, and nothing else ever
+        # released them: they were only dropped from hass.data, which frees the
+        # reference and not the subscriptions. Every options-flow save reloads
+        # the entry, so the count grew with each edit — N operators watching one
+        # valve, each with a watchdog able to force it closed under the
+        # successor that is legitimately driving it.
+        for operator in self._valve_operators.values():
+            with contextlib.suppress(Exception):
+                operator.async_unload()
+        self._valve_operators = {}
 
     async def _handle_stop(self, call: ServiceCall) -> None:
         """Emergency stop: close every configured valve concurrently."""
@@ -615,7 +654,7 @@ class IrrigationController:
                 # mid-cycle (a network glitch in the flow sensor used to
                 # lose every mm we had already delivered).
                 deficit_at_start = zone._zone_deficit
-                zone._deficit_at_irrigation_start = deficit_at_start
+                zone.begin_cycle()
                 ts_start = datetime.now()
                 delivered = await self._deliver_water(zone)
                 ts_end = datetime.now()
@@ -691,8 +730,9 @@ class IrrigationController:
             else:
                 # Partial irrigation — authoritative recompute from snapshot
                 all_complete = False
-                delivered_mm = delivered * zone._efficiency / zone._area if zone._area > 0 else 0.0
-                zone._zone_deficit = max(0.0, deficit_at_start - delivered_mm)
+                # The zone credits it against its own cycle snapshot, which is
+                # the same value as ``deficit_at_start`` (see _irrigate_zones).
+                zone.credit_delivery(delivered)
                 zone._last_volume_delivered = round(delivered, 1)
                 zone._session_water_delivered = round(delivered, 1)
                 zone._total_water_delivered += delivered
@@ -1141,8 +1181,7 @@ class IrrigationController:
         snapshot = zone._deficit_at_irrigation_start
         if snapshot is None or zone._area <= 0:
             return
-        delivered_mm = delivered_liters * zone._efficiency / zone._area
-        zone._zone_deficit = max(0.0, snapshot - delivered_mm)
+        zone.credit_delivery(delivered_liters)
         # Session water must rise live during a flow-metered cycle, not only at
         # completion — otherwise the card shows Volume/Duration counting down
         # while Session water stays 0 (field report, flow_meter zone).
@@ -1409,8 +1448,9 @@ class IrrigationController:
             )
 
         if delivered_liters > 0 and zone._area > 0:
-            delivered_mm = delivered_liters * zone._efficiency / zone._area
-            zone._zone_deficit = max(0.0, zone._zone_deficit - delivered_mm)
+            # No cycle was opened on this path, so the zone credits against its
+            # current deficit — which is what this site did explicitly before.
+            zone.credit_delivery(delivered_liters)
             zone._last_irrigation_source = "manual"
             zone._last_irrigated = ts_end
             zone._last_volume_delivered = round(delivered_liters, 1)

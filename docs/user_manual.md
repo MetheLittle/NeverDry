@@ -79,6 +79,8 @@ Different plants need different amounts of water. NeverDry assigns a **crop coef
 
 The Kc varies seasonally — plants need less water in winter than in summer. NeverDry interpolates between 4 seasonal values automatically and adjusts for your hemisphere based on your Home Assistant location.
 
+Two zones can hold the same plants and still dry out at different rates — one loses the sun behind the house at 14:00, the other sits against a south-facing wall. That is what **site exposure** is for: a per-zone factor that multiplies the Kc, so the zone keeps its seasonal shape instead of being pinned to one number. See [Site exposure](#site-exposure) below.
+
 ### Two scheduling modes
 
 | Mode | When it triggers | Best for |
@@ -154,11 +156,13 @@ For each zone, the wizard asks:
 | **Zone name** | Yes | Display name (e.g., "Vegetable Garden") |
 | **Valve** | No | The `switch` entity that controls this zone's valve. Leave empty for monitoring mode. |
 | **Area (m²)** | Yes | Irrigated area in square meters |
-| **System type** | Yes | Irrigation method — sets a default efficiency |
-| **Efficiency override** | No | Custom efficiency (0.1–1.0). Overrides the system type default. |
+| **System type** | Yes | Irrigation method — sets the efficiency. Pick *Custom* to enter your own. |
+| **Efficiency override** | For *Custom* | Your own efficiency (0.1–1.0). Used **only** when the system type is *Custom*, and required in that case. |
 | **Plant family** | No | Type of plants in this zone — sets a seasonal crop coefficient (Kc) that adjusts water demand throughout the year. See table below. |
-| **Custom Kc** | No | Override Kc (0.1–2.0). If set, overrides the plant family seasonal profile. |
-| **Guard flow rate (L/min)** | For `estimated_flow` | Measured valve flow rate. Required for `estimated_flow`; strongly recommended for `flow_meter` and `volume_preset` too — it drives the expected-duration estimate and lets the safety timeout scale with large deficits (it will become required in a future release). Measure with a bucket and stopwatch. |
+| **Custom Kc** | For *Custom* | One fixed Kc (0.1–2.0). Used **only** when the plant family is *Custom*, and required in that case. |
+| **Site exposure** | No | How much sun and wind this zone gets compared to an open site. Multiplies the Kc. Default *Full sun, open* (×1.00) changes nothing. See table below. |
+| **Custom microclimate factor** | For *Custom* | Your own exposure factor (0.1–1.5). Used **only** when site exposure is *Custom*, and required in that case. |
+| **Guard flow rate (L/min)** | For `estimated_flow` | Measured valve flow rate. Required for `estimated_flow`; strongly recommended for `flow_meter` and `volume_preset` too — it drives the expected-duration estimate, and that estimate is what bounds a delivery — without it the only bound is the safety timeout, an hour by default, regardless of how long the zone was ever going to take (it will become required in a future release). Measure with a bucket and stopwatch. |
 | **Threshold (mm)** | No | Deficit threshold for Mode A triggering (default: 20.0 mm) |
 
 **System type defaults:**
@@ -186,6 +190,55 @@ For each zone, the wizard asks:
 | Mixed garden (default) | 0.40 | 0.70 | 0.90 | 0.55 |
 
 The Kc values are interpolated linearly between seasons. The hemisphere is auto-detected from your Home Assistant location settings — in the southern hemisphere, the seasonal profile is automatically flipped.
+
+#### Site exposure
+
+The plant family says *what* grows in the zone. Site exposure says *where* the zone is: shaded, open, windy, or up against hot paving. It is applied as a multiplier on top of the Kc:
+
+```
+Kc_effective = Kc (plant family or custom override) × exposure factor
+```
+
+| Exposure | Factor | Pick it when |
+|----------|--------|--------------|
+| Deep / all-day shade | 0.60 | The zone never gets direct sun (north side, under dense canopy) |
+| Morning sun, afternoon shade | 0.75 | Sun until roughly midday, then shaded by a building or trees |
+| Morning shade, afternoon sun | 0.85 | Shaded early, then exposed through the hottest hours |
+| **Full sun, open (default)** | **1.00** | Open lawn or bed with no shading and no unusual wind |
+| Windy / exposed | 1.15 | Rooftop, ridge, or a channelled wind that dries the zone out fast |
+| Reflected heat (paving, south-facing wall) | 1.20 | Bordered by paving, gravel, or a wall that radiates heat back |
+| Custom | your value, 0.1–1.5 | You have measured or calculated your own factor |
+
+### One rule for the three custom values
+
+System type, plant family and site exposure work the same way: **the dropdown
+decides.** Each has a *Custom* entry, and only that entry uses the value you
+type in the box beside it. Choose a normal preset and the box is ignored — the
+form tells you so when you save, rather than quietly using one or the other.
+
+Choosing *Custom* and leaving the box empty is refused: it would mean nothing.
+
+Zones configured before this rule keep watering exactly as they did. On upgrade,
+any zone whose value was already in charge is marked *Custom* automatically.
+
+**Why not just lower the Kc?** Because a fixed Kc freezes the zone at one season's value. For an east-facing lawn that loses the sun at 14:00, a manual `Kc = 0.70` is about right in August and drifts badly from there:
+
+| Date | Seasonal Kc (lawn) | With exposure ×0.75 | Frozen Kc 0.70 |
+|------|--------------------|---------------------|----------------|
+| Aug 5 | 0.93 | 0.70 | correct |
+| Sep 15 | 0.80 | 0.60 | +17% |
+| Oct 15 | 0.70 | 0.53 | +33% |
+| Nov 15 | 0.62 | 0.46 | +52% |
+
+The error peaks in autumn, exactly when over-watering shaded turf invites disease.
+
+The presets come from the landscape coefficient method (`K_L = k_s × k_d × k_mc`, Costello, Matheny & Clark 2000): the plant family provides the species factor `k_s`, exposure provides the microclimate factor `k_mc`. They are expert-judgment starting points, not measurements — adjust them for your garden and report back what works.
+
+**Notes:**
+- The factor applies to a **custom Kc as well**, since exposure describes the site rather than the planting. If you set `Kc = 0.80` and *Deep shade*, the zone runs at 0.48. The two multiply out, so a high custom Kc with an above-1.0 exposure can exceed the 0.1–2.0 range of the Kc field itself (2.0 × 1.20 = 2.4). That is not capped, on purpose: both numbers are your explicit choice.
+- Values **above 1.0** are intentional. A zone against hot paving genuinely exceeds reference ET.
+- The zone's **Kc sensor** shows the effective value, with `kc_base`, `exposure`, and `microclimate_factor` as attributes so you can see how it was composed.
+- Leaving exposure at *Full sun, open* is a no-op — existing zones behave exactly as before.
 
 ### Step 3: Add more zones or finish
 
@@ -237,8 +290,11 @@ Shows the volume of water needed for this specific zone in liters.
 | `duration_s` | Expected valve run time [seconds] — from the live flow-meter rate while irrigating (reads as remaining time), otherwise from the configured guard flow rate; 0 if neither is available |
 | `deficit_mm` | This zone's current deficit [mm] (per-zone, not shared) |
 | `plant_family` | Plant family key (e.g., "lawn", "vegetables") |
-| `kc` | Current crop coefficient (varies seasonally) |
+| `kc` | Current **effective** crop coefficient (seasonal, after site exposure) |
+| `kc_base` | Crop coefficient before site exposure (plant family curve or manual override) |
 | `kc_override` | Manual Kc override value, if set |
+| `exposure` | Site exposure key (e.g., "morning_sun"), or `null` if unset |
+| `microclimate_factor` | Resolved exposure multiplier applied to `kc_base` |
 | `valve` | Associated valve entity |
 | `system_type` | Irrigation system type |
 | `area_m2` | Zone area |
@@ -273,6 +329,22 @@ up from the install date.
 If you want these totals to reflect rain that fell *before* NeverDry was
 installed, that historical rain cannot be reconstructed from a live sensor; the
 totals are only guaranteed correct from the install date forward.
+
+**Resetting the yearly totals.** Both totals reset on their own on 1 January,
+but you can clear them at any time from the **NeverDry** hub device, which
+carries two buttons:
+
+- **Reset yearly rain** — zeroes the system-wide yearly rain total (shared by
+  every zone's *Rain Yearly [L]*). Use it if the figure is wrong — for example
+  after changing rain sensor type — instead of waiting for the new year.
+- **Reset yearly water** — zeroes *Irrigated Yearly [L]* for every zone at once.
+  Each zone's lifetime total is preserved; only the year-to-date figure resets.
+
+Both are **state-only**: they restart the counters from zero but leave your
+historical charts (Energy dashboard statistics) untouched. Note that the yearly
+rain total is kept as a saved value that survives a restart *and a plain
+reinstall* — so if a wrong figure won't go away, this button is the way to clear
+it (reinstalling the integration on its own will not).
 
 ## 7. Irrigation logic — how it all works
 
@@ -389,7 +461,7 @@ What happens:
 3. A baseline is recorded for the flow meter (current cumulative reading, or open timestamp for rate sensors).
 4. An **auto-close monitor** starts in the background. It will close the valve via `switch.turn_off` at the **minimum** of:
    - **Volume needed** — if the zone has a flow meter, the monitor polls it and closes as soon as the delivered volume covers the current deficit-driven target (`volume_liters`). Without a flow meter but with a configured `flow_rate`, the monitor sleeps for the estimated duration `volume / flow_rate`.
-   - **Safety timeout** (`delivery_timeout`, default 1 hour) — always honoured as the upper bound, so a forgotten-open valve cannot run indefinitely. When the zone has a guard flow rate configured, the timeout automatically grows to `1.1 ×` the guard-flow duration estimate, so a large deficit is never cut short by the default floor.
+   - **Safety timeout** (`delivery_timeout`, default 1 hour) — the upper bound, so a forgotten-open valve cannot run indefinitely. When the zone has a guard flow rate configured, the effective bound is the *expected duration* (`volume / flow_rate`) times a safety margin, capped by this field: a zone with five minutes of work is guarded at its own scale rather than at the default hour. You can always tighten this field, never loosen it — if the work genuinely needs longer than you allow, the zone warns that it will stop short instead of quietly under-watering.
 5. When the switch goes `on → off` (either because the user closed it, or because the monitor closed it):
    - `is_irrigating` flips back to `False`.
    - `last_irrigated` is stamped with the current time.
@@ -410,7 +482,7 @@ The per-zone **Irrigate** button calls the `never_dry.irrigate_zone` service. Ne
 Same code path as trigger 2, only the source differs:
 
 - **Mode A (reactive)** — fires when the deficit crosses the threshold. `last_irrigation_source = "reactive"`.
-- **Mode B (scheduled)** — fires at the configured daily time if the deficit is above threshold. `last_irrigation_source = "scheduled"`.
+- **Mode B (scheduled)** — fires at the configured daily time **regardless of the threshold**: a schedule means "top this zone back up at this hour", and gating it on the reactive threshold would silently turn every scheduled run into a reactive one. The dose is whatever deficit has accumulated, so the zone is topped up even when it sits below the threshold; the only zone skipped is one with nothing to refill (deficit ≤ 0). The threshold stays a *reactive*-mode concept. `last_irrigation_source = "scheduled"`.
 - **Custom automation** — your own automation calling `never_dry.irrigate_zone` or `never_dry.irrigate_all`. Source = `"button"` (same as the manual button — the service entry point is shared).
 
 All of them go through `ValveOperator` and `_deliver_water`. Volume tracking, partial irrigation, and the `never_dry_irrigation_complete` event behave identically to trigger 2.
@@ -583,7 +655,7 @@ HACS checks for new releases automatically. You will see a notification in the H
 
 ### Manual update
 
-1. Download the latest release from [GitHub Releases](https://github.com/drake69/NeverDry/releases)
+1. Download the latest release from [GitHub Releases](https://github.com/never-dry/NeverDry/releases)
 2. Extract `never_dry.zip`
 3. Replace the contents of `config/custom_components/never_dry/` with the new files
 4. Restart Home Assistant
@@ -596,7 +668,7 @@ HACS checks for new releases automatically. You will see a notification in the H
 
 ### Version history
 
-Check the [GitHub Releases](https://github.com/drake69/NeverDry/releases) page for detailed release notes, including new features, bug fixes, and any breaking changes.
+Check the [GitHub Releases](https://github.com/never-dry/NeverDry/releases) page for detailed release notes, including new features, bug fixes, and any breaking changes.
 
 ## 12. Calibration guide
 
@@ -649,7 +721,7 @@ No manual seasonal adjustment is needed. If you find the model significantly ove
 NeverDry bundles a custom Lovelace card that shows everything about **one zone** at a glance. It is installed with the integration and **auto-registered** — you do **not** need to add a Lovelace resource manually. After install (and a browser refresh) it appears in the **"Add card"** picker as *NeverDry Zone Card*; open the card editor, pick the zone, and save.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/drake69/NeverDry/main/docs/assets/zone-card.png" alt="NeverDry Zone Card" width="320">
+  <img src="https://raw.githubusercontent.com/never-dry/NeverDry/main/docs/assets/zone-card.png" alt="NeverDry Zone Card" width="320">
 </p>
 
 The card groups the zone's entities by time horizon:

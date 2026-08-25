@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+- **A delivery is now bounded by the job, not by a constant** ([#173]). The safety timeout used to be combined with the expected duration by taking the *greater* of the two, which made the configured value a floor: a zone with five minutes of work was guarded with the one-hour default, and a flow meter that stopped counting mid-run kept the valve open for the whole hour. The bound is now the expected duration (`volume / flow rate`) times a safety margin, capped by the configured timeout — the field goes back to meaning what the manual has always said it means, an upper bound you can tighten but not loosen. If a zone genuinely needs longer than you allow, it now says so once instead of quietly stopping short. Zones with no guard flow rate configured are unaffected: with no estimate there is nothing to bound with, and the configured timeout is still all there is.
+
+### Added
+- **The zone card says when a valve is not answering.** An amber warning appears as soon as a command goes unanswered, instead of the press appearing to do nothing. A valve that drops off the radio mesh periodically keeps reporting a perfectly ordinary "off", so it never shows as unavailable: the only symptom used to be a button that seemed inert for the better part of a minute, followed by a blocked zone. The warning distinguishes *did not answer* — a radio problem: check the link, check the batteries — from *answered and delivered no water*, which is hydraulic and needs a different look. It clears itself as soon as the valve replies, and it stays quiet for the first few minutes after a restart, when Zigbee entities are not loaded yet and every zone would otherwise cry wolf. New `valve_reachable` and `valve_last_failure` attributes carry it. See the user manual, *When a valve stops answering*.
+- System-wide reset buttons on the NeverDry hub device ([#142]):
+  - **Reset yearly rain** — clears the shared year-to-date rain total (behind every zone's *Rain Yearly [L]*) without waiting for 1 January. The total is a saved value that survives a restart and a plain reinstall, so this button is the way to clear a wrong figure — e.g. after switching rain sensor type.
+  - **Reset yearly water** — clears *Irrigated Yearly [L]* for every zone at once; each zone's lifetime total is preserved.
+  - Both are state-only: recorder long-term statistics (Energy dashboard) are left untouched.
+- Per-zone **site exposure**: a microclimate factor (`k_mc`) that multiplies the crop coefficient, so a shaded, windy or paving-adjacent zone keeps its seasonal Kc curve instead of being frozen at one value by a constant Kc override ([#146]). Presets from the landscape coefficient method (0.60 deep shade … 1.20 reflected heat), plus an *Advanced (custom factor)* entry (0.1–1.5). Default *Full sun, open* (×1.00) leaves existing zones unchanged.
+- Zone Kc sensor attributes `kc_base`, `exposure` and `microclimate_factor`, so an effective Kc can be traced back to the curve and the factor it came from.
+
+### Fixed
+- **Reloading no longer leaves the previous setup running underneath the new one.** Saving anything in the options flow reloads the integration, and until now the reload left the old copy subscribed: the retired hub kept waking on every temperature reading and advancing a second water balance, and each valve gained another operator — each with its own watchdog, able to force a valve closed under the one legitimately driving it. The count grew with every edit. Nothing was visibly broken, which is why it lasted: the symptoms are drifting deficits and valves that close early for no reason the log explains. Every listener is now released when the entity or the controller goes away.
+- Soil-moisture probes reporting a **percentage** no longer stop a zone from watering ([#170]). A reading of 45 rather than 0.45 made `(field_capacity − vwc)` negative for every possible value — including a bone-dry 15 % — and the clamp that keeps a deficit from going negative pinned it at exactly zero, silently and forever. Readings are now normalised at the input boundary: above 1 is read as a percentage, exactly 1.0 as a saturated fraction. Consumer probes (Ecowitt, most Zigbee models) work without a template-sensor helper.
+- A moisture reading that is not a water content on either scale — a raw ADC count, a negative, a NaN — is now refused instead of being clamped to "saturated": the last good deficit is held and one warning is logged, naming the sensor.
+- Zone form fields showed their raw key instead of a label — `area_m2`, `flow_rate_lpm`, `plant_family` and every other field inside the three collapsible sections, in all languages including translated ones. Grouping the form into sections moved where Home Assistant looks a label up (`sections.<section>.data.<field>`), and the labels stayed at the step level where nothing reads them. Fields whose key happens to read like a word (`valve`, `name`) hid how widespread it was. The strings themselves were always there and are unchanged.
+- Imperial units in the config flow and displays ([#139]):
+  - Zone threshold help text no longer hardcodes "(mm)" — the field label already shows the user's unit (mm or in).
+  - Deficit, threshold and ET sensors now declare a display precision, so imperial users see meaningful decimals instead of values rounded to whole inches.
+  - Reconfiguring a zone in imperial is now stable: threshold and max-deficit round-trip through inches without drifting on every edit.
 
 ## [0.11.0] - 2026-07-26
 
@@ -39,9 +59,14 @@ First stable of the 0.11 line. Theme: **trust your water balance**.
 
 ---
 
-For releases prior to 0.11.0, see the [GitHub Releases](https://github.com/drake69/NeverDry/releases) page.
+For releases prior to 0.11.0, see the [GitHub Releases](https://github.com/never-dry/NeverDry/releases) page.
 
-[Unreleased]: https://github.com/drake69/NeverDry/compare/v0.11.0...HEAD
-[0.11.0]: https://github.com/drake69/NeverDry/releases/tag/v0.11.0
-[#123]: https://github.com/drake69/NeverDry/issues/123
-[#116]: https://github.com/drake69/NeverDry/issues/116
+[Unreleased]: https://github.com/never-dry/NeverDry/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/never-dry/NeverDry/releases/tag/v0.11.0
+[#173]: https://github.com/never-dry/NeverDry/issues/173
+[#170]: https://github.com/never-dry/NeverDry/issues/170
+[#146]: https://github.com/never-dry/NeverDry/issues/146
+[#142]: https://github.com/never-dry/NeverDry/pull/142
+[#139]: https://github.com/never-dry/NeverDry/issues/139
+[#123]: https://github.com/never-dry/NeverDry/issues/123
+[#116]: https://github.com/never-dry/NeverDry/issues/116

@@ -2,10 +2,10 @@
 
 **Smart irrigation for Home Assistant** — knows exactly when your garden needs water, calculates how long to run the valve, and makes sure it actually closes.
 
-[![Security](https://github.com/drake69/NeverDry/actions/workflows/security.yml/badge.svg)](https://github.com/drake69/NeverDry/actions/workflows/security.yml)
+[![Security](https://github.com/never-dry/NeverDry/actions/workflows/security.yml/badge.svg)](https://github.com/never-dry/NeverDry/actions/workflows/security.yml)
 [![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5)](https://github.com/hacs/integration)
-[![GitHub release](https://img.shields.io/github/v/release/drake69/NeverDry)](https://github.com/drake69/NeverDry/releases)
-[![Downloads](https://img.shields.io/github/downloads/drake69/NeverDry/latest/total?color=41BDF5&label=downloads%20%28latest%29)](https://github.com/drake69/NeverDry/releases)
+[![GitHub release](https://img.shields.io/github/v/release/never-dry/NeverDry)](https://github.com/never-dry/NeverDry/releases)
+[![Downloads](https://img.shields.io/github/downloads/never-dry/NeverDry/latest/total?color=41BDF5&label=downloads%20%28latest%29)](https://github.com/never-dry/NeverDry/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 [![HA Community](https://img.shields.io/badge/Home%20Assistant-Community%20thread-41BDF5?logo=home-assistant&logoColor=white)](https://community.home-assistant.io/t/neverdry-smart-irrigation-that-calculates-when-and-how-long-to-water-fao-56-water-balance-hacs/1013835)
 <!-- Active installs (Home Assistant analytics). Currently no data: `never_dry` is not yet listed
@@ -15,7 +15,7 @@
 -->
 
 
-If NeverDry is useful to you, **[leave a star](https://github.com/drake69/NeverDry/stargazers)** ⭐ — it helps others find the project.
+If NeverDry is useful to you, **[leave a star](https://github.com/never-dry/NeverDry/stargazers)** ⭐ — it helps others find the project.
 
 > 🌱 **Vision** — what NeverDry is for, and why: [`docs/VISION.md`](docs/VISION.md).
 > 🤝 **Want to contribute?** See [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [design notes](docs/design/README.md).
@@ -30,16 +30,17 @@ NeverDry tracks how much water your soil has lost to heat and wind, and how much
 
 **And it makes sure the valve always closes.**
 
-If a valve doesn't respond after three attempts, NeverDry blocks that zone and shows a warning on your dashboard. Three independent mechanisms make sure water can't run indefinitely — hardware timeout, software watchdog, and a per-valve state machine that remembers what happened.
+If a valve stops responding, NeverDry keeps trying — six attempts, with a growing pause between them, because a radio hiccup is not a broken valve — and only then blocks that zone and shows a warning on your dashboard. Three independent mechanisms make sure water can't run indefinitely — hardware timeout, software watchdog, and a per-valve state machine that remembers what happened.
 
 ## Features
 
 - **Knows when your garden is thirsty** — tracks heat, evaporation, and rainfall in real time; irrigates only when needed
 - **Each plant gets its own schedule** — 10 plant profiles (lawn, citrus, succulents, roses, ...) with seasonal variation; NeverDry knows your lawn drinks more in July than your lavender ever will
+- **Same plants, different spot** — a bed shaded by the house from 14:00 doesn't drink like the one baking against a south-facing wall; set each zone's exposure and NeverDry scales its water accordingly, all season long
 - **Knows how much water to deliver** — calculates exactly how many liters each zone needs; if you have a flow meter, it measures delivery directly; otherwise it computes run time from flow rate
 - **Zones are independent** — the rose bed and the lawn dry out at different rates; each zone tracks its own deficit
 - **Skips irrigation after rain** — tracks how much rain actually fell and subtracts it from the deficit
-- **Valve always closes** — if a valve doesn't respond 3 times, NeverDry blocks it, shows the state on the dashboard, and waits for you to check
+- **Valve always closes** — if a valve is still not responding after six tries, NeverDry blocks it, shows the state on the dashboard, and waits for you to check
 - **Two scheduling modes** — water when the deficit crosses a threshold (Mode A) or every night based on current deficit (Mode B)
 - **Works without valves too** — no hardware? NeverDry sends a notification when watering is needed and by how much
 - **Emergency stop** — one button closes all valves immediately
@@ -95,7 +96,7 @@ All sensors that carry a physical unit declare the proper HA `device_class` (e.g
 NeverDry ships a custom Lovelace card that shows everything about **one zone** at a glance. The card is bundled with the integration and **auto-registered** — no manual resource to add: after install it appears directly in the **"Add card"** picker as *NeverDry Zone Card*. Pick the zone in the card editor and you're done.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/drake69/NeverDry/main/docs/assets/zone-card.png" alt="NeverDry Zone Card" width="320">
+  <img src="https://raw.githubusercontent.com/never-dry/NeverDry/main/docs/assets/zone-card.png" alt="NeverDry Zone Card" width="320">
 </p>
 
 Each card groups a zone's entities by time horizon:
@@ -140,7 +141,27 @@ Each zone can be assigned a plant family with seasonal Kc values (northern hemis
 | Native ground cover | 0.25 | 0.45 | 0.55 | 0.35 |
 | Mixed garden (default) | 0.40 | 0.70 | 0.90 | 0.55 |
 
-You can also set a **manual Kc override** per zone (0.1–2.0) if you know the exact value. Not sure which Kc fits your setup? Use **[NeverDry Planner](https://drake69.github.io/neverdry-planner/)** to calculate the irrigated area and the right Kc to copy directly into NeverDry.
+You can also set a **manual Kc override** per zone (0.1–2.0) if you know the exact value. Not sure which Kc fits your setup? Use **[NeverDry Planner](https://never-dry.github.io/neverdry-planner/)** to calculate the irrigated area and the right Kc to copy directly into NeverDry.
+
+## Site Exposure
+
+Two zones can hold the same plants and still lose water at different rates — one is shaded by the house from 14:00, the other bakes next to a south-facing wall. **Site exposure** captures that with a per-zone factor that *multiplies* the Kc, so the zone keeps its seasonal curve instead of being frozen at one value by a fixed Kc override:
+
+```
+Kc_effective = Kc(plant family or override) × microclimate_factor
+```
+
+| Exposure | Factor |
+|----------|--------|
+| Deep / all-day shade | 0.60 |
+| Morning sun, afternoon shade | 0.75 |
+| Morning shade, afternoon sun | 0.85 |
+| Full sun, open (default) | 1.00 |
+| Windy / exposed | 1.15 |
+| Reflected heat (paving, south-facing wall) | 1.20 |
+| Advanced (custom factor) | 0.1–1.5, your value |
+
+The presets come from the landscape coefficient method (`K_L = k_s × k_d × k_mc`, Costello, Matheny & Clark 2000), where the plant family plays the species factor `k_s` and exposure the microclimate factor `k_mc`. Values above 1.0 are deliberate: paving and walls really do push a zone past reference ET. Leaving exposure at *Full sun, open* changes nothing, so existing zones keep behaving exactly as before.
 
 ---
 
@@ -148,7 +169,7 @@ You can also set a **manual Kc override** per zone (0.1–2.0) if you know the e
 
 ### HACS (recommended)
 
-[![Open your Home Assistant instance and open NeverDry in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=drake69&repository=NeverDry&category=integration)
+[![Open your Home Assistant instance and open NeverDry in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=never-dry&repository=NeverDry&category=integration)
 
 Or manually:
 
@@ -169,7 +190,7 @@ Or manually:
 
 **Via HACS**: HACS notifies you when a new version is available. Click **Update** and restart HA.
 
-**Manual**: Download the latest `never_dry.zip` from [Releases](https://github.com/drake69/NeverDry/releases), replace the `custom_components/never_dry/` folder, and restart HA.
+**Manual**: Download the latest `never_dry.zip` from [Releases](https://github.com/never-dry/NeverDry/releases), replace the `custom_components/never_dry/` folder, and restart HA.
 
 Your configuration and sensor history are preserved automatically. If the new version changes the config schema, settings are migrated seamlessly — no need to remove and re-add the integration.
 
@@ -201,7 +222,9 @@ NeverDry is configured entirely through the UI — no YAML required.
 | System type | Yes | — | Drip / micro-sprinkler / sprinkler / manual |
 | Efficiency | No | (from type) | Override distribution efficiency [0.1–1.0] |
 | Plant family | No | — | Sets seasonal Kc profile |
-| Custom Kc | No | — | Override Kc [0.1–2.0] — use [NeverDry Planner](https://drake69.github.io/neverdry-planner/) to estimate it |
+| Custom Kc | No | — | Override Kc [0.1–2.0] — use [NeverDry Planner](https://never-dry.github.io/neverdry-planner/) to estimate it |
+| Site exposure | No | Full sun, open | Sun/wind exposure preset — multiplies the Kc [0.60–1.20] |
+| Custom microclimate factor | Advanced only | — | Explicit exposure factor [0.1–1.5], used when exposure is *Advanced* |
 | Guard flow rate | For timer mode | — | Valve flow rate [L/min]. Required for timer-based zones; recommended for flow-meter and volume-dosing zones too, where it drives the expected duration and the safety-timeout scaling |
 | Threshold | No | 20.0 | Mode A trigger [mm] |
 | Battery sensor | No | — | Valve battery sensor — mirrored in the zone device card |
@@ -219,7 +242,7 @@ The model is based on FAO-56 (Allen et al., 1998):
 D_zone(t) = clamp(D_zone(t-1) + ET_h × Kc × Δt − ΔP,  0,  D_max)
 
 ET_h = max(0, α × (T − T_base) / 24)     [mm/h]  evapotranspiration
-Kc   = f(day_of_year, plant_family)        [—]     crop coefficient
+Kc   = f(day_of_year, plant_family) × k_mc [—]     crop coefficient × site exposure
 ΔP   = rain_delta(sensor_type)             [mm]    precipitation increment
 V    = D_zone × Area / Efficiency          [L]     volume needed
 t    = V / FlowRate × 60                   [s]     irrigation duration
@@ -236,21 +259,21 @@ t    = V / FlowRate × 60                   [s]     irrigation duration
 
 - [User Manual](docs/user_manual.md)
 - [Developer Manual](docs/developer_manual.md)
-- [Project Homepage](https://drake69.github.io/NeverDry/)
+- [Project Homepage](https://never-dry.github.io/NeverDry/)
 
 ## Bugs & Feature Requests
 
 Found a bug or have an idea? Open an issue — reports from real gardens are what drive this project forward:
 
-- 🐛 **[Report a bug](https://github.com/drake69/NeverDry/issues/new?template=bug_report.md)** — include your HA version, NeverDry version, valve hardware, and the relevant `custom_components.never_dry` debug log lines
-- 💡 **[Request a feature](https://github.com/drake69/NeverDry/issues/new?template=feature_request.md)** — describe your irrigation setup and what you're trying to achieve
+- 🐛 **[Report a bug](https://github.com/never-dry/NeverDry/issues/new?template=bug_report.md)** — include your HA version, NeverDry version, valve hardware, and the relevant `custom_components.never_dry` debug log lines
+- 💡 **[Request a feature](https://github.com/never-dry/NeverDry/issues/new?template=feature_request.md)** — describe your irrigation setup and what you're trying to achieve
 - 💬 **[HA Community thread](https://community.home-assistant.io/t/neverdry-smart-irrigation-that-calculates-when-and-how-long-to-water-fao-56-water-balance-hacs/1013835)** — for setup questions and general discussion
 
 ## Support
 
 NeverDry is free and open source. If it's useful to you, leave a star — it costs nothing and helps others find the project:
 
-<a href="https://github.com/drake69/NeverDry/stargazers"><img src="https://img.shields.io/badge/Star_on_GitHub-24292e?style=for-the-badge&logo=github&logoColor=white" alt="Star on GitHub" height="35"></a>
+<a href="https://github.com/never-dry/NeverDry/stargazers"><img src="https://img.shields.io/badge/Star_on_GitHub-24292e?style=for-the-badge&logo=github&logoColor=white" alt="Star on GitHub" height="35"></a>
 
 ---
 
@@ -267,6 +290,8 @@ The ET model is a simplification of the FAO-56 standard and is **not a substitut
 ## Acknowledgments
 
 Developed by [drake69](https://github.com/drake69) with AI assistance ([Claude](https://claude.ai) by Anthropic).
+
+Site exposure contributed by [philipgiuliani](https://github.com/philipgiuliani) ([#147](https://github.com/never-dry/NeverDry/pull/147)).
 
 ---
 

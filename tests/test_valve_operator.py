@@ -925,6 +925,8 @@ async def test_hw_max_duration_called_on_open(hass):
     set_value_calls = [c for c in hass.services.async_call.call_args_list if c.args[:2] == ("number", "set_value")]
     assert len(set_value_calls) == 1
     assert set_value_calls[0].args[2]["entity_id"] == "number.hw_timer"
+    # No hw provider passed: the on-device timer mirrors the watchdog value.
+    # The ladder itself is the zone's business, not the operator's.
     assert set_value_calls[0].args[2]["value"] == pytest.approx(120.0)
 
 
