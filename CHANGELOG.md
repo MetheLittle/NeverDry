@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-08-25
+
+A patch stable for the 0.11 line. Theme: **stop failing quietly**. Almost everything here was a fault that produced no error — a valve that looked inert, a probe pinned at zero, a reload leaving two copies running, an override that came back on its own, a yearly rain total that stayed at zero while it rained.
+
+Nothing in the water-balance engine changes: the domain model classes and the Hargreaves and Penman-Monteith ET tiers are present in the code but inert, with no caller in production. Wiring them is the next minor and goes through a pre-release first.
+
+**Upgrading.** Update through HACS and restart Home Assistant. There is nothing to configure by hand and no entity is renamed or removed — but two things are worth knowing.
+
+Your zone settings are migrated for you: a zone holding a custom efficiency or a manual Kc gets that value marked as *Custom* in the matching dropdown, so it goes on watering exactly as it did. Without that step the number would be ignored at the next start and the zone would fall back to its preset — a drip zone set to 0.55 would jump to 0.92 and water less, with nobody having touched it. Site exposure is deliberately left alone: there the dropdown already decided, so switching a leftover factor on would *change* the watering rather than preserve it. The config flow points those leftovers out the next time you save the zone.
+
+Going back to 0.11.0 is not supported once 0.11.1 has started: the migration marks your configuration as a newer schema, and 0.11.0 refuses to load a configuration it does not understand. If you want a way back, take a backup before updating.
+
 ### Changed
 - **A delivery is now bounded by the job, not by a constant** ([#173]). The safety timeout used to be combined with the expected duration by taking the *greater* of the two, which made the configured value a floor: a zone with five minutes of work was guarded with the one-hour default, and a flow meter that stopped counting mid-run kept the valve open for the whole hour. The bound is now the expected duration (`volume / flow rate`) times a safety margin, capped by the configured timeout — the field goes back to meaning what the manual has always said it means, an upper bound you can tighten but not loosen. If a zone genuinely needs longer than you allow, it now says so once instead of quietly stopping short. Zones with no guard flow rate configured are unaffected: with no estimate there is nothing to bound with, and the configured timeout is still all there is.
+- **One rule for the three preset/override pairs** ([#168]). System type, plant family and site exposure each pair a dropdown with a box for a custom value, and each behaved differently. The rule is now the same everywhere and stated once: **the dropdown decides, and the box is read only when the dropdown says *Custom***. A number typed in the box while a preset is selected no longer takes effect silently. The step on the three dimensionless factors goes from 0.05 to 0.01, because the preset values are not multiples of 0.05 — drip is 0.92 and pop-up sprinklers 0.68, so dialling one back by hand used to be impossible.
 
 ### Added
 - **The zone card says when a valve is not answering.** An amber warning appears as soon as a command goes unanswered, instead of the press appearing to do nothing. A valve that drops off the radio mesh periodically keeps reporting a perfectly ordinary "off", so it never shows as unavailable: the only symptom used to be a button that seemed inert for the better part of a minute, followed by a blocked zone. The warning distinguishes *did not answer* — a radio problem: check the link, check the batteries — from *answered and delivered no water*, which is hydraulic and needs a different look. It clears itself as soon as the valve replies, and it stays quiet for the first few minutes after a restart, when Zigbee entities are not loaded yet and every zone would otherwise cry wolf. New `valve_reachable` and `valve_last_failure` attributes carry it. See the user manual, *When a valve stops answering*.
@@ -16,10 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Reset yearly rain** — clears the shared year-to-date rain total (behind every zone's *Rain Yearly [L]*) without waiting for 1 January. The total is a saved value that survives a restart and a plain reinstall, so this button is the way to clear a wrong figure — e.g. after switching rain sensor type.
   - **Reset yearly water** — clears *Irrigated Yearly [L]* for every zone at once; each zone's lifetime total is preserved.
   - Both are state-only: recorder long-term statistics (Energy dashboard) are left untouched.
-- Per-zone **site exposure**: a microclimate factor (`k_mc`) that multiplies the crop coefficient, so a shaded, windy or paving-adjacent zone keeps its seasonal Kc curve instead of being frozen at one value by a constant Kc override ([#146]). Presets from the landscape coefficient method (0.60 deep shade … 1.20 reflected heat), plus an *Advanced (custom factor)* entry (0.1–1.5). Default *Full sun, open* (×1.00) leaves existing zones unchanged.
+- Per-zone **site exposure**: a microclimate factor (`k_mc`) that multiplies the crop coefficient, so a shaded, windy or paving-adjacent zone keeps its seasonal Kc curve instead of being frozen at one value by a constant Kc override ([#146], contributed by @philipgiuliani — the first outside code change NeverDry has shipped). Presets from the landscape coefficient method (0.60 deep shade … 1.20 reflected heat), plus an *Advanced (custom factor)* entry (0.1–1.5). Default *Full sun, open* (×1.00) leaves existing zones unchanged.
 - Zone Kc sensor attributes `kc_base`, `exposure` and `microclimate_factor`, so an effective Kc can be traced back to the curve and the factor it came from.
 
 ### Fixed
+- **Yearly rain stayed at zero for anyone using a soil-moisture probe** ([#144]). Rain is a system-wide quantity — one sky over the whole garden — but the credit lived inside the ET branch of the calculation, and a VWC setup bypasses that branch entirely. Every zone's *Rain Yearly [L]* therefore read 0 forever, with the rain sensor tracked, firing and correct. The credit now runs in both modes. ET behaviour is unchanged, and rain is still not subtracted from a VWC deficit — the probe already reflects it, because the water landed on the soil the probe is in.
+- **An override set by accident could not be cleared** ([#165]). Emptying a zone's efficiency, manual Kc, exposure, microclimate factor, delivery timeout or irrigation time silently restored the previous value: the form re-injected its own default whenever a field came back empty. Efficiency had a second, separate reason — it was a slider, and a slider always submits a number, so it had no empty state to send at all. It is a box now, like the Kc field beside it. Fields that must always hold a value keep their default.
+- **A partial delivery on 1 January no longer adds to last year's total.** *Irrigated Yearly [L]* is reset when the calendar year turns, but only the full-delivery path did so: a session that stopped short of its target — a stop, a timeout, a valve that closed early — carried the previous year's figure forward instead. The counter feeds long-term statistics, so the jump reached the Energy dashboard too. Both settle paths now share one answer.
 - **Reloading no longer leaves the previous setup running underneath the new one.** Saving anything in the options flow reloads the integration, and until now the reload left the old copy subscribed: the retired hub kept waking on every temperature reading and advancing a second water balance, and each valve gained another operator — each with its own watchdog, able to force a valve closed under the one legitimately driving it. The count grew with every edit. Nothing was visibly broken, which is why it lasted: the symptoms are drifting deficits and valves that close early for no reason the log explains. Every listener is now released when the entity or the controller goes away.
 - Soil-moisture probes reporting a **percentage** no longer stop a zone from watering ([#170]). A reading of 45 rather than 0.45 made `(field_capacity − vwc)` negative for every possible value — including a bone-dry 15 % — and the clamp that keeps a deficit from going negative pinned it at exactly zero, silently and forever. Readings are now normalised at the input boundary: above 1 is read as a percentage, exactly 1.0 as a saturated fraction. Consumer probes (Ecowitt, most Zigbee models) work without a template-sensor helper.
 - A moisture reading that is not a water content on either scale — a raw ADC count, a negative, a NaN — is now refused instead of being clamped to "saturated": the last good deficit is held and one warning is logged, naming the sensor.
@@ -61,9 +77,13 @@ First stable of the 0.11 line. Theme: **trust your water balance**.
 
 For releases prior to 0.11.0, see the [GitHub Releases](https://github.com/never-dry/NeverDry/releases) page.
 
-[Unreleased]: https://github.com/never-dry/NeverDry/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/never-dry/NeverDry/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/never-dry/NeverDry/releases/tag/v0.11.1
 [0.11.0]: https://github.com/never-dry/NeverDry/releases/tag/v0.11.0
 [#173]: https://github.com/never-dry/NeverDry/issues/173
+[#168]: https://github.com/never-dry/NeverDry/pull/168
+[#165]: https://github.com/never-dry/NeverDry/issues/165
+[#144]: https://github.com/never-dry/NeverDry/issues/144
 [#170]: https://github.com/never-dry/NeverDry/issues/170
 [#146]: https://github.com/never-dry/NeverDry/issues/146
 [#142]: https://github.com/never-dry/NeverDry/pull/142

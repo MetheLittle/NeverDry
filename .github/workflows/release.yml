@@ -49,10 +49,36 @@ jobs:
           cd custom_components/never_dry
           zip -r ../../never_dry.zip . -x '*__pycache__*'
 
+      - name: Compose release notes from the changelog
+        id: notes
+        run: |
+          # A stable release is described by its CHANGELOG section, in the words
+          # a user needs. Asking GitHub to generate the notes instead produces
+          # the raw list of merged pull requests — back-merges, version bumps
+          # and CI bumps included — which is internal churn served to people who
+          # install the integration.
+          #
+          # A missing section FAILS the release rather than falling back: the
+          # thing being guarded against is shipping a version nobody wrote down,
+          # and a silent fallback is exactly how that goes unnoticed.
+          #
+          # Pre-releases have no changelog section by convention, so they keep
+          # the generated notes: their audience is testers, who are the people
+          # the pull request list is actually useful to.
+          if [[ "${{ github.ref_name }}" == *-* ]]; then
+            echo "Pre-release ${{ github.ref_name }}: keeping the generated notes."
+            echo "from_changelog=false" >> "$GITHUB_OUTPUT"
+          else
+            python3 scripts/release_notes.py "${{ steps.version.outputs.version }}" \
+              --out release_notes.md
+            echo "from_changelog=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.from_changelog == 'true' && 'release_notes.md' || '' }}
+          generate_release_notes: ${{ steps.notes.outputs.from_changelog != 'true' }}
           files: never_dry.zip
           # Tags with a prerelease suffix (v0.11.0-beta.1) must be marked as
           # pre-release: HACS only offers them to users who enabled beta
