@@ -42,6 +42,17 @@ New contributors: see [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) first.
   the command adapter and `valve.*` support shipped 2026-08-17 (steps 1–2); the
   orchestration questions (soak, master pump, unified scheduler) are still open.
   Discussion: [#74](https://github.com/never-dry/NeverDry/issues/74).
+- [`scheduler.md`](scheduler.md) — **Draft**: what the scheduler is for, and the
+  gap between the decisions the model already records and the behaviour that
+  runs. Covers deferring versus skipping (a rain delay needs memory and a
+  bound), the unconnected forecast feed, irrigability windows, queued dispatch
+  without a queue, the freeze interlock that protects the valves rather than the
+  plants, and the two budgets a cycle-and-soak run consumes. Seven questions in
+  §14: three have working answers, four are open — the forecast binding shape,
+  which rain-delay evidence ships first, and how far a freeze may be overridden.
+  Discussion:
+  [#74](https://github.com/never-dry/NeverDry/issues/74).
+  *Status: Draft → Proposed (RFC) → Accepted (ADR).*
 - [`soil-moisture-model.md`](soil-moisture-model.md) — **Draft**: what a soil
   probe's reading is allowed to mean. Argues that "site-level" is not a physical
   category for soil, and documents a suspected defect in how the per-zone deficit
