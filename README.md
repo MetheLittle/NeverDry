@@ -296,6 +296,43 @@ Site exposure contributed by [philipgiuliani](https://github.com/philipgiuliani)
 
 ---
 
+## Contributors
+
+NeverDry is shaped by people who never pushed a commit as much as by people who
+did. A field report that explains *why* a valve times out is worth more than the
+patch it leads to, and this list counts it that way — code, ideas, bug reports and
+testing on real gardens all appear.
+
+If you have reported a bug, tested a pre-release or shaped a design note, you
+belong here. If you are missing, say so on any issue and it will be fixed.
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/drake69"><img src="https://avatars.githubusercontent.com/u/5324491?v=4?s=100" width="100px;" alt="Luigi Corsaro"/><br /><sub><b>Luigi Corsaro</b></sub></a><br /><a href="https://github.com/never-dry/NeverDry/commits?author=drake69" title="Code">💻</a> <a href="https://github.com/never-dry/NeverDry/commits?author=drake69" title="Documentation">📖</a> <a href="#ideas-drake69" title="Ideas, Planning, & Feedback">🤔</a> <a href="#maintenance-drake69" title="Maintenance">🚧</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/philipgiuliani"><img src="https://avatars.githubusercontent.com/u/5446019?v=4?s=100" width="100px;" alt="Philip Giuliani"/><br /><sub><b>Philip Giuliani</b></sub></a><br /><a href="https://github.com/never-dry/NeverDry/commits?author=philipgiuliani" title="Code">💻</a> <a href="#ideas-philipgiuliani" title="Ideas, Planning, & Feedback">🤔</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/evlas"><img src="https://avatars.githubusercontent.com/u/1157933?v=4?s=100" width="100px;" alt="Vito Ammirata"/><br /><sub><b>Vito Ammirata</b></sub></a><br /><a href="https://github.com/never-dry/NeverDry/commits?author=evlas" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/rpatel3001"><img src="https://avatars.githubusercontent.com/u/6333479?v=4?s=100" width="100px;" alt="Rajan Patel"/><br /><sub><b>Rajan Patel</b></sub></a><br /><a href="https://github.com/never-dry/NeverDry/issues?q=author%3Arpatel3001" title="Bug reports">🐛</a> <a href="#userTesting-rpatel3001" title="User Testing">📓</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/dietklein"><img src="https://avatars.githubusercontent.com/u/155997718?v=4?s=100" width="100px;" alt="dietklein"/><br /><sub><b>dietklein</b></sub></a><br /><a href="https://github.com/never-dry/NeverDry/issues?q=author%3Adietklein" title="Bug reports">🐛</a> <a href="#userTesting-dietklein" title="User Testing">📓</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/MetheLittle"><img src="https://avatars.githubusercontent.com/u/155000385?v=4?s=100" width="100px;" alt="MetheLittle"/><br /><sub><b>MetheLittle</b></sub></a><br /><a href="https://github.com/never-dry/NeverDry/issues?q=author%3AMetheLittle" title="Bug reports">🐛</a> <a href="#userTesting-MetheLittle" title="User Testing">📓</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/fpytloun"><img src="https://avatars.githubusercontent.com/u/948799?v=4?s=100" width="100px;" alt="Filip Pytloun"/><br /><sub><b>Filip Pytloun</b></sub></a><br /><a href="#ideas-fpytloun" title="Ideas, Planning, & Feedback">🤔</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/MrEcosse"><img src="https://avatars.githubusercontent.com/u/62436640?v=4?s=100" width="100px;" alt="MrEcosse"/><br /><sub><b>MrEcosse</b></sub></a><br /><a href="#ideas-MrEcosse" title="Ideas, Planning, & Feedback">🤔</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+---
+
 ## Scientific References
 
 NeverDry is based on established agronomic science. The key references are:

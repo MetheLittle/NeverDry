@@ -132,6 +132,18 @@ build a hierarchy, and none of them is a claim on your time.
 pre-release, or shaped a design note. This is not granted and there is nothing to
 apply for: if you have done any of that, you already are one.
 
+Contributors are listed in the README, with what they contributed: code,
+documentation, ideas, bug reports, testing on a real garden. The list is
+maintained with [all-contributors](https://allcontributors.org), and it exists
+because GitHub's own contributor graph counts commits and nothing else — which
+would credit the dependency-update bot above every person who has run this on
+their own irrigation system and told us what broke.
+
+Being added is not automatic, and deliberately so: a list that grows with every
+comment measures volume rather than contribution, which is the opposite of what
+it is for. If you are missing, say so on any issue — that is not a favour to ask
+for, it is a correction.
+
 **Triage** — an invited role (GitHub's `triage` permission). It allows labelling,
 assigning, closing and reopening issues, and being formally requested as a
 reviewer. It carries **no write access**: you cannot push or merge anything. It is
