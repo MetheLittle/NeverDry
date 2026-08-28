@@ -1,10 +1,18 @@
 version: 2
+
+# Every update opens against develop, not against the default branch. develop is
+# where work is integrated and verified; main receives it at release time along
+# with everything else. Without target-branch, a bump lands on main on its own,
+# develop drifts behind on the very actions its own CI runs, and each update
+# costs a back-merge — which it did twice before this line existed.
+
 updates:
   # Keep GitHub Actions up to date
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    target-branch: "develop"
     # One PR for all action bumps, not one per action path. Without this,
     # actions that must stay on the SAME version get split across PRs and
     # each one lands half the pair: codeql-action/init and /analyze on
@@ -28,6 +36,7 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    target-branch: "develop"
     commit-message:
       prefix: "deps"
     labels:
