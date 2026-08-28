@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The domain model stops being scaffolding and starts running the integration. Each
+entry below links the design note that explains it properly — this is the summary,
+not the argument.
+
+### Added
+- **Four ways to compute the water balance, and the site picks one.**
+  Temperature-only, Hargreaves, Penman-Monteith, or a soil probe. *Automatic*
+  takes the best your sensors support and says which one is running, because the
+  number depends on it. Five optional sensor pickers — humidity, wind, net
+  radiation and the two daily temperature extremes — unlock the richer tiers; a
+  site that declares none behaves exactly as before.
+  ([design](docs/design_water_balance_reference_model.md))
+- **A supervised valve test that measures your real flow rate**, shown beside the
+  configured one so the gap argues for itself. It publishes the meter's smallest
+  observed step and its update count too: on a coarse counter those are the limit
+  of detection, and without them a lone number looks like a measurement when it is
+  an artifact. ([design](docs/design/flow-rate-provenance.md))
+- **The quantities the model derives become entities**, not attributes at the
+  bottom of a dialog. Judging a computed daily radiation means watching it follow
+  the weather for a week, and Home Assistant keeps history for entities only. Only
+  the ones the running method actually computes appear.
+
+### Changed
+- **The soil probe belongs to a zone, not to the installation.** A probe measures
+  one patch of soil with one planting above it; declared once for everything it
+  drove zones it knows nothing about. A zone that has one measures instead of
+  estimating and stops listening to the site. This also removes, rather than
+  fixes, the class of defect where a shared probe overwrote a zone's deficit right
+  after that zone was watered. ([design](docs/design/soil-moisture-model.md))
+- **Three flow rates, told apart.** *Design* — what the zone was built to deliver.
+  *Water meter* — what the counter reads, renamed because it reports litres, not a
+  rate. *Historical* — the median of what past sessions actually delivered, and
+  what planning now uses when it exists. One label covering all three was the root
+  of false leak reports, false actuation failures, and zones quietly watering a
+  fraction of what they should. ([design](docs/design/flow-rate-provenance.md))
+- **The zone card** shows site exposure, separates what was measured from what was
+  derived, acknowledges a press before its outcome, and puts the zone's settings
+  one click away.
+
+### Fixed
+- **A flow-metered valve no longer times out on a coarse counter** ([#173]). The
+  verification window was a fixed 10 s, but a counter cannot move before its
+  resolution divided by the flow rate — 50 s in the original report, around 60 s
+  on a meter that steps in 28 L units. The window is now derived per zone. Merely
+  widening it would have cost the safety it provides, so where the derivation
+  outgrows what still works as a guard the check is declared **inapplicable**
+  rather than stretched: the run proceeds and flow stays an observer.
+  ([design](docs/design/evidence-and-methodology.md))
+- **The valve picker accepts `valve.*` entities**, not only `switch.*` ([#94]).
+  The engine could already drive them; the form would not let you choose one.
+
 ## [0.11.1] - 2026-08-25
 
 A patch stable for the 0.11 line. Theme: **stop failing quietly**. Almost everything here was a fault that produced no error — a valve that looked inert, a probe pinned at zero, a reload leaving two copies running, an override that came back on its own, a yearly rain total that stayed at zero while it rained.
@@ -81,6 +132,7 @@ For releases prior to 0.11.0, see the [GitHub Releases](https://github.com/never
 [0.11.1]: https://github.com/never-dry/NeverDry/releases/tag/v0.11.1
 [0.11.0]: https://github.com/never-dry/NeverDry/releases/tag/v0.11.0
 [#173]: https://github.com/never-dry/NeverDry/issues/173
+[#94]: https://github.com/never-dry/NeverDry/issues/94
 [#168]: https://github.com/never-dry/NeverDry/pull/168
 [#165]: https://github.com/never-dry/NeverDry/issues/165
 [#144]: https://github.com/never-dry/NeverDry/issues/144
