@@ -458,6 +458,8 @@ Shows the volume of water needed for this specific zone in liters.
 | `flow_rate_lpm` | Valve flow rate |
 | `threshold_mm` | Mode A trigger threshold |
 | `irrigating` | `true` if this zone is currently being irrigated |
+| `valve_reachable` | `true` when the valve is answering, `false` when it is not, and absent when there is no evidence either way — a zone with no valve, or one not heard from yet. Absence is never a fault. |
+| `valve_last_failure` | Why the last command failed, when one did. It separates a valve that never answered from one that answered and moved no water. |
 
 ### Water totals: Rain Yearly and Irrigated Yearly
 
@@ -880,6 +882,15 @@ If you have a soil moisture sensor that reports volumetric water content (VWC), 
 - Default field capacity: 0.30 (30%)
 - Default root depth: 0.30 m
 
+**Either scale works — no template sensor needed.** A probe may report water
+content as a fraction (`0.25`) or as a percentage (`25`), and NeverDry reads
+both: a value above 1 is taken as a percentage, and exactly `1.0` as a saturated
+fraction. Consumer probes — Ecowitt, most Zigbee models — report percentages and
+work as they come, without a helper to divide by 100. A reading that is not a
+water content on either scale (a raw ADC count, a negative, a `NaN`) is refused
+rather than believed: the zone holds its last good deficit and one warning is
+logged naming the sensor.
+
 This gives the most accurate deficit estimate, especially in variable soil conditions.
 
 ### Seasonal adjustments
@@ -1004,6 +1015,29 @@ concurrent cycle is logged, or `Reactive irrigation triggered:` to confirm it fi
 - Verify the source sensors are online and reporting values
 - Check the Home Assistant logs: **Settings → System → Logs** → filter for `never_dry`
 
+### When a valve stops answering
+
+The zone card shows an **amber warning** — *"Valve not responding"* — as soon as a valve stops answering NeverDry.
+
+**Why this exists.** A battery valve that runs flat mid-season is close to invisible. The switch goes on showing a perfectly ordinary *off*, the battery sensor goes on showing whatever it last managed to report, and a Zigbee coordinator will not call the device missing for hours, because a valve that sleeps is *supposed* to be quiet. Meanwhile the zone's deficit climbs and looks exactly like a dry spell. Before this warning existed the only symptom was a button that seemed inert for the better part of a minute, followed by a blocked zone.
+
+**What it means, and what it does not.** It means the valve is not *answering*: a radio problem, or a flat battery. It does **not** mean the valve is broken or that no water came out. A valve that answers normally and delivers nothing — supply turned off, clogged filter — is a different fault and deliberately does not raise this warning, because it would send you to look in the wrong place. The two are told apart by `valve_last_failure` (see §6).
+
+**How NeverDry decides.** Two kinds of evidence, and they are not equally strong:
+
+- **A command went unanswered.** NeverDry asked and got nothing back. That is proof, and it counts immediately — this is also the case that actually bites, because a flaky valve keeps reporting a level and so never looks unavailable.
+- **The valve simply has not spoken** — its entity is missing or `unavailable`. Nobody asked, so this is weaker: right after a restart it is the normal state of every Zigbee entity for a minute or two. During that grace period the card says nothing rather than crying wolf. The grace ends early as soon as the valve is seen alive even once, so a valve that comes up and then drops out is reported straight away.
+
+**What to check**, in the order that usually pays:
+
+1. **Batteries.** The most common cause by far, and the one the valve cannot report — a device with no power cannot tell you it has no power.
+2. **Radio range.** A valve at the edge of the mesh drops out in wet weather and returns in dry. If it recovers on its own and the warning comes back days later, add a mains-powered Zigbee device between the coordinator and the valve to act as a router.
+3. **The coordinator.** If *every* zone warns at once, the problem is upstream — the gateway, not the valves.
+
+**It clears itself.** As soon as the valve answers again the warning disappears. You never have to dismiss it.
+
+**When you are told, and when you are not.** NeverDry notifies you when a watering was actually **attempted** and the valve did not answer — whether you pressed the button or the schedule did. It does **not** go looking for a dead valve between waterings: nothing polls the valves on a timer, so a battery that dies on Monday is reported at the next watering, not the moment it dies. Until then the amber warning on the card is the only sign, which is why it is worth having the card somewhere you actually look. Proactive checking is planned but not in this release.
+
 ### Deficit never increases
 
 - Is your temperature sensor reporting values above `t_base` (default 9°C)?
@@ -1064,7 +1098,7 @@ A: You can add new zones via **Settings → Devices & Services → NeverDry → 
 A: D_max (default 100 mm) is the maximum value the deficit can reach. It prevents the deficit from growing indefinitely during extended dry periods or sensor outages. In practice, values above 100 mm rarely occur in residential settings.
 
 **Q: What is the VWC sensor option?**
-A: If you have a soil moisture sensor that reports volumetric water content (as a fraction, e.g., 0.25 for 25%), the integration can calculate the deficit directly from that measurement instead of using the temperature-based ET model. This is more accurate but requires a suitable sensor.
+A: If you have a soil moisture sensor that reports volumetric water content, the integration can calculate the deficit directly from that measurement instead of using the temperature-based ET model. This is more accurate but requires a suitable sensor. Either scale is accepted — a fraction (`0.25`) or a percentage (`25`) — so the consumer probes that report percentages need no conversion helper.
 
 **Q: How accurate is the ET estimate?**
 A: With temperature only, the model explains 40–60% of the real ET variance in temperate climates. It's sufficient for residential use but not for professional agriculture. Adding T_max/T_min sensors (Hargreaves-Samani) improves accuracy to ~1 mm/day.

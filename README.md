@@ -43,6 +43,7 @@ If a valve stops responding, NeverDry keeps trying — six attempts, with a grow
 - **Measures your system instead of believing you** — the flow rate you type in decides how long a valve stays open *and* how much water NeverDry thinks it delivered. One button runs a supervised one-minute test and tells you the real figure. On the garden this was built for, three zones declared 100, 200 and 100 L/h were actually running at 264, 360 and 24 — a fifteenfold spread, same brand of valve
 - **Zones are independent** — the rose bed and the lawn dry out at different rates; each zone tracks its own deficit
 - **Skips irrigation after rain** — tracks how much rain actually fell and subtracts it from the deficit
+- **Tells you when a valve goes quiet** — a flat battery valve keeps reporting a perfectly ordinary "off", so nothing looks wrong while the zone dries out; NeverDry warns on the card as soon as a command goes unanswered, and tells a radio problem apart from a valve that answers and delivers no water
 - **Valve always closes** — if a valve is still not responding after six tries, NeverDry blocks it, shows the state on the dashboard, and waits for you to check
 - **Two scheduling modes** — water when the deficit crosses a threshold (Mode A) or every night based on current deficit (Mode B)
 - **Works without valves too** — no hardware? NeverDry sends a notification when watering is needed and by how much
