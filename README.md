@@ -37,6 +37,7 @@ If a valve stops responding, NeverDry keeps trying — six attempts, with a grow
 ## Features
 
 - **Knows when your garden is thirsty** — tracks heat, evaporation, and rainfall in real time; irrigates only when needed
+- **Four ways to work out the water balance, and it picks one for you** — temperature-only, Hargreaves, Penman-Monteith, or a soil probe. *Automatic* takes the best your sensors support and tells you which one is running, because the number depends on it. Add a humidity or wind sensor and NeverDry moves up a tier on its own; add nothing and it works exactly as before
 - **Each plant gets its own schedule** — 10 plant profiles (lawn, citrus, succulents, roses, ...) with seasonal variation; NeverDry knows your lawn drinks more in July than your lavender ever will
 - **Same plants, different spot** — a bed shaded by the house from 14:00 doesn't drink like the one baking against a south-facing wall; set each zone's exposure and NeverDry scales its water accordingly, all season long
 - **Knows how much water to deliver** — calculates exactly how many liters each zone needs; if you have a flow meter, it measures delivery directly; otherwise it computes run time from flow rate
@@ -63,6 +64,8 @@ If a valve stops responding, NeverDry keeps trying — six attempts, with a grow
 |--------|-------------|-------------|
 | `sensor.et_hourly_estimate` | mm/h | Instantaneous evapotranspiration rate |
 | `sensor.never_dry` | mm | Reference soil water deficit (Kc=1.0) |
+| `sensor.water_balance_method` | — | Which of the four methods is running |
+| `sensor.<derived quantity>` | varies | What the running method derived, one entity each so Home Assistant keeps the history: diurnal temperature range, daily minimum and maximum, and for the full-weather tier daily solar radiation, net radiation and wind speed at 2 m |
 
 **Per zone** (grouped under each zone's device card):
 
@@ -79,7 +82,9 @@ If a valve stops responding, NeverDry keeps trying — six attempts, with a grow
 | `sensor.<zone>_yearly_water` | L | Cumulative water delivered this year |
 | `sensor.<zone>_rain` | mm | Cumulative rain accounted for the zone |
 | `sensor.<zone>_kc` | — | Current crop coefficient (seasonal) |
-| `sensor.<zone>_flow_rate` | L/min | Configured flow rate |
+| `sensor.<zone>_flow_rate` | L/min | Design flow rate — what the zone was built to deliver |
+| `sensor.<zone>_measured_flow_rate` | L/min | What the last supervised valve test measured, kept as a series so a slow decline reads as clogging emitters |
+| `sensor.<zone>_water_meter_resolution` | L | Smallest increment this zone's meter has ever reported — the limit of detection behind any measured figure |
 | `sensor.<zone>_threshold` | mm | Configured trigger threshold |
 | `sensor.<zone>_area` | m² | Configured irrigated area |
 | `sensor.<zone>_efficiency` | — | Configured system efficiency |
