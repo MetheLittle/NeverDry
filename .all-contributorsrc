@@ -1,0 +1,95 @@
+{
+  "projectName": "NeverDry",
+  "projectOwner": "never-dry",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "commitConvention": "angular",
+  "contributorsPerLine": 7,
+  "skipCi": true,
+  "contributors": [
+    {
+      "login": "drake69",
+      "name": "Luigi Corsaro",
+      "avatar_url": "https://avatars.githubusercontent.com/u/5324491?v=4",
+      "profile": "https://github.com/drake69",
+      "contributions": [
+        "code",
+        "doc",
+        "ideas",
+        "maintenance"
+      ]
+    },
+    {
+      "login": "philipgiuliani",
+      "name": "Philip Giuliani",
+      "avatar_url": "https://avatars.githubusercontent.com/u/5446019?v=4",
+      "profile": "https://github.com/philipgiuliani",
+      "contributions": [
+        "code",
+        "ideas"
+      ]
+    },
+    {
+      "login": "evlas",
+      "name": "Vito Ammirata",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1157933?v=4",
+      "profile": "https://github.com/evlas",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "rpatel3001",
+      "name": "Rajan Patel",
+      "avatar_url": "https://avatars.githubusercontent.com/u/6333479?v=4",
+      "profile": "https://github.com/rpatel3001",
+      "contributions": [
+        "bug",
+        "userTesting"
+      ]
+    },
+    {
+      "login": "dietklein",
+      "name": "dietklein",
+      "avatar_url": "https://avatars.githubusercontent.com/u/155997718?v=4",
+      "profile": "https://github.com/dietklein",
+      "contributions": [
+        "bug",
+        "userTesting"
+      ]
+    },
+    {
+      "login": "MetheLittle",
+      "name": "MetheLittle",
+      "avatar_url": "https://avatars.githubusercontent.com/u/155000385?v=4",
+      "profile": "https://github.com/MetheLittle",
+      "contributions": [
+        "bug",
+        "userTesting"
+      ]
+    },
+    {
+      "login": "fpytloun",
+      "name": "Filip Pytloun",
+      "avatar_url": "https://avatars.githubusercontent.com/u/948799?v=4",
+      "profile": "https://github.com/fpytloun",
+      "contributions": [
+        "ideas"
+      ]
+    },
+    {
+      "login": "MrEcosse",
+      "name": "MrEcosse",
+      "avatar_url": "https://avatars.githubusercontent.com/u/62436640?v=4",
+      "profile": "https://github.com/MrEcosse",
+      "contributions": [
+        "ideas"
+      ]
+    }
+  ]
+}
