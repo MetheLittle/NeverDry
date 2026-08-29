@@ -173,9 +173,12 @@ def _et_method_field(current: dict | None = None) -> dict:
     see Penman-Monteith has no way to learn which sensor unlocks it. The choice
     is validated on submit instead, and the error names the missing sensors.
     """
-    stored = (current or {}).get(CONF_ET_METHOD, DEFAULT_ET_METHOD)
     return {
-        vol.Optional(CONF_ET_METHOD, default=stored): selector.SelectSelector(
+        vol.Optional(
+            CONF_ET_METHOD,
+            default=DEFAULT_ET_METHOD,
+            **_suggest(current, CONF_ET_METHOD),
+        ): selector.SelectSelector(
             selector.SelectSelectorConfig(
                 # A list, not the tuple in const: Home Assistant validates this
                 # field with voluptuous, which refuses a tuple outright.
@@ -307,10 +310,22 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
     """System sensors + ET parameters form for options flow, pre-filled from the entry."""
     t_unit = "°F" if is_imperial else "°C"
     d_unit = "in" if is_imperial else "mm"
-    t_stored = current.get(CONF_T_BASE, DEFAULT_T_BASE)
-    d_stored = current.get(CONF_D_MAX, DEFAULT_D_MAX)
-    t_display = _c_to_f(t_stored) if is_imperial else t_stored
-    d_display = round(d_stored * _MM_TO_IN, 2) if is_imperial else d_stored
+    # Constants for the default, stored values for the suggestion — the two
+    # are different jobs and the conversion has to happen for both.
+    t_base_default = _c_to_f(DEFAULT_T_BASE) if is_imperial else DEFAULT_T_BASE
+    d_max_default = round(DEFAULT_D_MAX * _MM_TO_IN, 2) if is_imperial else DEFAULT_D_MAX
+
+    def _stored(key, to_display=None):
+        v = current.get(key)
+        if v is None:
+            return {}
+        return {"description": {"suggested_value": to_display(v) if to_display else v}}
+
+    def _as_temp(v):
+        return _c_to_f(v) if is_imperial else v
+
+    def _as_depth(v):
+        return round(v * _MM_TO_IN, 2) if is_imperial else v
 
     return vol.Schema(
         {
@@ -324,7 +339,8 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
             ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
             vol.Optional(
                 CONF_RAIN_SENSOR_TYPE,
-                default=current.get(CONF_RAIN_SENSOR_TYPE, DEFAULT_RAIN_SENSOR_TYPE),
+                default=DEFAULT_RAIN_SENSOR_TYPE,
+                **_stored(CONF_RAIN_SENSOR_TYPE),
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[RAIN_TYPE_EVENT, RAIN_TYPE_DAILY_TOTAL],
@@ -332,7 +348,7 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
                     mode="dropdown",
                 )
             ),
-            vol.Optional(CONF_D_MAX, default=d_display): selector.NumberSelector(
+            vol.Optional(CONF_D_MAX, default=d_max_default, **_stored(CONF_D_MAX, _as_depth)): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0.5 if is_imperial else 10.0,
                     max=20.0 if is_imperial else 500.0,
@@ -342,7 +358,7 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
                 )
             ),
             **_et_method_field(current),
-            vol.Optional(CONF_ALPHA, default=current.get(CONF_ALPHA, DEFAULT_ALPHA)): selector.NumberSelector(
+            vol.Optional(CONF_ALPHA, default=DEFAULT_ALPHA, **_stored(CONF_ALPHA)): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0.05,
                     max=1.0,
@@ -351,7 +367,9 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
                     unit_of_measurement="mm/°C/day",
                 )
             ),
-            vol.Optional(CONF_T_BASE, default=t_display): selector.NumberSelector(
+            vol.Optional(
+                CONF_T_BASE, default=t_base_default, **_stored(CONF_T_BASE, _as_temp)
+            ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=23.0 if is_imperial else -5.0,
                     max=68.0 if is_imperial else 20.0,
@@ -1098,8 +1116,10 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         flow_unit = "gal/h" if imperial else "L/h"
         depth_unit = "in" if imperial else "mm"
 
-        # Helper to get current value or UNDEFINED
-        def _d(key, fallback=vol.UNDEFINED):
+        # Helpers returning what to *suggest*, never what to default to. None
+        # means "leave the box empty": a field the user cleared has to come back
+        # cleared, and only a suggestion can do that.
+        def _d(key, fallback=None):
             return cur.get(key, fallback)
 
         def _d_area(fallback):
@@ -1109,7 +1129,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         def _d_flow():
             v = cur.get(CONF_ZONE_FLOW_RATE)
             if v is None:
-                return vol.UNDEFINED
+                return None
             # Stored in L/min; UI shows gal/h (imperial) or L/h (metric).
             return round(v * _LPM_TO_GPH, 1) if imperial else round(v * _LPM_TO_LPH, 1)
 
@@ -1142,14 +1162,14 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
             {
                 vol.Required(
                     CONF_ZONE_NAME,
-                    default=_d(CONF_ZONE_NAME, ""),
+                    description={"suggested_value": _d(CONF_ZONE_NAME, "")},
                 ): selector.TextSelector(),
                 vol.Required(SECTION_GROUND): section(
                     vol.Schema(
                         {
                             vol.Required(
                                 CONF_ZONE_AREA,
-                                default=_d_area(10.0),
+                                description={"suggested_value": _d_area(10.0)},
                             ): selector.NumberSelector(
                                 selector.NumberSelectorConfig(
                                     min=1.0 if imperial else 0.1,
@@ -1161,7 +1181,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                             ),
                             vol.Optional(
                                 CONF_ZONE_PLANT_FAMILY,
-                                default=_d(CONF_ZONE_PLANT_FAMILY),
+                                description={"suggested_value": _d(CONF_ZONE_PLANT_FAMILY)},
                             ): selector.SelectSelector(
                                 selector.SelectSelectorConfig(
                                     options=pf_opts,
@@ -1220,7 +1240,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                             ): selector.EntitySelector(ent_sw),
                             vol.Optional(
                                 CONF_ZONE_DELIVERY_MODE,
-                                default=_d(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE),
+                                description={"suggested_value": _d(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE)},
                             ): selector.SelectSelector(
                                 selector.SelectSelectorConfig(
                                     options=dm_opts,
@@ -1230,7 +1250,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                             ),
                             vol.Optional(
                                 CONF_ZONE_FLOW_RATE,
-                                default=_d_flow(),
+                                description={"suggested_value": _d_flow()},
                             ): selector.NumberSelector(
                                 selector.NumberSelectorConfig(
                                     min=2.0 if imperial else 1.0,
@@ -1250,7 +1270,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                             ): selector.EntitySelector(ent_nr),
                             vol.Required(
                                 CONF_ZONE_SYSTEM_TYPE,
-                                default=_d(CONF_ZONE_SYSTEM_TYPE, SYSTEM_TYPE_DRIP),
+                                description={"suggested_value": _d(CONF_ZONE_SYSTEM_TYPE, SYSTEM_TYPE_DRIP)},
                             ): selector.SelectSelector(
                                 selector.SelectSelectorConfig(
                                     options=st_opts,
@@ -1299,10 +1319,12 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                         {
                             vol.Optional(
                                 CONF_ZONE_IRRIGATION_MODE,
-                                default=_d(
-                                    CONF_ZONE_IRRIGATION_MODE,
-                                    DEFAULT_IRRIGATION_MODE,
-                                ),
+                                description={
+                                    "suggested_value": _d(
+                                        CONF_ZONE_IRRIGATION_MODE,
+                                        DEFAULT_IRRIGATION_MODE,
+                                    )
+                                },
                             ): selector.SelectSelector(
                                 selector.SelectSelectorConfig(
                                     options=[
@@ -1325,7 +1347,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                             ): selector.TimeSelector(),
                             vol.Optional(
                                 CONF_ZONE_THRESHOLD,
-                                default=_d_threshold(DEFAULT_THRESHOLD),
+                                description={"suggested_value": _d_threshold(DEFAULT_THRESHOLD)},
                             ): selector.NumberSelector(
                                 selector.NumberSelectorConfig(
                                     min=0.1 if imperial else 1.0,
