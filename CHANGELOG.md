@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-08-29
+
+A patch stable for the 0.11 line, and it exists for one reason: **a new user could not finish installing the integration.**
+
+Filling in a zone and pressing submit emptied every field and said nothing. The form would not close, and there was no way to learn why. Reported by a new user who got that far and stopped; nobody knows how many got that far and did not write in.
+
+Everything else here is the same fault found in its other hiding places while fixing that one. Three ways into a zone that answered differently, a cleared field that refilled itself, an error code printed raw instead of its message, and a form that named its own internal identifiers out loud.
+
+**Upgrading.** Update through HACS and restart Home Assistant. No entity is renamed or removed and nothing needs reconfiguring.
+
+One change is worth knowing before you next edit a zone. The rules that decide whether a zone can be saved now apply in all three places a zone can be created or changed — first-run setup, *add zone* and *edit zone* — where before only setup enforced them. If an existing zone was saved through the options dialogs without the design flow rate its delivery mode requires, the next edit will ask for that value before it will save. It is the number that makes the zone able to water at all. A zone with no valve is exempt: it delivers nothing by design.
+
+
 ### Changed
 - **The three ways into a zone now answer the same** ([#196]). First-run setup, *add zone* and *edit zone* each took a zone in, and each judged it differently: setup refused a delivery mode whose one indispensable input was missing, while the two options steps saved it without a word — or, for a flow meter or volume preset with no entity behind it, quietly swapped the mode for *estimated flow*. A mode you did not choose, needing a design flow rate nobody then checked. All three doors now apply the same rule and say the same thing, so a zone that cannot deliver is refused wherever you try to save it. If you already have such a zone, the next edit will ask you for the missing value before it will save. A zone with **no valve** is exempt from all of it: it delivers nothing by design — it watches the deficit and tells you when to water by hand — so asking it how fast it waters would be asking about something it will never do.
 
