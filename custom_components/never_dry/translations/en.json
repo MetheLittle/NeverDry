@@ -57,9 +57,9 @@
             "data": {
               "valve": "Valve switch (optional)",
               "delivery_mode": "Water delivery mode",
-              "flow_rate_lpm": "Guard flow rate (all modes; required for estimated_flow)",
-              "flow_meter_sensor": "Flow meter sensor (flow_meter only)",
-              "volume_entity": "Volume target entity (volume_preset only)",
+              "flow_rate_lpm": "Design flow rate",
+              "flow_meter_sensor": "Delivery measurement sensor — counter or flow rate (flow meter mode only)",
+              "volume_entity": "Volume target entity (volume dosing mode only)",
               "system_type": "Irrigation system type",
               "efficiency": "Custom efficiency (overrides system type default)",
               "delivery_timeout": "Safety timeout"
@@ -67,12 +67,12 @@
             "data_description": {
               "valve": "The switch entity that controls this zone's irrigation valve. Leave empty for monitoring mode (no valve)",
               "delivery_mode": "How your valve delivers water. Estimated flow: simple on/off valve, duration calculated from flow rate. Flow meter: valve with a flow sensor, closes at target volume. Volume preset: smart valve that accepts a volume target and closes itself.",
-              "flow_rate_lpm": "Water flow rate of the valve in liters per hour (gal/h in imperial). Required for estimated_flow mode; recommended for flow_meter and volume_preset, where it drives the expected duration and the safety-timeout scaling (will become required in a future release). Measure with a bucket and stopwatch",
-              "flow_meter_sensor": "Sensor entity that reports cumulative liters delivered. Required for flow_meter mode",
-              "volume_entity": "Number entity on the smart valve that accepts a volume target in liters. Required for volume_preset mode",
+              "flow_rate_lpm": "Water flow rate of the valve in liters per hour (gal/h in imperial). Required when the delivery mode works the duration out from it; recommended with a flow meter or volume dosing too, where it drives the expected duration and the safety-timeout scaling. Measure with a bucket and stopwatch",
+              "flow_meter_sensor": "Sensor entity that reports cumulative liters delivered. Required when the delivery mode is the one with a flow meter.",
+              "volume_entity": "Number entity on the smart valve that accepts a volume target in liters. Required when the delivery mode leaves the dosing to the valve.",
               "system_type": "Sets the zone's efficiency (drip 0.92, micro-sprinklers 0.80, pop-up 0.68, manual 0.55). Pick Custom to enter your own below.",
               "efficiency": "Used only when the system type is Custom. With any other type this field is ignored and the form will tell you so.",
-              "delivery_timeout": "Maximum time to wait for flow_meter or volume_preset delivery before forcing valve close (safety limit)"
+              "delivery_timeout": "Maximum time to wait for a measured or self-dosed delivery before forcing the valve closed (safety limit)."
             }
           },
           "scheduling": {
@@ -108,9 +108,9 @@
     "error": {
       "zone_name_too_long": "Zone name is too long (max 64 characters)",
       "too_many_zones": "Maximum number of zones reached (50)",
-      "flow_rate_required": "Flow rate is required for estimated_flow delivery mode",
-      "flow_meter_required": "Flow meter sensor is required for flow_meter delivery mode",
-      "volume_entity_required": "Volume entity is required for volume_preset delivery mode",
+      "flow_rate_required": "The design flow rate is needed: the delivery mode you chose works the watering duration out from it.",
+      "flow_meter_required": "A delivery measurement sensor is needed — a cumulative counter or a flow rate: the delivery mode you chose closes the valve at the measured volume.",
+      "volume_entity_required": "A volume target entity is needed: the delivery mode you chose leaves the dosing to the valve itself.",
       "zone_already_exists": "A zone with this name already exists",
       "efficiency_required": "Choose an efficiency: the system type is set to Custom, which takes its value from that field",
       "kc_required": "Choose a Kc: the plant family is set to Custom, which takes its value from that field",
@@ -176,8 +176,8 @@
               "valve": "Valve switch (optional)",
               "delivery_mode": "Water delivery mode",
               "flow_rate_lpm": "Valve flow rate",
-              "flow_meter_sensor": "Flow meter sensor",
-              "volume_entity": "Volume target entity",
+              "flow_meter_sensor": "Delivery measurement sensor — counter or flow rate (flow meter mode only)",
+              "volume_entity": "Volume target entity (volume dosing mode only)",
               "system_type": "Irrigation system type",
               "efficiency": "Custom efficiency",
               "delivery_timeout": "Safety timeout"
@@ -241,8 +241,8 @@
               "valve": "Valve switch",
               "delivery_mode": "Water delivery mode",
               "flow_rate_lpm": "Valve flow rate",
-              "flow_meter_sensor": "Flow meter sensor",
-              "volume_entity": "Volume target entity",
+              "flow_meter_sensor": "Delivery measurement sensor — counter or flow rate (flow meter mode only)",
+              "volume_entity": "Volume target entity (volume dosing mode only)",
               "system_type": "Irrigation system type",
               "efficiency": "Custom efficiency",
               "delivery_timeout": "Safety timeout"
@@ -277,7 +277,13 @@
     "error": {
       "efficiency_required": "Choose an efficiency: the system type is set to Custom, which takes its value from that field",
       "kc_required": "Choose a Kc: the plant family is set to Custom, which takes its value from that field",
-      "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field"
+      "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field",
+      "flow_rate_required": "The design flow rate is needed: the delivery mode you chose works the watering duration out from it.",
+      "flow_meter_required": "A delivery measurement sensor is needed — a cumulative counter or a flow rate: the delivery mode you chose closes the valve at the measured volume.",
+      "volume_entity_required": "A volume target entity is needed: the delivery mode you chose leaves the dosing to the valve itself.",
+      "zone_already_exists": "A zone with this name already exists",
+      "too_many_zones": "Maximum number of zones reached (50)",
+      "zone_name_too_long": "Zone name is too long (max 64 characters)"
     },
     "abort": {
       "no_zones": "No zones configured"

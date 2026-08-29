@@ -290,3 +290,165 @@ def test_sectioned_fields_are_labelled_under_their_section():
                         )
 
     assert not errors, "Sectioned-form label inconsistencies:\n  " + "\n  ".join(errors)
+
+
+# ── Error codes must resolve in the flow that raises them ─────────────
+#
+# An error code is not text: Home Assistant looks it up under
+# ``<root>.error.<code>``, where the root is ``config`` for the setup wizard and
+# ``options`` for the Settings dialogs. A code with no entry there is not a
+# missing translation that falls back to English — the raw code is printed at
+# the user, which is what "flow_rate_required" looked like in the field.
+#
+# The two roots drifted because the delivery-mode checks lived only in the setup
+# step for a long time, so only ``config.error`` ever needed them. The moment
+# the same helper started serving the options steps too (GH #196), every code it
+# can raise had to resolve in both — and nothing was checking.
+
+_STRINGS = _COMPONENT / "strings.json"
+_IT_JSON = _COMPONENT / "translations" / "it.json"
+
+
+def _raised_error_codes() -> set[str]:
+    """Every error code ``config_flow.py`` can hand to a form."""
+    from never_dry import config_flow as cf
+
+    tree = ast.parse(_CONFIG_FLOW.read_text())
+    codes: set[str] = set()
+
+    for node in ast.walk(tree):
+        # _add_field_error(errors, FIELD, "code")
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_add_field_error"
+            and len(node.args) == 3
+            and isinstance(node.args[2], ast.Constant)
+        ):
+            codes.add(node.args[2].value)
+        # errors["base"] = "code" / errors[FIELD] = "code"
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
+            for target in node.targets:
+                if (
+                    isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "errors"
+                    and isinstance(node.value.value, str)
+                ):
+                    codes.add(node.value.value)
+        # errors={"base": "code"} passed straight to async_show_form
+        if isinstance(node, ast.keyword) and node.arg == "errors" and isinstance(node.value, ast.Dict):
+            for value in node.value.values:
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    codes.add(value.value)
+        # The ET-method validator returns its code.
+        if isinstance(node, ast.FunctionDef) and node.name == "_et_method_error":
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Return) and isinstance(inner.value, ast.Constant) and inner.value.value:
+                    codes.add(inner.value.value)
+
+    # The preset/override codes travel in a table rather than at the call site.
+    codes.update(pair[4] for pair in cf.PRESET_OVERRIDE_PAIRS)
+    return codes
+
+
+def test_every_raised_error_code_resolves_in_both_flows():
+    """A code with no entry is printed raw at the user, not translated late."""
+    codes = _raised_error_codes()
+    assert codes, "no error codes found — the extractor has drifted from the source"
+
+    missing: list[str] = []
+    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+        data = json.loads(path.read_text())
+        for root in ("config", "options"):
+            declared = data.get(root, {}).get("error", {})
+            missing += [f"{path.name}: {root}.error.{code}" for code in sorted(codes) if code not in declared]
+
+    assert not missing, "error codes with no entry to resolve to:\n  " + "\n  ".join(missing)
+
+
+def test_the_two_flows_declare_the_same_error_catalogue():
+    """One set of helpers serves both flows, so one catalogue serves both roots.
+
+    Divergence here is how a code ends up raisable somewhere it cannot be
+    read, which is invisible until a user is standing in front of it.
+    """
+    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+        data = json.loads(path.read_text())
+        config = set(data.get("config", {}).get("error", {}))
+        options = set(data.get("options", {}).get("error", {}))
+        assert config == options, (
+            f"{path.name}: config.error and options.error have drifted — "
+            f"only in config: {sorted(config - options)}; only in options: {sorted(options - config)}"
+        )
+
+
+# ── Internal vocabulary must not reach the user ───────────────────────
+#
+# A value like ``estimated_flow`` is an identifier. It has a translated label
+# precisely because the user is not supposed to see the key — and then the
+# error text said "required for estimated_flow delivery mode", naming in the
+# message the very thing the dropdown had just spelt out in words. A tester
+# read it back on 0.12.0-beta.3 and asked why the form spoke two languages.
+#
+# The rule is derived rather than listed: every option that has a label under
+# ``selector.<key>.options`` is by construction an internal identifier, so its
+# raw form must not appear in any label, description or error.
+
+
+def _internal_option_keys(data: dict) -> set[str]:
+    """Option values that have a translated label, so are identifiers.
+
+    Only the ones carrying an underscore. A key like ``custom`` or ``auto`` is
+    an ordinary English word, and banning it would flag "Pick Custom to enter
+    your own" — the label doing its job.
+    """
+    keys: set[str] = set()
+    for group in data.get("selector", {}).values():
+        keys |= {k for k in group.get("options", {}) if "_" in k}
+    return keys
+
+
+def _user_facing_strings(data: dict):
+    """Every string the form puts in front of a person, with where it lives."""
+    for root in ("config", "options"):
+        section = data.get(root, {})
+        for code, text in section.get("error", {}).items():
+            yield f"{root}.error.{code}", text
+        for step_name, step in section.get("step", {}).items():
+            blocks = [("", step)] + [(f"{s}.", body) for s, body in step.get("sections", {}).items()]
+            for prefix, block in blocks:
+                for kind in ("data", "data_description"):
+                    for field, text in block.get(kind, {}).items():
+                        yield f"{root}.{step_name}.{prefix}{kind}.{field}", text
+
+
+def test_no_user_facing_string_names_an_internal_key():
+    offenders: list[str] = []
+    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+        data = json.loads(path.read_text())
+        keys = _internal_option_keys(data)
+        assert keys, f"{path.name}: no translated options found — the extractor has drifted"
+        for where, text in _user_facing_strings(data):
+            for key in sorted(keys):
+                if key in text:
+                    offenders.append(f"{path.name}: {where} says '{key}'")
+    assert not offenders, "these read an identifier out loud; use the label the user already sees:\n  " + "\n  ".join(
+        offenders
+    )
+
+
+def test_a_label_is_a_name_not_a_paragraph():
+    """A label names the field; the explanation belongs in data_description.
+
+    The Italian file had the whole design-flow-rate description pasted into the
+    label slot — 493 characters where the form expects two words — so the
+    field announced itself with a paragraph while every neighbour had a name.
+    """
+    offenders: list[str] = []
+    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+        data = json.loads(path.read_text())
+        for where, text in _user_facing_strings(data):
+            if ".data." in where and len(text) > 90:
+                offenders.append(f"{path.name}: {where} is {len(text)} characters")
+    assert not offenders, "labels that are paragraphs:\n  " + "\n  ".join(offenders)

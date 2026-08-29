@@ -47,7 +47,7 @@ def _patch_flow_env(monkeypatch):
     monkeypatch.setattr(cf.vol, "Required", lambda *a, **k: object(), raising=False)
     monkeypatch.setattr(cf.vol, "Optional", lambda *a, **k: object(), raising=False)
     monkeypatch.setattr(cf, "_confirm_zone_schema", lambda: None)
-    monkeypatch.setattr(cf, "_zone_schema_initial", lambda imperial: None)
+    monkeypatch.setattr(cf, "_zone_schema_initial", lambda imperial, current=None: None)
 
     def _show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None):
         return {
