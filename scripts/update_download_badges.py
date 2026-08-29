@@ -54,6 +54,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD = REPO_ROOT / "docs" / "gh-pages" / "badges" / "downloads.json"
 DEFAULT_REPO = "never-dry/NeverDry"
 COLOR = "41BDF5"
+# Where the payload above ends up once Pages deploys it. This is a project site,
+# not an organisation one, so the repository name is part of the path — the badge
+# first shipped pointing at the domain root and rendered "site not found".
+PUBLISHED_AT = "https://never-dry.github.io/NeverDry/badges/downloads.json"
 
 
 def _fetch_releases(repo: str) -> list[dict]:
@@ -162,6 +166,7 @@ def main() -> int:
     PAYLOAD.parent.mkdir(parents=True, exist_ok=True)
     PAYLOAD.write_text(json.dumps(fresh, indent=2) + "\n")
     print(f"wrote {PAYLOAD.relative_to(REPO_ROOT)}: {fresh['message']}")
+    print(f"served from {PUBLISHED_AT} once Pages deploys")
     return 0
 
 
