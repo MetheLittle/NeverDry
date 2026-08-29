@@ -24,6 +24,7 @@ from never_dry.const import (
 )
 from never_dry.controller import IrrigationController
 from never_dry.sensor import IrrigationZoneSensor
+from never_dry.valve_notifier import NotificationKind
 
 
 def _make_zone(hass_mock, di_sensor, **overrides):
@@ -225,7 +226,17 @@ class TestFlowMeterDelivery:
         assert len(close_calls) >= 1
 
     @pytest.mark.asyncio
-    async def test_unavailable_sensor_skips(self, hass_mock, di_sensor):
+    async def test_unavailable_sensor_waters_on_the_estimate(self, hass_mock, di_sensor):
+        """A silent meter is far more likely than a dry pipe.
+
+        This test used to assert the opposite — that the session was skipped and
+        no valve was opened. Skipping is the larger harm: a flaky sensor dries
+        the garden out while the integration reports nothing wrong. The same
+        judgement is already made mid-session, where a run that measures zero
+        with the valve open is credited from the flow rate rather than believed.
+        A meter already silent when the session opens is the same fault, and now
+        gets the same answer.
+        """
         zone = _make_zone(
             hass_mock,
             di_sensor,
@@ -241,15 +252,22 @@ class TestFlowMeterDelivery:
         hass_mock.states.get = MagicMock(return_value=unavailable)
 
         ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl._wait_with_stop_check = AsyncMock(side_effect=lambda d, **kwargs: d)
         result = await ctrl._deliver_flow_meter(zone)
 
-        assert result == 0.0
-        # No valve should have been opened
+        assert result > 0.0
         open_calls = [c for c in hass_mock.services.async_call.call_args_list if "turn_on" in str(c)]
-        assert len(open_calls) == 0
+        assert len(open_calls) == 1
 
     @pytest.mark.asyncio
-    async def test_no_flow_meter_entity_returns_false(self, hass_mock, di_sensor):
+    async def test_no_meter_entity_waters_on_the_estimate(self, hass_mock, di_sensor):
+        """Unreachable from the form now, but an older entry can still say this.
+
+        The three entry points all refuse ``flow_meter`` without its meter
+        (GH #196), so this shape only arrives from an entry edited by hand or
+        restored from a schema that allowed it. It is still a zone somebody
+        wants watered.
+        """
         zone = _make_zone(
             hass_mock,
             di_sensor,
@@ -258,9 +276,10 @@ class TestFlowMeterDelivery:
         zone._zone_deficit = 5.0
 
         ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl._wait_with_stop_check = AsyncMock(side_effect=lambda d, **kwargs: d)
         result = await ctrl._deliver_flow_meter(zone)
 
-        assert result == 0.0
+        assert result > 0.0
 
     @pytest.mark.asyncio
     async def test_meter_reset_adjusts_baseline(self, hass_mock, di_sensor):
@@ -1130,3 +1149,123 @@ class TestTheMeasuredFlowShowsTheHistoryNotTheLastRun:
         sensor = ZoneMeasuredFlowSensor(self._zone_with_history(hass_mock, di_sensor))
         assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
         assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+
+class TestSilentMeterReachesTheUser:
+    """A meter that stops reporting has to say so somewhere a person looks.
+
+    Watering on the estimate is the right answer, but it is also a quiet one:
+    the zone goes on being watered and nothing looks wrong, while the volumes
+    feeding the deficit are guesses. The log alone does not carry that — nobody
+    opens it while the garden looks fine.
+    """
+
+    @pytest.mark.asyncio
+    async def test_unavailable_meter_notifies(self, hass_mock, di_sensor):
+        zone = _make_zone(
+            hass_mock,
+            di_sensor,
+            **{
+                CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
+                CONF_ZONE_FLOW_METER_SENSOR: "sensor.flow_meter",
+            },
+        )
+        zone._zone_deficit = 5.0
+        unavailable = MagicMock()
+        unavailable.state = "unavailable"
+        hass_mock.states.get = MagicMock(return_value=unavailable)
+
+        notifier = AsyncMock()
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=notifier)
+        ctrl._wait_with_stop_check = AsyncMock(side_effect=lambda d, **kwargs: d)
+
+        await ctrl._deliver_flow_meter(zone)
+
+        notifier.notify.assert_awaited_once()
+        args, kwargs = notifier.notify.call_args
+        assert args[1] is NotificationKind.FLOW_METER_DEAD
+        # Facts only: the catalogue owns the wording, the caller owns the cause.
+        assert kwargs["context"] == {"detail": "'sensor.flow_meter' is unavailable"}
+
+    @pytest.mark.asyncio
+    async def test_nothing_to_estimate_with_is_a_different_condition(self, hass_mock, di_sensor):
+        """No flow rate, so the water is neither measured nor credited.
+
+        A separate kind rather than a sentence passed in by the caller: the
+        consequence differs — the deficit stands and the zone is watered again
+        next cycle — and that is what the user has to be told.
+        """
+        zone = _make_zone(hass_mock, di_sensor)
+        zone._flow_rate = 0.0
+        notifier = AsyncMock()
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=notifier)
+
+        scheduled = []
+        hass_mock.async_create_task = scheduled.append
+
+        assert ctrl._fallback_volume_estimate(zone, elapsed_s=600.0, measured=0.0) == 0.0
+
+        assert len(scheduled) == 1
+        await scheduled[0]
+        assert notifier.notify.call_args[0][1] is NotificationKind.DELIVERY_UNCREDITED
+
+    @pytest.mark.asyncio
+    async def test_a_measured_session_says_nothing(self, hass_mock, di_sensor):
+        """The notification is for a silent meter, not for every session."""
+        zone = _make_zone(hass_mock, di_sensor)
+        notifier = AsyncMock()
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=notifier)
+
+        scheduled = []
+        hass_mock.async_create_task = scheduled.append
+
+        assert ctrl._fallback_volume_estimate(zone, elapsed_s=600.0, measured=12.0) == 12.0
+
+        assert scheduled == []
+        notifier.notify.assert_not_awaited()
+
+
+class TestTheRateToEstimateWith:
+    """Who decides which flow rate an estimate uses.
+
+    The controller used to work it out itself, reading the zone's private
+    design rate. That put the precedence rule — measured sessions when there
+    are enough of them, the design rate otherwise — in a second place, and the
+    second place had the worse answer: it ignored the very sessions the system
+    had measured. The zone answers now, and the driver decides.
+    """
+
+    def test_a_zone_with_a_driver_reports_what_the_driver_learned(self, hass_mock, di_sensor):
+        zone = _make_zone(hass_mock, di_sensor)
+        driver = MagicMock()
+        driver.effective_flow_lpm = 3.4
+        zone.set_operator(driver)
+
+        assert zone.effective_flow_lpm == 3.4
+
+    def test_without_a_driver_the_design_rate_stands(self, hass_mock, di_sensor):
+        """No valve, or a smart valve that doses itself: no history to consult."""
+        zone = _make_zone(hass_mock, di_sensor)
+        zone.set_operator(None)
+
+        assert zone.effective_flow_lpm == zone._flow_rate
+
+    def test_the_credited_estimate_follows_the_measured_sessions(self, hass_mock, di_sensor):
+        """The gap this closes is the one measured on the field installation.
+
+        A zone declared at 360 L/h delivering a median of 205: crediting the
+        design rate settles a debt that was not paid, and does so most
+        confidently on exactly the installations whose meter has gone quiet.
+        """
+        zone = _make_zone(hass_mock, di_sensor)
+        zone._flow_rate = 6.0  # design
+        driver = MagicMock()
+        driver.effective_flow_lpm = 3.4  # what it really delivers
+        zone.set_operator(driver)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        # The credit also raises a notification; this test is about the number.
+        hass_mock.async_create_task = lambda coro: coro.close()
+
+        credited = ctrl._fallback_volume_estimate(zone, elapsed_s=600.0, measured=0.0)
+
+        assert credited == pytest.approx(3.4 * 600.0 / 60.0)
