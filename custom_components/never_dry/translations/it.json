@@ -302,7 +302,13 @@
       "kc_required": "Inserisci un Kc: la famiglia di piante è impostata su Personalizzato, che prende il valore da quel campo",
       "microclimate_factor_required": "Inserisci un fattore microclima: l'esposizione è impostata su Personalizzato, che prende il valore da quel campo",
       "et_method_missing_sensors": "Questo metodo richiede sensori che l'installazione non ha dichiarato. Indica i sensori richiesti, oppure lascia il metodo su Automatico.",
-      "et_method_unknown": "Metodo di evapotraspirazione sconosciuto."
+      "et_method_unknown": "Metodo di evapotraspirazione sconosciuto.",
+      "flow_rate_required": "La portata è richiesta per la modalità di erogazione estimated_flow",
+      "flow_meter_required": "Per la modalità flow_meter serve un sensore di erogazione: un contatore cumulativo o una portata",
+      "volume_entity_required": "L'entità del volume è richiesta per la modalità di erogazione volume_preset",
+      "zone_already_exists": "Esiste già una zona con questo nome",
+      "too_many_zones": "È stato raggiunto il numero massimo di zone (50)",
+      "zone_name_too_long": "Il nome della zona è troppo lungo (massimo 64 caratteri)"
     },
     "abort": {
       "no_zones": "Nessuna zona configurata"
