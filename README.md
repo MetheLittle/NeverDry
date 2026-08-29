@@ -5,7 +5,7 @@
 [![Security](https://github.com/never-dry/NeverDry/actions/workflows/security.yml/badge.svg)](https://github.com/never-dry/NeverDry/actions/workflows/security.yml)
 [![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5)](https://github.com/hacs/integration)
 [![GitHub release](https://img.shields.io/github/v/release/never-dry/NeverDry)](https://github.com/never-dry/NeverDry/releases)
-[![Downloads across all releases](https://img.shields.io/github/downloads/never-dry/NeverDry/total?color=41BDF5&label=downloads%20%28all%20releases%29)](https://github.com/never-dry/NeverDry/releases)
+[![Downloads of the most downloaded release](https://img.shields.io/endpoint?url=https%3A%2F%2Fnever-dry.github.io%2Fbadges%2Fdownloads.json)](https://github.com/never-dry/NeverDry/releases)
 [![Downloads of the latest stable release](https://img.shields.io/github/downloads/never-dry/NeverDry/latest/total?color=41BDF5&label=downloads%20%28latest%20stable%29)](https://github.com/never-dry/NeverDry/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 [![HA Community](https://img.shields.io/badge/Home%20Assistant-Community%20thread-41BDF5?logo=home-assistant&logoColor=white)](https://community.home-assistant.io/t/neverdry-smart-irrigation-that-calculates-when-and-how-long-to-water-fao-56-water-balance-hacs/1013835)
@@ -19,13 +19,21 @@
      A second badge measuring the same thing, worse, under a name that claims
      something else.
 
-          Both download badges read GitHub live, which is the point: whatever HACS
-     publishes is a stale copy of the same thing.
+          The two download badges answer different questions, and neither is a count
+     of people.
 
-     They answer different questions and neither is a count of people. "All
-     releases" is the sum, so one long-standing user is counted once per
-     update — but it never resets, which the other one does: "latest stable"
-     drops to zero the day a version ships and only climbs as people update.
+     "Best release" is the most downloaded single release, which is the closest
+     honest proxy for reach: each person fetches a given release once, where the
+     sum across releases counts one long-standing user again at every update. No
+     badge service can compute a maximum over an array, so it is computed by
+     scripts/update_download_badges.py and published as a shields endpoint on
+     the Pages site. Its message carries the tag, so the figure cannot be read
+     as current for the version people install today.
+
+     "Latest stable" is the pace of the current version. It drops to zero the
+     day a version ships — it read 0 half an hour after 0.11.2 — and climbs as
+     people update.
+
      Neither is installs. The one number that would be is the Home Assistant
      analytics figure below, and it has no data yet.
 
