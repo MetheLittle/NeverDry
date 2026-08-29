@@ -1033,6 +1033,27 @@ class IrrigationController:
         """
         return _valve_level(self._hass, zone.valve) == "off"
 
+    async def _notify_meter_silent(self, zone_name: str, detail: str, *, credited: bool) -> None:
+        """Say that the meter went quiet, and which of the two outcomes followed.
+
+        A log line is not a channel: nobody opens the log while the garden looks
+        fine, and by the time it stops looking fine the session is weeks old. The
+        notifier deduplicates on zone, kind and context, so a meter dead for a
+        fortnight says so once rather than after every cycle.
+
+        What travels here is the condition and the facts behind it — never the
+        sentence. The wording of every notification lives in one catalogue, and a
+        caller that composed its own prose would quietly move that boundary.
+        """
+        if self._notifier is None:
+            return
+        await self._notifier.notify(
+            zone_name,
+            NotificationKind.FLOW_METER_DEAD if credited else NotificationKind.DELIVERY_UNCREDITED,
+            severity=Severity.WARNING,
+            context={"detail": detail},
+        )
+
     def _fallback_volume_estimate(self, zone, elapsed_s: float, measured: float) -> float:
         """Estimate delivered volume when the flow sensor measured nothing.
 
@@ -1054,6 +1075,13 @@ class IrrigationController:
                 zone.zone_name,
                 elapsed_s,
             )
+            self._hass.async_create_task(
+                self._notify_meter_silent(
+                    zone.zone_name,
+                    f"measured 0 L after {elapsed_s:.0f}s with the valve open",
+                    credited=False,
+                )
+            )
             return measured
         estimate = zone._flow_rate * elapsed_s / 60.0
         _LOGGER.warning(
@@ -1064,6 +1092,13 @@ class IrrigationController:
             elapsed_s,
             estimate,
             zone._flow_rate,
+        )
+        self._hass.async_create_task(
+            self._notify_meter_silent(
+                zone.zone_name,
+                f"measured 0 L after {elapsed_s:.0f}s with the valve open",
+                credited=True,
+            )
         )
         return estimate
 
@@ -1255,8 +1290,16 @@ class IrrigationController:
 
         meter_entity = zone.flow_meter_sensor
         if not meter_entity:
+            # Not reachable from the form any more — the three entry points all
+            # refuse this mode without its meter (GH #196) — but an entry edited
+            # by hand or restored from an older schema can still arrive here.
             _LOGGER.error("Zone '%s' has no flow_meter_sensor configured", zone.zone_name)
-            return 0.0
+            await self._notify_meter_silent(
+                zone.zone_name,
+                "no meter entity is configured for this zone",
+                credited=True,
+            )
+            return await self._deliver_estimated_flow(zone)
 
         # Detect sensor type from unit of measurement
         is_rate_sensor = self._is_flow_rate_sensor(meter_entity)
@@ -1268,12 +1311,23 @@ class IrrigationController:
         # Cumulative volume mode: read difference (normalized to liters)
         initial_reading = self._read_volume_liters(meter_entity)
         if initial_reading is None:
+            # Estimating, not skipping. A meter that is already silent when the
+            # session opens is the same fault as one that goes silent halfway
+            # through, and that case has always been credited from the flow rate
+            # rather than treated as a dry pipe. Refusing to water instead lets a
+            # flaky sensor dry the garden out, which is the larger harm — so the
+            # zone is watered on the estimate and the user is told.
             _LOGGER.error(
-                "Flow meter '%s' unavailable for zone '%s', skipping",
+                "Flow meter '%s' unavailable for zone '%s' — watering on the estimate",
                 meter_entity,
                 zone.zone_name,
             )
-            return 0.0
+            await self._notify_meter_silent(
+                zone.zone_name,
+                f"'{meter_entity}' is unavailable",
+                credited=True,
+            )
+            return await self._deliver_estimated_flow(zone)
 
         if not await self._open_valve(zone.valve):
             return 0.0

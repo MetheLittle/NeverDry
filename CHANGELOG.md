@@ -45,6 +45,16 @@ not the argument.
 - **The zone card** shows site exposure, separates what was measured from what was
   derived, acknowledges a press before its outcome, and puts the zone's settings
   one click away.
+- **A silent water meter no longer stops the watering.** A zone whose meter was
+  already unavailable when its turn came did not water at all, and said so only in
+  the log. Mid-session the code had always judged this the other way — a run that
+  measures zero with the valve open is credited from the flow rate, because a
+  silent sensor is far more likely than a dry pipe — and a meter that is silent
+  from the start is the same fault. It now waters on the estimate, and you are
+  told: *Flow meter not reporting* when the volume was estimated, *Water delivered
+  could not be credited* when the zone had no design flow rate to estimate with
+  and its deficit was therefore left standing. Both are new notifications; until
+  now the only trace was a log line nobody opens while the garden looks fine.
 
 ### Fixed
 - **A flow-metered valve no longer times out on a coarse counter** ([#173]). The

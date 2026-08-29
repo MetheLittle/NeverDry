@@ -43,6 +43,10 @@ class NotificationKind(StrEnum):
     UNREACHABLE_PASSIVE = "unreachable_passive"
     UNREACHABLE_AT_IRRIGATION = "unreachable_at_irrigation"
     FLOW_METER_DEAD = "flow_meter_dead"
+    # Same fault, different consequence, so a different condition rather than a
+    # sentence passed in by the caller: the volume could not be estimated
+    # either, and the zone's deficit is left standing.
+    DELIVERY_UNCREDITED = "delivery_uncredited"
     STUCK_OPEN = "stuck_open"
     LEAK_DETECTED = "leak_detected"
     ZONE_DISABLED = "zone_disabled"
@@ -89,8 +93,22 @@ _TEMPLATES: dict[NotificationKind, _Template] = {
         ),
     ),
     NotificationKind.FLOW_METER_DEAD: _Template(
-        title="Flow meter unavailable",
-        body="Zone '{zone}' flow meter became unavailable during irrigation.",
+        title="Flow meter not reporting",
+        body=(
+            "Zone '{zone}' flow meter is not reporting ({detail}). Irrigation "
+            "ran on the flow rate instead of being skipped, so the volume is "
+            "estimated rather than measured. Check the meter entity: a silent "
+            "meter is far more likely than a dry pipe."
+        ),
+    ),
+    NotificationKind.DELIVERY_UNCREDITED: _Template(
+        title="Water delivered could not be credited",
+        body=(
+            "Zone '{zone}' delivered water that could not be measured ({detail}) "
+            "and has no design flow rate to estimate it with, so its deficit is "
+            "unchanged and the zone will be watered again on the next cycle. "
+            "Set the zone's design flow rate, or fix the meter."
+        ),
     ),
     NotificationKind.STUCK_OPEN: _Template(
         title="Valve stuck open — shut off mains water",
