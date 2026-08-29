@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A rejected zone form no longer empties itself in silence** ([#196]). Filling in a zone, pressing submit, and watching every field go blank with nothing on screen to say why — the form simply would not close, and the installation could not be completed. Two faults met there. The zone form is built from collapsible sections, and an error filed against a field *inside* a section could not be reached by the frontend, so the message never appeared; the three delivery-mode requirements were filed exactly that way, and the one most people hit is the design flow rate, which is mandatory but cannot be marked as such in the form because it only applies to one delivery mode. On top of that the redrawn form carried none of the submitted values, so even a visible error cost the user the whole zone. Errors now always reach the top of the form, and a rejected zone comes back filled in with what was typed.
+
+[#196]: https://github.com/never-dry/NeverDry/issues/196
+
 ## [0.11.1] - 2026-08-25
 
 A patch stable for the 0.11 line. Theme: **stop failing quietly**. Almost everything here was a fault that produced no error — a valve that looked inert, a probe pinned at zero, a reload leaving two copies running, an override that came back on its own, a yearly rain total that stayed at zero while it rained.

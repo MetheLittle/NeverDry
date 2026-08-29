@@ -57,7 +57,7 @@
             "data": {
               "valve": "Valve switch (optional)",
               "delivery_mode": "Water delivery mode",
-              "flow_rate_lpm": "Valve flow rate (estimated_flow only)",
+              "flow_rate_lpm": "Guard flow rate (all modes; required for estimated_flow)",
               "flow_meter_sensor": "Flow meter sensor (flow_meter only)",
               "volume_entity": "Volume target entity (volume_preset only)",
               "system_type": "Irrigation system type",
@@ -67,7 +67,7 @@
             "data_description": {
               "valve": "The switch entity that controls this zone's irrigation valve. Leave empty for monitoring mode (no valve)",
               "delivery_mode": "How your valve delivers water. Estimated flow: simple on/off valve, duration calculated from flow rate. Flow meter: valve with a flow sensor, closes at target volume. Volume preset: smart valve that accepts a volume target and closes itself.",
-              "flow_rate_lpm": "Water flow rate of the valve in liters per minute. Required for estimated_flow mode. Measure with a bucket and stopwatch",
+              "flow_rate_lpm": "Water flow rate of the valve in liters per hour (gal/h in imperial). Required for estimated_flow mode; recommended for flow_meter and volume_preset, where it drives the expected duration and the safety-timeout scaling (will become required in a future release). Measure with a bucket and stopwatch",
               "flow_meter_sensor": "Sensor entity that reports cumulative liters delivered. Required for flow_meter mode",
               "volume_entity": "Number entity on the smart valve that accepts a volume target in liters. Required for volume_preset mode",
               "system_type": "Sets the zone's efficiency (drip 0.92, micro-sprinklers 0.80, pop-up 0.68, manual 0.55). Pick Custom to enter your own below.",
