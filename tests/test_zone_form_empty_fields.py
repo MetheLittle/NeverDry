@@ -427,3 +427,58 @@ def _saved_zone(flow) -> dict:
     call = flow.hass.config_entries.async_update_entry.call_args
     assert call is not None, "the zone was never saved"
     return call.kwargs["data"][CONF_ZONES][-1]
+
+
+class TestZoneWithNoValve:
+    """A monitoring zone is not asked how fast it waters.
+
+    A zone with no valve delivers nothing by design: it watches the deficit and
+    says when to water by hand, which is the monitoring mode the controller
+    runs when no valve is configured anywhere. Every delivery-mode requirement
+    is about an act it will never perform, so none of them applies — refusing
+    to save it over a design flow rate would lock a supported setup out of the
+    form.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("door", DOORS)
+    async def test_accepted_with_nothing_about_delivery(self, hass_mock, seeded, door):
+        payload = _payload()
+        valve = payload[ZONE_FORM[CONF_ZONE_VALVE][0]]
+        for field in (CONF_ZONE_VALVE, CONF_ZONE_FLOW_RATE, CONF_ZONE_FLOW_METER_SENSOR, CONF_ZONE_VOLUME_ENTITY):
+            valve.pop(field, None)
+
+        result, _flow = await _submit(door, hass_mock, payload)
+
+        assert not _was_refused(door, result), f"{door}: a monitoring zone was refused"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("door", DOORS)
+    @pytest.mark.parametrize("mode", [DELIVERY_MODE_FLOW_METER, DELIVERY_MODE_VOLUME_PRESET])
+    async def test_a_stale_mode_does_not_bite_without_a_valve(self, hass_mock, seeded, door, mode):
+        """The dropdown keeps a value even when there is nothing to drive.
+
+        The form cannot hide the delivery mode when the valve field is emptied,
+        so a zone that loses its valve arrives with a mode still selected. It is
+        inert, and it must not be the reason the zone cannot be saved.
+        """
+        payload = _payload()
+        valve = payload[ZONE_FORM[CONF_ZONE_VALVE][0]]
+        for field in (CONF_ZONE_VALVE, CONF_ZONE_FLOW_RATE, CONF_ZONE_FLOW_METER_SENSOR, CONF_ZONE_VOLUME_ENTITY):
+            valve.pop(field, None)
+        valve[CONF_ZONE_DELIVERY_MODE] = mode
+
+        result, _flow = await _submit(door, hass_mock, payload)
+
+        assert not _was_refused(door, result), f"{door}/{mode}: refused a zone that delivers nothing"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("door", DOORS)
+    async def test_a_valve_brings_the_requirement_back(self, hass_mock, seeded, door):
+        """The exemption is the absent valve, not a hole in the rule."""
+        payload = _payload(without=CONF_ZONE_FLOW_RATE)
+
+        result, _flow = await _submit(door, hass_mock, payload)
+
+        assert _was_refused(door, result)
+        assert result["errors"]["base"] == "flow_rate_required"
