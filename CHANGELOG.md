@@ -57,6 +57,19 @@ not the argument.
   **no valve** is exempt from all of it: it delivers nothing by design — it watches
   the deficit and tells you when to water by hand — so asking it how fast it waters
   would be asking about something it will never do.
+- **Declining "save anyway" no longer undoes your edit** ([#196]). A zone with
+  unusual values asks for confirmation, and submitting without ticking the box
+  sends you back to the form. That return was drawn from the *saved* zone — the
+  configuration you were in the middle of changing — so a box you had just
+  emptied came back full. The form now comes back holding what you typed,
+  cleared boxes included.
+- **The form stops reading identifiers out loud.** An error said *"required for
+  estimated_flow delivery mode"* while the dropdown beside it said *"Simple
+  on/off"*: the same choice, named twice, once in a language meant for the code.
+  Twelve messages and labels did this. In Italian the design flow rate had its
+  whole explanation pasted into the label slot, so during setup the field
+  announced itself with a 493-character paragraph while every neighbour had a
+  name.
 - **A silent water meter no longer stops the watering.** A zone whose meter was
   already unavailable when its turn came did not water at all, and said so only in
   the log. Mid-session the code had always judged this the other way — a run that

@@ -18,6 +18,7 @@ from never_dry.const import (
     CONF_RAIN_SENSOR,
     CONF_TEMP_SENSOR,
     CONF_ZONE_AREA,
+    CONF_ZONE_DELIVERY_MODE,
     CONF_ZONE_EXPOSURE,
     CONF_ZONE_FLOW_METER_SENSOR,
     CONF_ZONE_FLOW_RATE,
@@ -52,6 +53,10 @@ def _patch_flow_env(monkeypatch):
     monkeypatch.setattr(cf.vol, "Schema", lambda *a, **k: None, raising=False)
     monkeypatch.setattr(cf.vol, "Required", lambda *a, **k: object(), raising=False)
     monkeypatch.setattr(cf.vol, "Optional", lambda *a, **k: object(), raising=False)
+    monkeypatch.setattr(cf.vol, "UNDEFINED", object(), raising=False)
+    # The edit form builds its schema inline, so the selector module has to
+    # answer attribute access rather than be the empty stub conftest installs.
+    monkeypatch.setattr(cf, "selector", MagicMock())
     monkeypatch.setattr(cf, "_confirm_zone_schema", lambda: None)
 
     def _show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None):
@@ -259,3 +264,101 @@ class TestSensorsStepSurvivesRejection:
         await flow.async_step_user()
 
         assert sensors_schema_calls == [None]
+
+
+_STORED_ZONE = {
+    CONF_ZONE_NAME: "Prato",
+    CONF_ZONE_AREA: 50.0,
+    CONF_ZONE_FLOW_RATE: 10.0,  # metric, L/min
+    CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
+    CONF_ZONE_FLOW_METER_SENSOR: "sensor.prato_counter",
+}
+
+
+class TestDecliningTheSoftGuard:
+    """Declining means "let me fix that", not "start again".
+
+    A zone with unusual values routes through a confirmation step, and
+    submitting it without ticking the box sends the user back to the form.
+    That return redrew from the *stored* configuration — the very
+    configuration the user was in the middle of changing — so a box they had
+    deliberately emptied came back full and the edit was undone without a
+    word. Reported from the field on 0.12.0-beta.3, on the design flow rate.
+
+    Reported *after* the fix that made a cleared field survive a refusal, and
+    it is worth saying why that fix did not cover this: a refusal redraws the
+    same step with the input in hand, while declining leaves the step and
+    comes back with nothing. Two paths back into one form.
+    """
+
+    def _options(self, hass):
+        entry = MagicMock()
+        entry.entry_id = "abc"
+        entry.data = {CONF_ZONES: [dict(_STORED_ZONE)]}
+        options = cf.NeverDryOptionsFlow(entry)
+        options.hass = hass
+        options._edit_zone_name = "Prato"
+        return options
+
+    def test_the_form_opens_on_what_is_saved(self, hass_mock):
+        options = self._options(hass_mock)
+
+        assert options._edit_zone_seed() == _STORED_ZONE
+
+    def test_a_declined_submission_wins_over_what_is_saved(self, hass_mock):
+        options = self._options(hass_mock)
+        # The rate is gone from the submission; the stored zone still has it.
+        options._pending_zone = {CONF_ZONE_NAME: "Prato", CONF_ZONE_AREA: 50.0}
+
+        seed = options._edit_zone_seed()
+
+        assert CONF_ZONE_FLOW_RATE not in seed
+        assert seed[CONF_ZONE_AREA] == 50.0
+
+    def test_the_declined_submission_is_consumed_once(self, hass_mock):
+        """It seeds the form it was declined from, and then it is gone."""
+        options = self._options(hass_mock)
+        options._pending_zone = {CONF_ZONE_NAME: "Prato"}
+
+        options._edit_zone_seed()
+
+        assert options._edit_zone_seed() == _STORED_ZONE
+
+    @pytest.mark.asyncio
+    async def test_declining_carries_the_submission_back(self, hass_mock):
+        options = self._options(hass_mock)
+        submitted = {
+            CONF_ZONE_NAME: "Prato",
+            cf.SECTION_GROUND: {CONF_ZONE_AREA: 50.0},
+            cf.SECTION_VALVE: {
+                "valve": "switch.prato",
+                CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
+                CONF_ZONE_FLOW_METER_SENSOR: "sensor.prato_counter",
+                "system_type": "sprinkler",
+            },
+            cf.SECTION_SCHEDULING: {},
+        }
+        # The meter is declared, so a missing design rate is a warning here,
+        # not a refusal — which is the path that leads to the guard at all.
+        result = await options.async_step_edit_zone_detail(submitted)
+        assert result["step_id"] == "confirm_zone"
+
+        options._pending_action = "edit"
+        await options.async_step_confirm_zone({"confirm": False})
+
+        # Consumed by the redraw on the way back, and the rate stayed gone.
+        assert options._pending_zone is None
+
+    @pytest.mark.asyncio
+    async def test_confirming_saves_and_forgets(self, hass_mock):
+        """A kept submission must not leak into the next visit to the form."""
+        options = self._options(hass_mock)
+        options._pending_zone = {CONF_ZONE_NAME: "Prato"}
+        options._pending_form = {CONF_ZONE_NAME: "Prato"}
+        options._pending_action = "edit"
+
+        await options.async_step_confirm_zone({"confirm": True})
+
+        assert options._pending_zone is None
+        assert options._pending_form is None
+        assert options._edit_zone_seed() == _STORED_ZONE
