@@ -53,7 +53,10 @@ not the argument.
   you did not choose, needing a design flow rate nobody then checked. All three
   doors now apply the same rule and say the same thing, so a zone that cannot
   deliver is refused wherever you try to save it. If you already have such a zone,
-  the next edit will ask you for the missing value before it will save.
+  the next edit will ask you for the missing value before it will save. A zone with
+  **no valve** is exempt from all of it: it delivers nothing by design — it watches
+  the deficit and tells you when to water by hand — so asking it how fast it waters
+  would be asking about something it will never do.
 
 ### Fixed
 - **A flow-metered valve no longer times out on a coarse counter** ([#173]). The

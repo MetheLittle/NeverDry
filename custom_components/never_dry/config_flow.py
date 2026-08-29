@@ -738,8 +738,17 @@ def _delivery_mode_errors(user_input: dict) -> dict[str, str]:
     flow rate to turn a volume into a duration, a counter to read the volume
     off, a number entity to hand the target to. Without it the mode is a
     declaration the zone cannot honour.
+
+    None of which applies to a zone with no valve. That zone delivers nothing by
+    design — it watches the deficit and tells you when to water by hand, which
+    is the monitoring mode the controller runs when no valve is configured
+    anywhere. Asking it how fast it waters is asking about something it will
+    never do, and refusing to save it over the answer would lock a supported
+    setup out of the form.
     """
     errors: dict[str, str] = {}
+    if not user_input.get(CONF_ZONE_VALVE):
+        return errors
     mode = user_input.get(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE)
     if mode == DELIVERY_MODE_ESTIMATED_FLOW and not user_input.get(CONF_ZONE_FLOW_RATE):
         _add_field_error(errors, CONF_ZONE_FLOW_RATE, "flow_rate_required")
