@@ -867,7 +867,9 @@ Releases are automated via GitHub Actions (`.github/workflows/release.yml`):
 - [ ] E2E smoke tests pass (`python tests/e2e/smoke.py --no-valves`, then full run if valves available)
 - [ ] No uncommitted changes
 - [ ] `HACS` validation passes locally or in CI
-- [ ] Changelog / release notes drafted (GitHub auto-generates from PR titles)
+- [ ] Changelog section written for the version, **with its date** — the release
+      workflow takes the release body from it and *fails* if the section is missing,
+      rather than falling back to the list of merged pull requests
 
 ## 10. Config entry migration
 

@@ -6,6 +6,21 @@ on:
     paths:
       - 'docs/gh-pages/**'
       - '.github/workflows/gh-pages.yml'
+      - 'scripts/update_download_badges.py'
+  # The download badge is computed, not fetched: no badge service can take a
+  # maximum over the releases array. Recomputing it on a schedule is what keeps
+  # it from going stale, and it deploys without a commit — so no pull request,
+  # no review, and nothing for anyone to remember at release time.
+  # Weekly is close enough: the figure is one past release's count and it grows
+  # slowly, so the badge trails reality by a week at worst.
+  schedule:
+    - cron: '17 5 * * 1'
+  # A release is the one moment the push trigger cannot cover: tagging a version
+  # touches none of the paths above, so nothing would redeploy and the badge
+  # would sit on whatever the last site change published.
+  release:
+    types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,6 +42,21 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      # Deliberately non-blocking. If GitHub rate-limits us the script writes
+      # nothing and the committed payload is published instead — an older true
+      # number. Failing the deploy over a badge would take the whole site down
+      # to protect a figure nobody navigates by.
+      - name: Refresh the download badge
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/update_download_badges.py
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

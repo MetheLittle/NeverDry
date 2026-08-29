@@ -111,6 +111,29 @@ not the argument.
   declared sensors cannot support used to take the sensor pickers down with it.
   What is refused, and where, is now one rule — see *Changed*.
 
+## [0.11.2] - 2026-08-29
+
+A patch stable for the 0.11 line, and it exists for one reason: **a new user could not finish installing the integration.**
+
+Filling in a zone and pressing submit emptied every field and said nothing. The form would not close, and there was no way to learn why. Reported by a new user who got that far and stopped; nobody knows how many got that far and did not write in.
+
+Everything else here is the same fault found in its other hiding places while fixing that one. Three ways into a zone that answered differently, a cleared field that refilled itself, an error code printed raw instead of its message, and a form that named its own internal identifiers out loud.
+
+**Upgrading.** Update through HACS and restart Home Assistant. No entity is renamed or removed and nothing needs reconfiguring.
+
+One change is worth knowing before you next edit a zone. The rules that decide whether a zone can be saved now apply in all three places a zone can be created or changed — first-run setup, *add zone* and *edit zone* — where before only setup enforced them. If an existing zone was saved through the options dialogs without the design flow rate its delivery mode requires, the next edit will ask for that value before it will save. It is the number that makes the zone able to water at all. A zone with no valve is exempt: it delivers nothing by design.
+
+
+### Changed
+- **The three ways into a zone now answer the same** ([#196]). First-run setup, *add zone* and *edit zone* each took a zone in, and each judged it differently: setup refused a delivery mode whose one indispensable input was missing, while the two options steps saved it without a word — or, for a flow meter or volume preset with no entity behind it, quietly swapped the mode for *estimated flow*. A mode you did not choose, needing a design flow rate nobody then checked. All three doors now apply the same rule and say the same thing, so a zone that cannot deliver is refused wherever you try to save it. If you already have such a zone, the next edit will ask you for the missing value before it will save. A zone with **no valve** is exempt from all of it: it delivers nothing by design — it watches the deficit and tells you when to water by hand — so asking it how fast it waters would be asking about something it will never do.
+
+### Fixed
+- **Declining "save anyway" no longer undoes your edit** ([#196]). A zone with unusual values asks for confirmation, and submitting without ticking the box sends you back to the form. That return was drawn from the *saved* zone — the configuration you were in the middle of changing — so a box you had just emptied came back full. The form now comes back holding what you typed, cleared boxes included.
+- **The form stops reading identifiers out loud.** An error said *"required for estimated_flow delivery mode"* while the dropdown beside it said *"Simple on/off"*: the same choice, named twice, once in a language meant for the code. Twelve messages and labels did this.
+- **A rejected zone form no longer empties itself in silence** ([#196]). Filling in a zone, pressing submit, and watching every field go blank with nothing on screen to say why — the form simply would not close, and the installation could not be completed. Two faults met there. The zone form is built from collapsible sections, and an error filed against a field *inside* a section could not be reached by the frontend, so the message never appeared; the three delivery-mode requirements were filed exactly that way, and the one most people hit is the design flow rate, which is mandatory but cannot be marked as such in the form because it only applies to one delivery mode. On top of that the redrawn form carried none of the submitted values, so even a visible error cost the user the whole zone. Errors now always reach the top of the form, and a rejected zone comes back filled in with what was typed. What is refused, and where, is now one rule — see *Changed*.
+
+[#196]: https://github.com/never-dry/NeverDry/issues/196
+
 ## [0.11.1] - 2026-08-25
 
 A patch stable for the 0.11 line. Theme: **stop failing quietly**. Almost everything here was a fault that produced no error — a valve that looked inert, a probe pinned at zero, a reload leaving two copies running, an override that came back on its own, a yearly rain total that stayed at zero while it rained.
