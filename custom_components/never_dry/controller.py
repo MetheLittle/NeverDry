@@ -1062,12 +1062,19 @@ class IrrigationController:
         more likely a dead/stale flow sensor than a dry pipe. Returning the
         raw 0.0 would skip the deficit settle entirely: the deficit would
         survive up to an hour of real watering and the scheduler would
-        immediately re-irrigate on the next cycle. Fall back to the zone's
-        configured nominal flow rate so the water is still credited.
+        immediately re-irrigate on the next cycle.
+
+        The rate comes from the zone, which asks its driver: measured sessions
+        when there are enough of them, the design rate otherwise. Crediting the
+        design rate while the zone really delivers 57% of it — the gap measured
+        on this installation — settles a debt that was not paid, and does it
+        most confidently on exactly the installations whose meter has stopped
+        answering.
         """
         if measured > 0 or elapsed_s <= 0:
             return measured
-        if zone._flow_rate <= 0:
+        rate = zone.effective_flow_lpm
+        if rate <= 0:
             _LOGGER.warning(
                 "Zone '%s': flow sensor measured 0 L after %.0fs with the valve open"
                 " and no flow_rate configured — cannot estimate delivered volume,"
@@ -1083,15 +1090,15 @@ class IrrigationController:
                 )
             )
             return measured
-        estimate = zone._flow_rate * elapsed_s / 60.0
+        estimate = rate * elapsed_s / 60.0
         _LOGGER.warning(
             "Zone '%s': flow sensor measured 0 L after %.0fs with the valve open —"
-            " crediting estimated %.1fL from configured flow_rate (%.2f L/min) so"
+            " crediting estimated %.1fL from the effective flow rate (%.2f L/min) so"
             " the deficit is settled",
             zone.zone_name,
             elapsed_s,
             estimate,
-            zone._flow_rate,
+            rate,
         )
         self._hass.async_create_task(
             self._notify_meter_silent(
@@ -1829,13 +1836,13 @@ class IrrigationController:
                 delivered_liters = max(0.0, flow_end - baseline) if flow_end is not None else 0.0
             # Meter measured nothing → credit the guard-flow estimate.
             delivered_liters = self._fallback_volume_estimate(zone, elapsed_s, delivered_liters)
-        elif zone._flow_rate > 0 and elapsed_s > 0:
-            delivered_liters = zone._flow_rate * elapsed_s / 60.0
+        elif (rate := zone.effective_flow_lpm) > 0 and elapsed_s > 0:
+            delivered_liters = rate * elapsed_s / 60.0
             _LOGGER.info(
-                "Manual irrigation estimated: zone='%s', %.1fL from flow_rate %.2f L/min x %.0fs",
+                "Manual irrigation estimated: zone='%s', %.1fL from flow rate %.2f L/min x %.0fs",
                 zone_name,
                 delivered_liters,
-                zone._flow_rate,
+                rate,
                 elapsed_s,
             )
         else:
@@ -1925,9 +1932,9 @@ class IrrigationController:
                     volume_target,
                     timeout_s,
                 )
-            elif volume_target > 0 and zone._flow_rate > 0:
-                # Estimated duration: volume / flow_rate (L/min) → seconds
-                estimated_s = int(volume_target / zone._flow_rate * 60)
+            elif volume_target > 0 and (rate := zone.effective_flow_lpm) > 0:
+                # Estimated duration: volume / flow rate (L/min) → seconds
+                estimated_s = int(volume_target / rate * 60)
                 wait_s = min(estimated_s, timeout_s)
                 _LOGGER.info(
                     "Manual valve '%s': estimated %ds for %.1fL (timeout=%ds, waiting %ds)",

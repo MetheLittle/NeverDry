@@ -1223,3 +1223,49 @@ class TestSilentMeterReachesTheUser:
 
         assert scheduled == []
         notifier.notify.assert_not_awaited()
+
+
+class TestTheRateToEstimateWith:
+    """Who decides which flow rate an estimate uses.
+
+    The controller used to work it out itself, reading the zone's private
+    design rate. That put the precedence rule — measured sessions when there
+    are enough of them, the design rate otherwise — in a second place, and the
+    second place had the worse answer: it ignored the very sessions the system
+    had measured. The zone answers now, and the driver decides.
+    """
+
+    def test_a_zone_with_a_driver_reports_what_the_driver_learned(self, hass_mock, di_sensor):
+        zone = _make_zone(hass_mock, di_sensor)
+        driver = MagicMock()
+        driver.effective_flow_lpm = 3.4
+        zone.set_operator(driver)
+
+        assert zone.effective_flow_lpm == 3.4
+
+    def test_without_a_driver_the_design_rate_stands(self, hass_mock, di_sensor):
+        """No valve, or a smart valve that doses itself: no history to consult."""
+        zone = _make_zone(hass_mock, di_sensor)
+        zone.set_operator(None)
+
+        assert zone.effective_flow_lpm == zone._flow_rate
+
+    def test_the_credited_estimate_follows_the_measured_sessions(self, hass_mock, di_sensor):
+        """The gap this closes is the one measured on the field installation.
+
+        A zone declared at 360 L/h delivering a median of 205: crediting the
+        design rate settles a debt that was not paid, and does so most
+        confidently on exactly the installations whose meter has gone quiet.
+        """
+        zone = _make_zone(hass_mock, di_sensor)
+        zone._flow_rate = 6.0  # design
+        driver = MagicMock()
+        driver.effective_flow_lpm = 3.4  # what it really delivers
+        zone.set_operator(driver)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        # The credit also raises a notification; this test is about the number.
+        hass_mock.async_create_task = lambda coro: coro.close()
+
+        credited = ctrl._fallback_volume_estimate(zone, elapsed_s=600.0, measured=0.0)
+
+        assert credited == pytest.approx(3.4 * 600.0 / 60.0)

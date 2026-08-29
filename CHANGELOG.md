@@ -55,6 +55,11 @@ not the argument.
   could not be credited* when the zone had no design flow rate to estimate with
   and its deficit was therefore left standing. Both are new notifications; until
   now the only trace was a log line nobody opens while the garden looks fine.
+  The estimate itself also got better: it follows the rate your sessions actually
+  measured, where before it used the design rate regardless. Crediting the design
+  rate on a zone that really delivers a fraction of it settles a debt that was
+  never paid — and it did so most confidently on exactly the installations whose
+  meter had stopped answering.
 
 ### Fixed
 - **A flow-metered valve no longer times out on a coarse counter** ([#173]). The

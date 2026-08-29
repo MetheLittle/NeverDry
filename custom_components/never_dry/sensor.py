@@ -2447,6 +2447,23 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._operator = operator
 
     @property
+    def effective_flow_lpm(self) -> float:
+        """The rate to estimate with: what the driver has learned, else the design rate.
+
+        Which of the two is better is the driver's judgement — it is the only
+        object holding the measured sessions, and it applies the precedence
+        rule in one place. Asking it here is what keeps that rule from being
+        re-derived by every caller that needs a number.
+
+        A zone with no driver falls back to the design rate, because there is no
+        history to consult: a zone with no valve never delivers, and a smart
+        valve doses itself without going through a driver at all.
+        """
+        if self._operator is not None:
+            return self._operator.effective_flow_lpm
+        return self._flow_rate
+
+    @property
     def _within_startup_grace(self) -> bool:
         """True while this valve has never been seen and setup is recent.
 
