@@ -5,13 +5,29 @@
 [![Security](https://github.com/never-dry/NeverDry/actions/workflows/security.yml/badge.svg)](https://github.com/never-dry/NeverDry/actions/workflows/security.yml)
 [![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5)](https://github.com/hacs/integration)
 [![GitHub release](https://img.shields.io/github/v/release/never-dry/NeverDry)](https://github.com/never-dry/NeverDry/releases)
+[![Downloads across all releases](https://img.shields.io/github/downloads/never-dry/NeverDry/total?color=41BDF5&label=downloads%20%28all%20releases%29)](https://github.com/never-dry/NeverDry/releases)
 [![Downloads of the latest stable release](https://img.shields.io/github/downloads/never-dry/NeverDry/latest/total?color=41BDF5&label=downloads%20%28latest%20stable%29)](https://github.com/never-dry/NeverDry/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 [![HA Community](https://img.shields.io/badge/Home%20Assistant-Community%20thread-41BDF5?logo=home-assistant&logoColor=white)](https://community.home-assistant.io/t/neverdry-smart-irrigation-that-calculates-when-and-how-long-to-water-fao-56-water-balance-hacs/1013835)
-<!-- The downloads badge counts the latest stable release only, and its label
-     now says so: read as a measure of reach it understates badly, because four
-     days after a release it shows the handful of people who have updated
-     already rather than everyone using the project.
+<!-- No installs badge here, and it is worth writing down why so nobody wires
+     one again. HACS publishes a `downloads` field per repository at
+     data-v2.hacs.xyz, and it looks like an install count until you check it:
+     for alandtse/tesla it reads 17709 while that repository's latest stable
+     release shows 18148 downloads on GitHub. It is the same quantity, taken
+     from a staler snapshot. For this repository it read 248 — v0.11.0's count
+     around 9 August — while the badge beside it was showing the live figure.
+     A second badge measuring the same thing, worse, under a name that claims
+     something else.
+
+          Both download badges read GitHub live, which is the point: whatever HACS
+     publishes is a stale copy of the same thing.
+
+     They answer different questions and neither is a count of people. "All
+     releases" is the sum, so one long-standing user is counted once per
+     update — but it never resets, which the other one does: "latest stable"
+     drops to zero the day a version ships and only climbs as people update.
+     Neither is installs. The one number that would be is the Home Assistant
+     analytics figure below, and it has no data yet.
 
      Active installs (Home Assistant analytics) is the number that would actually
      mean installs. There is no listing threshold — the feed publishes domains
