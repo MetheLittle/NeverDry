@@ -11,8 +11,15 @@ on:
   # maximum over the releases array. Recomputing it on a schedule is what keeps
   # it from going stale, and it deploys without a commit — so no pull request,
   # no review, and nothing for anyone to remember at release time.
+  # Weekly is close enough: the figure is one past release's count and it grows
+  # slowly, so the badge trails reality by a week at worst.
   schedule:
-    - cron: '17 5 * * *'
+    - cron: '17 5 * * 1'
+  # A release is the one moment the push trigger cannot cover: tagging a version
+  # touches none of the paths above, so nothing would redeploy and the badge
+  # would sit on whatever the last site change published.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
