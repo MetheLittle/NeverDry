@@ -45,6 +45,15 @@ not the argument.
 - **The zone card** shows site exposure, separates what was measured from what was
   derived, acknowledges a press before its outcome, and puts the zone's settings
   one click away.
+- **The three ways into a zone now answer the same** ([#196]). First-run setup, *add
+  zone* and *edit zone* each took a zone in, and each judged it differently: setup
+  refused a delivery mode whose one indispensable input was missing, while the two
+  options steps saved it without a word — or, for a flow meter or volume preset
+  with no entity behind it, quietly swapped the mode for *estimated flow*. A mode
+  you did not choose, needing a design flow rate nobody then checked. All three
+  doors now apply the same rule and say the same thing, so a zone that cannot
+  deliver is refused wherever you try to save it. If you already have such a zone,
+  the next edit will ask you for the missing value before it will save.
 
 ### Fixed
 - **A flow-metered valve no longer times out on a coarse counter** ([#173]). The
@@ -69,6 +78,7 @@ not the argument.
   the whole zone. Errors now always reach the top of the form, and a rejected zone
   comes back filled in. The first step keeps what was typed too: an ET method the
   declared sensors cannot support used to take the sensor pickers down with it.
+  What is refused, and where, is now one rule — see *Changed*.
 
 ## [0.11.1] - 2026-08-25
 

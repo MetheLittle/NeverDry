@@ -731,6 +731,46 @@ def _override_errors(user_input: dict) -> dict[str, str]:
     return errors
 
 
+def _delivery_mode_errors(user_input: dict) -> dict[str, str]:
+    """Reject a delivery mode whose one indispensable input is missing.
+
+    Each mode rests on exactly one value that nothing else can supply: a design
+    flow rate to turn a volume into a duration, a counter to read the volume
+    off, a number entity to hand the target to. Without it the mode is a
+    declaration the zone cannot honour.
+    """
+    errors: dict[str, str] = {}
+    mode = user_input.get(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE)
+    if mode == DELIVERY_MODE_ESTIMATED_FLOW and not user_input.get(CONF_ZONE_FLOW_RATE):
+        _add_field_error(errors, CONF_ZONE_FLOW_RATE, "flow_rate_required")
+    elif mode == DELIVERY_MODE_FLOW_METER and not user_input.get(CONF_ZONE_FLOW_METER_SENSOR):
+        _add_field_error(errors, CONF_ZONE_FLOW_METER_SENSOR, "flow_meter_required")
+    elif mode == DELIVERY_MODE_VOLUME_PRESET and not user_input.get(CONF_ZONE_VOLUME_ENTITY):
+        _add_field_error(errors, CONF_ZONE_VOLUME_ENTITY, "volume_entity_required")
+    return errors
+
+
+def _zone_errors(user_input: dict) -> dict[str, str]:
+    """Everything a submitted zone is refused for, wherever it was submitted.
+
+    The three doors into a zone — first-run setup, *add zone*, *edit zone* —
+    used to answer differently to the same omission: setup refused, the other
+    two saved and said nothing. One function now, so a rule cannot be enforced
+    at one door and forgotten at the next.
+
+    Delivery mode is checked first and keeps "base": a zone that cannot deliver
+    is a worse problem than a preset with an empty box, and "base" is the one
+    key rendered at the top of the form.
+    """
+    errors = _delivery_mode_errors(user_input)
+    for key, code in _override_errors(user_input).items():
+        if key == "base":
+            errors.setdefault("base", code)
+        else:
+            errors[key] = code
+    return errors
+
+
 def _ignored_override_warnings(zone: dict) -> list[str]:
     """Tell the user which values will not be used, and why.
 
@@ -759,17 +799,6 @@ def _ignored_override_warnings(zone: dict) -> list[str]:
             f" — choose 'Custom' to apply it, or clear the field"
         )
     return warnings
-
-
-def _coerce_delivery_mode(user_input: dict) -> dict:
-    """Downgrade delivery_mode to estimated_flow when the required sensor is missing."""
-    dm = user_input.get(CONF_ZONE_DELIVERY_MODE)
-    if (dm == DELIVERY_MODE_FLOW_METER and not user_input.get(CONF_ZONE_FLOW_METER_SENSOR)) or (
-        dm == DELIVERY_MODE_VOLUME_PRESET and not user_input.get(CONF_ZONE_VOLUME_ENTITY)
-    ):
-        user_input = dict(user_input)
-        user_input[CONF_ZONE_DELIVERY_MODE] = DELIVERY_MODE_ESTIMATED_FLOW
-    return user_input
 
 
 class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -811,19 +840,12 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             user_input = _flatten_sections(user_input)
             name = user_input.get(CONF_ZONE_NAME, "")
-            mode = user_input.get(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE)
             if len(name) > MAX_ZONE_NAME_LENGTH:
                 _add_field_error(errors, CONF_ZONE_NAME, "zone_name_too_long")
             elif len(self._zones) >= MAX_ZONES:
                 errors["base"] = "too_many_zones"
-            elif mode == DELIVERY_MODE_ESTIMATED_FLOW and not user_input.get(CONF_ZONE_FLOW_RATE):
-                _add_field_error(errors, CONF_ZONE_FLOW_RATE, "flow_rate_required")
-            elif mode == DELIVERY_MODE_FLOW_METER and not user_input.get(CONF_ZONE_FLOW_METER_SENSOR):
-                _add_field_error(errors, CONF_ZONE_FLOW_METER_SENSOR, "flow_meter_required")
-            elif mode == DELIVERY_MODE_VOLUME_PRESET and not user_input.get(CONF_ZONE_VOLUME_ENTITY):
-                _add_field_error(errors, CONF_ZONE_VOLUME_ENTITY, "volume_entity_required")
-            elif override_errors := _override_errors(user_input):
-                errors.update(override_errors)
+            elif zone_errors := _zone_errors(user_input):
+                errors.update(zone_errors)
             else:
                 zone_metric = _zone_input_to_metric(user_input, imperial)
                 self._pending_warnings = _unusual_zone_values(zone_metric, imperial) + _ignored_override_warnings(
@@ -968,23 +990,20 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
             # typed (L/h read back as L/min).
             submitted = _flatten_sections(user_input)
             user_input = _zone_input_to_metric(submitted, imperial)
-            user_input = _coerce_delivery_mode(user_input)
             new_data = dict(self._config_entry.data)
             zones = list(new_data.get(CONF_ZONES, []))
+            errors = _zone_errors(user_input)
             # Reject duplicate zone names
             new_name = user_input[CONF_ZONE_NAME]
             existing_names = {z[CONF_ZONE_NAME] for z in zones}
             if new_name in existing_names:
+                errors[CONF_ZONE_NAME] = "zone_already_exists"
+                errors["base"] = "zone_already_exists"
+            if errors:
                 return self.async_show_form(
                     step_id="add_zone",
                     data_schema=_zone_schema_initial(imperial, submitted),
-                    errors={"base": "zone_already_exists"},
-                )
-            if override_errors := _override_errors(user_input):
-                return self.async_show_form(
-                    step_id="add_zone",
-                    data_schema=_zone_schema_initial(imperial, submitted),
-                    errors=override_errors,
+                    errors=errors,
                 )
             self._pending_warnings = _unusual_zone_values(user_input, imperial) + _ignored_override_warnings(user_input)
             if self._pending_warnings:
@@ -1051,9 +1070,8 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             user_input = _flatten_sections(user_input)
             user_input = _zone_input_to_metric(user_input, imperial)
-            errors = _override_errors(user_input)
+            errors = _zone_errors(user_input)
             if not errors:
-                user_input = _coerce_delivery_mode(user_input)
                 self._pending_warnings = _unusual_zone_values(user_input, imperial) + _ignored_override_warnings(
                     user_input
                 )
