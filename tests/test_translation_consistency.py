@@ -381,3 +381,74 @@ def test_the_two_flows_declare_the_same_error_catalogue():
             f"{path.name}: config.error and options.error have drifted — "
             f"only in config: {sorted(config - options)}; only in options: {sorted(options - config)}"
         )
+
+
+# ── Internal vocabulary must not reach the user ───────────────────────
+#
+# A value like ``estimated_flow`` is an identifier. It has a translated label
+# precisely because the user is not supposed to see the key — and then the
+# error text said "required for estimated_flow delivery mode", naming in the
+# message the very thing the dropdown had just spelt out in words. A tester
+# read it back on 0.12.0-beta.3 and asked why the form spoke two languages.
+#
+# The rule is derived rather than listed: every option that has a label under
+# ``selector.<key>.options`` is by construction an internal identifier, so its
+# raw form must not appear in any label, description or error.
+
+
+def _internal_option_keys(data: dict) -> set[str]:
+    """Option values that have a translated label, so are identifiers.
+
+    Only the ones carrying an underscore. A key like ``custom`` or ``auto`` is
+    an ordinary English word, and banning it would flag "Pick Custom to enter
+    your own" — the label doing its job.
+    """
+    keys: set[str] = set()
+    for group in data.get("selector", {}).values():
+        keys |= {k for k in group.get("options", {}) if "_" in k}
+    return keys
+
+
+def _user_facing_strings(data: dict):
+    """Every string the form puts in front of a person, with where it lives."""
+    for root in ("config", "options"):
+        section = data.get(root, {})
+        for code, text in section.get("error", {}).items():
+            yield f"{root}.error.{code}", text
+        for step_name, step in section.get("step", {}).items():
+            blocks = [("", step)] + [(f"{s}.", body) for s, body in step.get("sections", {}).items()]
+            for prefix, block in blocks:
+                for kind in ("data", "data_description"):
+                    for field, text in block.get(kind, {}).items():
+                        yield f"{root}.{step_name}.{prefix}{kind}.{field}", text
+
+
+def test_no_user_facing_string_names_an_internal_key():
+    offenders: list[str] = []
+    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+        data = json.loads(path.read_text())
+        keys = _internal_option_keys(data)
+        assert keys, f"{path.name}: no translated options found — the extractor has drifted"
+        for where, text in _user_facing_strings(data):
+            for key in sorted(keys):
+                if key in text:
+                    offenders.append(f"{path.name}: {where} says '{key}'")
+    assert not offenders, "these read an identifier out loud; use the label the user already sees:\n  " + "\n  ".join(
+        offenders
+    )
+
+
+def test_a_label_is_a_name_not_a_paragraph():
+    """A label names the field; the explanation belongs in data_description.
+
+    The Italian file had the whole design-flow-rate description pasted into the
+    label slot — 493 characters where the form expects two words — so the
+    field announced itself with a paragraph while every neighbour had a name.
+    """
+    offenders: list[str] = []
+    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+        data = json.loads(path.read_text())
+        for where, text in _user_facing_strings(data):
+            if ".data." in where and len(text) > 90:
+                offenders.append(f"{path.name}: {where} is {len(text)} characters")
+    assert not offenders, "labels that are paragraphs:\n  " + "\n  ".join(offenders)

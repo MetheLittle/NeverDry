@@ -57,9 +57,9 @@
             "data": {
               "valve": "Interruttore della valvola (opzionale)",
               "delivery_mode": "Modalità di erogazione dell'acqua",
-              "flow_rate_lpm": "Portata di guardia (tutte le modalità; richiesta per estimated_flow)",
-              "flow_meter_sensor": "Sensore del flussometro (solo per flow_meter)",
-              "volume_entity": "Entità target del volume (solo per volume_preset)",
+              "flow_rate_lpm": "Portata di progetto",
+              "flow_meter_sensor": "Sensore di erogazione — contatore o portata (solo con valvola a flussometro)",
+              "volume_entity": "Entità target del volume (solo con dosaggio a volume)",
               "system_type": "Tipo di impianto di irrigazione",
               "efficiency": "Efficienza personalizzata (sovrascrive il valore predefinito del tipo di impianto)",
               "delivery_timeout": "Timeout di sicurezza"
@@ -67,12 +67,12 @@
             "data_description": {
               "valve": "L'entità interruttore (switch) che controlla la valvola di irrigazione di questa zona. Lascia vuoto per la modalità di solo monitoraggio (nessuna valvola)",
               "delivery_mode": "Modalità di erogazione dell'acqua della valvola. Portata stimata (estimated flow): semplice valvola on/off, durata calcolata in base alla portata. Flussometro (flow meter): valvola con sensore di flusso, si chiude al raggiungimento del volume target. Volume preimpostato (volume preset): valvola intelligente che accetta un volume target e si chiude autonomamente.",
-              "flow_rate_lpm": "Portata d'acqua della valvola in litri all'ora (gal/h in imperiale). Richiesta per la modalità estimated_flow; raccomandata per flow_meter e volume_preset, dove determina la durata prevista e la scalatura del timeout di sicurezza (diventerà obbligatoria in una release futura). Misurala con un secchio e un cronometro",
-              "flow_meter_sensor": "Entità sensore che rileva i litri cumulativi erogati. Richiesto per la modalità flow_meter",
-              "volume_entity": "Entità numerica sulla valvola intelligente che accetta un target di volume in litri. Richiesto per la modalità volume_preset",
+              "flow_rate_lpm": "Portata d'acqua della valvola in litri all'ora (gal/h in imperiale). Richiesta quando la modalità di erogazione ricava da lei la durata; raccomandata anche con flussometro o dosaggio a volume, dove determina la durata prevista e la scalatura del timeout di sicurezza. Misurala con un secchio e un cronometro",
+              "flow_meter_sensor": "Entità sensore che rileva i litri cumulativi erogati. Richiesto quando la modalità di erogazione è quella con flussometro.",
+              "volume_entity": "Entità numerica sulla valvola intelligente che accetta un target di volume in litri. Richiesto quando la modalità di erogazione affida il dosaggio alla valvola.",
               "system_type": "Imposta l'efficienza della zona (goccia 0.92, micro-irrigatori 0.80, pop-up 0.68, manuale 0.55). Scegli Personalizzato per inserire la tua qui sotto.",
               "efficiency": "Usato solo quando il tipo di impianto è Personalizzato. Con qualsiasi altro tipo questo campo viene ignorato e il form te lo segnala.",
-              "delivery_timeout": "Tempo massimo di attesa per l'erogazione con flow_meter o volume_preset prima di forzare la chiusura della valvola (limite di sicurezza)"
+              "delivery_timeout": "Tempo massimo di attesa per un'erogazione misurata o dosata dalla valvola prima di forzarne la chiusura (limite di sicurezza)."
             }
           },
           "scheduling": {
@@ -108,9 +108,9 @@
     "error": {
       "zone_name_too_long": "Il nome della zona è troppo lungo (massimo 64 caratteri)",
       "too_many_zones": "È stato raggiunto il numero massimo di zone (50)",
-      "flow_rate_required": "La portata è richiesta per la modalità di erogazione estimated_flow",
-      "flow_meter_required": "Il sensore del flussometro è richiesto per la modalità di erogazione flow_meter",
-      "volume_entity_required": "L'entità del volume è richiesta per la modalità di erogazione volume_preset",
+      "flow_rate_required": "Serve la portata di progetto: la modalità di erogazione scelta ricava da quella la durata dell'irrigazione.",
+      "flow_meter_required": "Serve il sensore di erogazione — un contatore cumulativo o una portata: la modalità scelta chiude la valvola al volume misurato.",
+      "volume_entity_required": "Serve l'entità target del volume: la modalità scelta affida il dosaggio alla valvola stessa.",
       "zone_already_exists": "Esiste già una zona con questo nome",
       "efficiency_required": "Inserisci un'efficienza: il tipo di impianto è impostato su Personalizzato, che prende il valore da quel campo",
       "kc_required": "Inserisci un Kc: la famiglia di piante è impostata su Personalizzato, che prende il valore da quel campo",
@@ -175,9 +175,9 @@
             "data": {
               "valve": "Interruttore della valvola (opzionale)",
               "delivery_mode": "Modalità di erogazione dell'acqua",
-              "flow_rate_lpm": "Portata della valvola",
-              "flow_meter_sensor": "Sensore del flussometro",
-              "volume_entity": "Entità target del volume",
+              "flow_rate_lpm": "Portata di progetto",
+              "flow_meter_sensor": "Sensore di erogazione — contatore o portata (solo con valvola a flussometro)",
+              "volume_entity": "Entità target del volume (solo con dosaggio a volume)",
               "system_type": "Tipo di impianto di irrigazione",
               "efficiency": "Efficienza personalizzata",
               "delivery_timeout": "Timeout di sicurezza"
@@ -240,9 +240,9 @@
             "data": {
               "valve": "Interruttore della valvola",
               "delivery_mode": "Modalità di erogazione dell'acqua",
-              "flow_rate_lpm": "Portata della valvola",
-              "flow_meter_sensor": "Sensore del flussometro",
-              "volume_entity": "Entità target del volume",
+              "flow_rate_lpm": "Portata di progetto",
+              "flow_meter_sensor": "Sensore di erogazione — contatore o portata (solo con valvola a flussometro)",
+              "volume_entity": "Entità target del volume (solo con dosaggio a volume)",
               "system_type": "Tipo di impianto di irrigazione",
               "efficiency": "Efficienza personalizzata",
               "delivery_timeout": "Timeout di sicurezza"
@@ -278,9 +278,9 @@
       "efficiency_required": "Inserisci un'efficienza: il tipo di impianto è impostato su Personalizzato, che prende il valore da quel campo",
       "kc_required": "Inserisci un Kc: la famiglia di piante è impostata su Personalizzato, che prende il valore da quel campo",
       "microclimate_factor_required": "Inserisci un fattore microclima: l'esposizione è impostata su Personalizzato, che prende il valore da quel campo",
-      "flow_rate_required": "La portata è richiesta per la modalità di erogazione estimated_flow",
-      "flow_meter_required": "Il sensore del flussometro è richiesto per la modalità di erogazione flow_meter",
-      "volume_entity_required": "L'entità del volume è richiesta per la modalità di erogazione volume_preset",
+      "flow_rate_required": "Serve la portata di progetto: la modalità di erogazione scelta ricava da quella la durata dell'irrigazione.",
+      "flow_meter_required": "Serve il sensore di erogazione — un contatore cumulativo o una portata: la modalità scelta chiude la valvola al volume misurato.",
+      "volume_entity_required": "Serve l'entità target del volume: la modalità scelta affida il dosaggio alla valvola stessa.",
       "zone_already_exists": "Esiste già una zona con questo nome",
       "too_many_zones": "È stato raggiunto il numero massimo di zone (50)",
       "zone_name_too_long": "Il nome della zona è troppo lungo (massimo 64 caratteri)"
