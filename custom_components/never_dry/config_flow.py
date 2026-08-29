@@ -838,7 +838,20 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._data: dict[str, Any] = {}
         self._zones: list[dict[str, Any]] = []
         self._pending_zone: dict[str, Any] | None = None
+        # The same submission in form units, for redrawing the form the user
+        # was standing in. _pending_zone is metric, which is what gets saved.
+        self._pending_form: dict[str, Any] | None = None
         self._pending_warnings: list[str] = []
+
+    def _take_pending_form(self) -> dict[str, Any] | None:
+        """The declined submission, consumed once.
+
+        Declining the soft guard means "let me fix that", not "start again":
+        the form has to come back holding what was typed, including the box
+        that was deliberately emptied.
+        """
+        form, self._pending_form = self._pending_form, None
+        return form
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
         """Step 1: Select sensors and ET model parameters."""
@@ -880,16 +893,19 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 if self._pending_warnings:
                     self._pending_zone = zone_metric
+                    self._pending_form = user_input
                     return await self.async_step_confirm_zone()
                 self._zones.append(zone_metric)
                 return await self.async_step_add_another()
 
         # user_input survives here only when it was rejected above — it is
         # still in form units, since the conversion to metric happens on the
-        # accepted path. Passing it back is what keeps the form filled in.
+        # accepted path. With no input at all this may be a return from the
+        # soft guard, which carries the same thing. Either way, passing it back
+        # is what keeps the form filled in.
         return self.async_show_form(
             step_id="zone",
-            data_schema=_zone_schema_initial(imperial, user_input),
+            data_schema=_zone_schema_initial(imperial, user_input or self._take_pending_form()),
             errors=errors,
             description_placeholders={
                 "zone_count": str(len(self._zones)),
@@ -908,10 +924,15 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """
         if user_input is not None:
             pending = self._pending_zone
-            self._pending_zone = None
             if user_input.get("confirm") and pending is not None:
+                self._pending_zone = None
+                self._pending_form = None
                 self._zones.append(pending)
                 return await self.async_step_add_another()
+            # Declined. The submission is deliberately left standing: the zone
+            # form reads it on the way back, so the values the user was in the
+            # middle of changing survive the round trip.
+            self._pending_zone = None
             return await self.async_step_zone()
 
         return self.async_show_form(
@@ -965,8 +986,36 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         """Initialize options flow."""
         self._config_entry = config_entry
         self._pending_zone: dict[str, Any] | None = None
+        # The same submission in form units, for redrawing the add form.
+        # The edit form seeds from the metric copy, since it converts anyway.
+        self._pending_form: dict[str, Any] | None = None
         self._pending_warnings: list[str] = []
         self._pending_action: str = ""
+
+    def _take_pending_form(self) -> dict[str, Any] | None:
+        """The declined submission in form units, consumed once."""
+        form, self._pending_form = self._pending_form, None
+        return form
+
+    def _take_pending_zone(self) -> dict[str, Any] | None:
+        """The declined submission in metric, consumed once."""
+        zone, self._pending_zone = self._pending_zone, None
+        return zone
+
+    def _edit_zone_seed(self) -> dict[str, Any]:
+        """What the edit form is drawn from when it opens with no input.
+
+        A declined soft guard comes back here, and it must not redraw from the
+        stored zone: that is the configuration the user was in the middle of
+        changing, so a box they had just emptied would come back full and their
+        edit would be undone without a word. The declined submission wins when
+        there is one; otherwise the form opens on what is saved.
+        """
+        declined = self._take_pending_zone()
+        if declined is not None:
+            return declined
+        zones = list(self._config_entry.data.get(CONF_ZONES, []))
+        return next((z for z in zones if z[CONF_ZONE_NAME] == self._edit_zone_name), {})
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
         """Show menu: edit model params or manage zones."""
@@ -1035,13 +1084,16 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
             self._pending_warnings = _unusual_zone_values(user_input, imperial) + _ignored_override_warnings(user_input)
             if self._pending_warnings:
                 self._pending_zone = user_input
+                self._pending_form = submitted
                 self._pending_action = "add"
                 return await self.async_step_confirm_zone()
             return self._save_added_zone(user_input)
 
+        # No input here is either a first render or a return from the soft
+        # guard; the second carries the submission that was declined.
         return self.async_show_form(
             step_id="add_zone",
-            data_schema=_zone_schema_initial(imperial),
+            data_schema=_zone_schema_initial(imperial, self._take_pending_form()),
         )
 
     def _save_added_zone(self, zone: dict[str, Any]) -> config_entries.ConfigFlowResult:
@@ -1086,11 +1138,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
         """Edit zone details with current values as defaults."""
-        zones = list(self._config_entry.data.get(CONF_ZONES, []))
-        cur = next(
-            (z for z in zones if z[CONF_ZONE_NAME] == self._edit_zone_name),
-            {},
-        )
+        cur = self._edit_zone_seed()
 
         imperial = _is_imperial(self.hass)
         errors: dict[str, str] = {}
@@ -1396,13 +1444,18 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         """
         if user_input is not None:
             pending = self._pending_zone
-            self._pending_zone = None
             if user_input.get("confirm") and pending is not None:
+                self._pending_zone = None
+                self._pending_form = None
                 if self._pending_action == "edit":
                     return self._save_edited_zone(pending)
                 return self._save_added_zone(pending)
+            # Declined. The submission is left standing for the form to read on
+            # the way back — the edit form takes the metric copy, the add form
+            # the one in display units.
             if self._pending_action == "edit":
                 return await self.async_step_edit_zone_detail()
+            self._pending_zone = None
             return await self.async_step_add_zone()
 
         return self.async_show_form(
