@@ -222,8 +222,14 @@ def _et_method_error(user_input: dict) -> str | None:
     return None if env.satisfies(model.required_sensors) else "et_method_missing_sensors"
 
 
-def _sensors_schema(is_imperial: bool) -> vol.Schema:
+def _sensors_schema(is_imperial: bool, current: dict | None = None) -> vol.Schema:
     """Sensors + ET parameters form for initial setup, unit-aware.
+
+    ``current`` is a rejected submission being handed back, and every field is
+    seeded from it. An ET method the declared sensors cannot support is the one
+    way out of this step that is not forward, and without the seeding it also
+    emptied the two sensor pickers the user had just filled in — the same trap
+    the zone form had in GH #196, one step earlier.
 
     **No soil probe here.** A probe measures one patch of soil, with one kind of
     planting above it and its own watering history, so a probe declared for the
@@ -242,18 +248,22 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
 
     return vol.Schema(
         {
-            vol.Required(CONF_TEMP_SENSOR): selector.EntitySelector(
+            vol.Required(CONF_TEMP_SENSOR, **_suggest(current, CONF_TEMP_SENSOR)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
             ),
-            vol.Required(CONF_RAIN_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
-            vol.Optional(CONF_RAIN_SENSOR_TYPE, default=DEFAULT_RAIN_SENSOR_TYPE): selector.SelectSelector(
+            vol.Required(CONF_RAIN_SENSOR, **_suggest(current, CONF_RAIN_SENSOR)): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_RAIN_SENSOR_TYPE, default=DEFAULT_RAIN_SENSOR_TYPE, **_suggest(current, CONF_RAIN_SENSOR_TYPE)
+            ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[RAIN_TYPE_EVENT, RAIN_TYPE_DAILY_TOTAL],
                     translation_key="rain_sensor_type",
                     mode="dropdown",
                 )
             ),
-            vol.Optional(CONF_D_MAX, default=d_max_default): selector.NumberSelector(
+            vol.Optional(CONF_D_MAX, default=d_max_default, **_suggest(current, CONF_D_MAX)): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0.5 if is_imperial else 10.0,
                     max=20.0 if is_imperial else 500.0,
@@ -267,8 +277,8 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
             # dropdown within one step, so the only way to express "this box
             # belongs to that choice" is to put it underneath it. The label says
             # which method uses it; the confirm step says so again if it is inert.
-            **_et_method_field(),
-            vol.Optional(CONF_ALPHA, default=DEFAULT_ALPHA): selector.NumberSelector(
+            **_et_method_field(current),
+            vol.Optional(CONF_ALPHA, default=DEFAULT_ALPHA, **_suggest(current, CONF_ALPHA)): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0.05,
                     max=1.0,
@@ -277,7 +287,9 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
                     unit_of_measurement="mm/°C/day",
                 )
             ),
-            vol.Optional(CONF_T_BASE, default=t_base_default): selector.NumberSelector(
+            vol.Optional(
+                CONF_T_BASE, default=t_base_default, **_suggest(current, CONF_T_BASE)
+            ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=23.0 if is_imperial else -5.0,
                     max=68.0 if is_imperial else 20.0,
@@ -286,7 +298,7 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
                     unit_of_measurement=t_unit,
                 )
             ),
-            **_extra_sensor_fields(),
+            **_extra_sensor_fields(current),
         }
     )
 
@@ -353,23 +365,50 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
     )
 
 
-def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
-    """Zone form for initial setup and add_zone options flow (no pre-existing values)."""
+def _suggest(current: dict | None, key: str) -> dict:
+    """Marker keyword arguments that seed one field from a rejected submission.
+
+    ``current is None`` is a first render and the field carries no suggestion
+    at all — an explicit ``suggested_value=None`` there would blank out the
+    ``default=`` the field is supposed to open with.
+
+    A key missing from ``current`` is a box the user left empty, and it has to
+    come back empty: suggesting anything would put back the very value the
+    error is asking for.
+    """
+    if current is None:
+        return {}
+    return {"description": {"suggested_value": current.get(key)}}
+
+
+def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.Schema:
+    """Zone form for initial setup and add_zone options flow.
+
+    ``current`` is what the user has just submitted, and is present only when
+    the form is being redrawn after an error. Without it every field comes back
+    empty and a rejected zone has to be typed again from scratch, with nothing
+    on screen saying why — the trap reported in GH #196. Seeded as
+    ``suggested_value`` and never as ``default=``: a default cannot be cleared,
+    which is how the override boxes trapped their users in GH #165.
+    """
     area_unit = "ft²" if is_imperial else "m²"
     flow_unit = "gal/h" if is_imperial else "L/h"
     depth_unit = "in" if is_imperial else "mm"
     threshold_default = round(DEFAULT_THRESHOLD * _MM_TO_IN, 2) if is_imperial else DEFAULT_THRESHOLD
+
+    def _sug(key: str) -> dict:
+        return _suggest(current, key)
 
     # Nothing is collapsed here: a zone being created has to be seen once in
     # full. The edit form collapses everything instead — there you already
     # know what you came to change.
     return vol.Schema(
         {
-            vol.Required(CONF_ZONE_NAME): selector.TextSelector(),
+            vol.Required(CONF_ZONE_NAME, **_sug(CONF_ZONE_NAME)): selector.TextSelector(),
             vol.Required(SECTION_GROUND): section(
                 vol.Schema(
                     {
-                        vol.Required(CONF_ZONE_AREA): selector.NumberSelector(
+                        vol.Required(CONF_ZONE_AREA, **_sug(CONF_ZONE_AREA)): selector.NumberSelector(
                             selector.NumberSelectorConfig(
                                 min=1.0 if is_imperial else 0.1,
                                 max=107000.0 if is_imperial else 10000.0,
@@ -378,14 +417,14 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                                 unit_of_measurement=area_unit,
                             )
                         ),
-                        vol.Optional(CONF_ZONE_PLANT_FAMILY): selector.SelectSelector(
+                        vol.Optional(CONF_ZONE_PLANT_FAMILY, **_sug(CONF_ZONE_PLANT_FAMILY)): selector.SelectSelector(
                             selector.SelectSelectorConfig(
                                 options=list(PLANT_FAMILIES.keys()),
                                 translation_key="plant_family",
                                 mode="dropdown",
                             )
                         ),
-                        vol.Optional(CONF_ZONE_KC): selector.NumberSelector(
+                        vol.Optional(CONF_ZONE_KC, **_sug(CONF_ZONE_KC)): selector.NumberSelector(
                             selector.NumberSelectorConfig(min=0.1, max=2.0, step=0.01, mode="box")
                         ),
                         # The probe belongs here, in the zone, not to the
@@ -394,17 +433,21 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                         # reading from somebody else's patch says nothing about
                         # this one. A zone that declares one stops estimating
                         # and starts measuring.
-                        vol.Optional(CONF_ZONE_VWC_SENSOR): selector.EntitySelector(
+                        vol.Optional(CONF_ZONE_VWC_SENSOR, **_sug(CONF_ZONE_VWC_SENSOR)): selector.EntitySelector(
                             selector.EntitySelectorConfig(domain="sensor", device_class="moisture")
                         ),
-                        vol.Optional(CONF_ZONE_EXPOSURE, default=DEFAULT_EXPOSURE): selector.SelectSelector(
+                        vol.Optional(
+                            CONF_ZONE_EXPOSURE, default=DEFAULT_EXPOSURE, **_sug(CONF_ZONE_EXPOSURE)
+                        ): selector.SelectSelector(
                             selector.SelectSelectorConfig(
                                 options=list(EXPOSURES.keys()),
                                 translation_key="exposure",
                                 mode="dropdown",
                             )
                         ),
-                        vol.Optional(CONF_ZONE_MICROCLIMATE_FACTOR): selector.NumberSelector(
+                        vol.Optional(
+                            CONF_ZONE_MICROCLIMATE_FACTOR, **_sug(CONF_ZONE_MICROCLIMATE_FACTOR)
+                        ): selector.NumberSelector(
                             selector.NumberSelectorConfig(
                                 min=MICROCLIMATE_FACTOR_MIN,
                                 max=MICROCLIMATE_FACTOR_MAX,
@@ -426,10 +469,12 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                         # controller's own state checks went through that adapter
                         # — offering it earlier would have shown a valve that
                         # saved without error and never opened.
-                        vol.Optional(CONF_ZONE_VALVE): selector.EntitySelector(
+                        vol.Optional(CONF_ZONE_VALVE, **_sug(CONF_ZONE_VALVE)): selector.EntitySelector(
                             selector.EntitySelectorConfig(domain=["switch", "valve"])
                         ),
-                        vol.Optional(CONF_ZONE_DELIVERY_MODE, default=DEFAULT_DELIVERY_MODE): selector.SelectSelector(
+                        vol.Optional(
+                            CONF_ZONE_DELIVERY_MODE, default=DEFAULT_DELIVERY_MODE, **_sug(CONF_ZONE_DELIVERY_MODE)
+                        ): selector.SelectSelector(
                             selector.SelectSelectorConfig(
                                 options=[
                                     DELIVERY_MODE_ESTIMATED_FLOW,
@@ -440,7 +485,7 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                                 mode="dropdown",
                             )
                         ),
-                        vol.Optional(CONF_ZONE_FLOW_RATE): selector.NumberSelector(
+                        vol.Optional(CONF_ZONE_FLOW_RATE, **_sug(CONF_ZONE_FLOW_RATE)): selector.NumberSelector(
                             selector.NumberSelectorConfig(
                                 min=2.0 if is_imperial else 1.0,
                                 max=3200.0 if is_imperial else 12000.0,
@@ -449,13 +494,13 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                                 unit_of_measurement=flow_unit,
                             )
                         ),
-                        vol.Optional(CONF_ZONE_FLOW_METER_SENSOR): selector.EntitySelector(
-                            selector.EntitySelectorConfig(domain="sensor")
-                        ),
-                        vol.Optional(CONF_ZONE_VOLUME_ENTITY): selector.EntitySelector(
+                        vol.Optional(
+                            CONF_ZONE_FLOW_METER_SENSOR, **_sug(CONF_ZONE_FLOW_METER_SENSOR)
+                        ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+                        vol.Optional(CONF_ZONE_VOLUME_ENTITY, **_sug(CONF_ZONE_VOLUME_ENTITY)): selector.EntitySelector(
                             selector.EntitySelectorConfig(domain="number")
                         ),
-                        vol.Required(CONF_ZONE_SYSTEM_TYPE): selector.SelectSelector(
+                        vol.Required(CONF_ZONE_SYSTEM_TYPE, **_sug(CONF_ZONE_SYSTEM_TYPE)): selector.SelectSelector(
                             selector.SelectSelectorConfig(
                                 options=[
                                     SYSTEM_TYPE_DRIP,
@@ -468,7 +513,7 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                                 mode="dropdown",
                             )
                         ),
-                        vol.Optional(CONF_ZONE_EFFICIENCY): selector.NumberSelector(
+                        vol.Optional(CONF_ZONE_EFFICIENCY, **_sug(CONF_ZONE_EFFICIENCY)): selector.NumberSelector(
                             # box, not slider: a slider always submits a value, so an
                             # override set by accident could never be cleared again
                             # (GH #165). step 0.01 so every system-type default is
@@ -477,7 +522,9 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                             selector.NumberSelectorConfig(min=0.1, max=1.0, step=0.01, mode="box")
                         ),
                         vol.Optional(
-                            CONF_ZONE_DELIVERY_TIMEOUT, default=DEFAULT_DELIVERY_TIMEOUT_S
+                            CONF_ZONE_DELIVERY_TIMEOUT,
+                            default=DEFAULT_DELIVERY_TIMEOUT_S,
+                            **_sug(CONF_ZONE_DELIVERY_TIMEOUT),
                         ): selector.NumberSelector(
                             selector.NumberSelectorConfig(
                                 min=60, max=7200, step=60, mode="box", unit_of_measurement="s"
@@ -491,7 +538,9 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                 vol.Schema(
                     {
                         vol.Optional(
-                            CONF_ZONE_IRRIGATION_MODE, default=DEFAULT_IRRIGATION_MODE
+                            CONF_ZONE_IRRIGATION_MODE,
+                            default=DEFAULT_IRRIGATION_MODE,
+                            **_sug(CONF_ZONE_IRRIGATION_MODE),
                         ): selector.SelectSelector(
                             selector.SelectSelectorConfig(
                                 options=[
@@ -503,10 +552,14 @@ def _zone_schema_initial(is_imperial: bool) -> vol.Schema:
                                 mode="dropdown",
                             )
                         ),
-                        vol.Optional(CONF_ZONE_IRRIGATION_TIME, default=DEFAULT_IRRIGATION_TIME): (
-                            selector.TimeSelector()
-                        ),
-                        vol.Optional(CONF_ZONE_THRESHOLD, default=threshold_default): selector.NumberSelector(
+                        vol.Optional(
+                            CONF_ZONE_IRRIGATION_TIME,
+                            default=DEFAULT_IRRIGATION_TIME,
+                            **_sug(CONF_ZONE_IRRIGATION_TIME),
+                        ): (selector.TimeSelector()),
+                        vol.Optional(
+                            CONF_ZONE_THRESHOLD, default=threshold_default, **_sug(CONF_ZONE_THRESHOLD)
+                        ): selector.NumberSelector(
                             selector.NumberSelectorConfig(
                                 min=0.1 if is_imperial else 1.0,
                                 max=4.0 if is_imperial else 100.0,
@@ -621,13 +674,39 @@ def _flatten_sections(user_input: dict) -> dict:
     return flat
 
 
-# Which section each override box is rendered in, so an error can be pointed
-# at a field the frontend is actually showing.
+# Which section each field is rendered in, so an error can be pointed at a
+# field the frontend is actually showing. Only sectioned fields belong here:
+# a top-level field is found by its own name.
 _SECTION_OF_FIELD = {
     CONF_ZONE_EFFICIENCY: SECTION_VALVE,
     CONF_ZONE_KC: SECTION_GROUND,
     CONF_ZONE_MICROCLIMATE_FACTOR: SECTION_GROUND,
+    CONF_ZONE_FLOW_RATE: SECTION_VALVE,
+    CONF_ZONE_FLOW_METER_SENSOR: SECTION_VALVE,
+    CONF_ZONE_VOLUME_ENTITY: SECTION_VALVE,
 }
+
+
+def _add_field_error(errors: dict[str, str], field: str, code: str) -> None:
+    """File one field error under every key the frontend might look for.
+
+    A field rendered inside a section cannot be reached by its bare name
+    alone, so one problem is filed three times:
+      - the bare name, which is what an unsectioned form matches;
+      - the section-qualified name;
+      - "base", which is rendered at the top of the form no matter what.
+
+    Without that last key the form comes back with nothing on screen to say
+    why it refused — which is how a mandatory design flow rate left users
+    staring at a blank form that would not close (GH #196). A top-level field
+    needs only its own name.
+    """
+    errors[field] = code
+    section_name = _SECTION_OF_FIELD.get(field)
+    if section_name is None:
+        return
+    errors[f"{section_name}.{field}"] = code
+    errors.setdefault("base", code)
 
 
 def _preset_is_custom(table: dict, key: str | None, field: str) -> bool:
@@ -648,16 +727,7 @@ def _override_errors(user_input: dict) -> dict[str, str]:
             continue
         if user_input.get(override_key) is not None:
             continue
-        # Three keys for one problem, because the field lives inside a
-        # collapsed section and the frontend has to be able to find it:
-        #   - the bare name, which is what an unsectioned form matches;
-        #   - the section-qualified name;
-        #   - "base", which is rendered at the top of the form no matter what.
-        # Without the last one the form simply refuses to close with nothing
-        # on screen to say why, which is worse than the bug being fixed.
-        errors[override_key] = error
-        errors[f"{_SECTION_OF_FIELD[override_key]}.{override_key}"] = error
-        errors.setdefault("base", error)
+        _add_field_error(errors, override_key, error)
     return errors
 
 
@@ -725,9 +795,12 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._data = _sensors_input_to_metric(user_input, imperial)
                 return await self.async_step_zone()
 
+        # Same as the zone step: user_input is here only if it was rejected,
+        # and it is still in form units — the conversion to metric happens on
+        # the accepted path.
         return self.async_show_form(
             step_id="user",
-            data_schema=_sensors_schema(imperial),
+            data_schema=_sensors_schema(imperial, user_input),
             errors=errors,
         )
 
@@ -740,15 +813,15 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             name = user_input.get(CONF_ZONE_NAME, "")
             mode = user_input.get(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE)
             if len(name) > MAX_ZONE_NAME_LENGTH:
-                errors[CONF_ZONE_NAME] = "zone_name_too_long"
+                _add_field_error(errors, CONF_ZONE_NAME, "zone_name_too_long")
             elif len(self._zones) >= MAX_ZONES:
                 errors["base"] = "too_many_zones"
             elif mode == DELIVERY_MODE_ESTIMATED_FLOW and not user_input.get(CONF_ZONE_FLOW_RATE):
-                errors[CONF_ZONE_FLOW_RATE] = "flow_rate_required"
+                _add_field_error(errors, CONF_ZONE_FLOW_RATE, "flow_rate_required")
             elif mode == DELIVERY_MODE_FLOW_METER and not user_input.get(CONF_ZONE_FLOW_METER_SENSOR):
-                errors[CONF_ZONE_FLOW_METER_SENSOR] = "flow_meter_required"
+                _add_field_error(errors, CONF_ZONE_FLOW_METER_SENSOR, "flow_meter_required")
             elif mode == DELIVERY_MODE_VOLUME_PRESET and not user_input.get(CONF_ZONE_VOLUME_ENTITY):
-                errors[CONF_ZONE_VOLUME_ENTITY] = "volume_entity_required"
+                _add_field_error(errors, CONF_ZONE_VOLUME_ENTITY, "volume_entity_required")
             elif override_errors := _override_errors(user_input):
                 errors.update(override_errors)
             else:
@@ -762,9 +835,12 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._zones.append(zone_metric)
                 return await self.async_step_add_another()
 
+        # user_input survives here only when it was rejected above — it is
+        # still in form units, since the conversion to metric happens on the
+        # accepted path. Passing it back is what keeps the form filled in.
         return self.async_show_form(
             step_id="zone",
-            data_schema=_zone_schema_initial(imperial),
+            data_schema=_zone_schema_initial(imperial, user_input),
             errors=errors,
             description_placeholders={
                 "zone_count": str(len(self._zones)),
@@ -887,8 +963,11 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         """Add a new irrigation zone."""
         imperial = _is_imperial(self.hass)
         if user_input is not None:
-            user_input = _flatten_sections(user_input)
-            user_input = _zone_input_to_metric(user_input, imperial)
+            # Kept in form units for the error redraws below: seeding the
+            # form with metric values would silently rewrite what the user
+            # typed (L/h read back as L/min).
+            submitted = _flatten_sections(user_input)
+            user_input = _zone_input_to_metric(submitted, imperial)
             user_input = _coerce_delivery_mode(user_input)
             new_data = dict(self._config_entry.data)
             zones = list(new_data.get(CONF_ZONES, []))
@@ -898,13 +977,13 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
             if new_name in existing_names:
                 return self.async_show_form(
                     step_id="add_zone",
-                    data_schema=_zone_schema_initial(imperial),
+                    data_schema=_zone_schema_initial(imperial, submitted),
                     errors={"base": "zone_already_exists"},
                 )
             if override_errors := _override_errors(user_input):
                 return self.async_show_form(
                     step_id="add_zone",
-                    data_schema=_zone_schema_initial(imperial),
+                    data_schema=_zone_schema_initial(imperial, submitted),
                     errors=override_errors,
                 )
             self._pending_warnings = _unusual_zone_values(user_input, imperial) + _ignored_override_warnings(user_input)

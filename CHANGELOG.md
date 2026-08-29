@@ -57,6 +57,18 @@ not the argument.
   ([design](docs/design/evidence-and-methodology.md))
 - **The valve picker accepts `valve.*` entities**, not only `switch.*` ([#94]).
   The engine could already drive them; the form would not let you choose one.
+- **A rejected setup form no longer empties itself in silence** ([#196]). Filling in a
+  zone, pressing submit, and watching every field go blank with nothing on screen to
+  say why — the form would not close, and the installation could not be completed.
+  Two faults met there. The zone form is built from collapsible sections, and an error
+  filed against a field *inside* a section never reached the frontend, so no message
+  appeared; the three delivery-mode requirements were filed exactly that way, and the
+  one most people hit is the design flow rate — mandatory, but impossible to mark as
+  such in the form, because it only applies to one delivery mode. On top of that the
+  redraw carried none of the submitted values, so even a visible error cost the user
+  the whole zone. Errors now always reach the top of the form, and a rejected zone
+  comes back filled in. The first step keeps what was typed too: an ET method the
+  declared sensors cannot support used to take the sensor pickers down with it.
 
 ## [0.11.1] - 2026-08-25
 
@@ -133,6 +145,7 @@ For releases prior to 0.11.0, see the [GitHub Releases](https://github.com/never
 [0.11.0]: https://github.com/never-dry/NeverDry/releases/tag/v0.11.0
 [#173]: https://github.com/never-dry/NeverDry/issues/173
 [#94]: https://github.com/never-dry/NeverDry/issues/94
+[#196]: https://github.com/never-dry/NeverDry/issues/196
 [#168]: https://github.com/never-dry/NeverDry/pull/168
 [#165]: https://github.com/never-dry/NeverDry/issues/165
 [#144]: https://github.com/never-dry/NeverDry/issues/144
