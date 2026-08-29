@@ -201,3 +201,85 @@ class TestClearingActuallyRemovesTheKey:
         assert CONF_ZONE_EFFICIENCY not in zone
         assert CONF_ZONE_KC not in zone
         assert CONF_ZONE_MICROCLIMATE_FACTOR not in zone
+
+
+# ── The rule, checked against the whole form rather than three fields ──
+
+
+class TestNoStoredValueIsEverADefault:
+    """``default=`` may carry a constant. A stored value may only be suggested.
+
+    GH #165 was fixed on the three override boxes and left as three fixes. The
+    same construction survived on the design flow rate, and a beta tester met
+    it there: clear the box, submit, and the old number is back with no error —
+    voluptuous had refilled the missing key before the flow ever saw it, so the
+    refusal that should have followed could not fire.
+
+    The difference that matters is *what* the default carries. A constant is a
+    genuine fallback: empty the box and the field returns to what it means when
+    nothing is chosen. A stored value re-injected the same way cannot be
+    removed at all, and the form silently undoes what the user just did.
+    """
+
+    # Anything that reads back what this installation happens to hold.
+    _STORED = ("current", "cur", "_d", "_d_flow", "_d_area", "_d_threshold", "_stored", "stored")
+
+    def _defaults(self):
+        """Every ``default=`` in the flow: line, field, expression, names used.
+
+        Names, not substrings: ``d_max_default`` is a constant that happens to
+        contain ``_d``, and a test that cannot tell those apart teaches people
+        to work around it.
+        """
+        import ast
+        from pathlib import Path
+
+        source = Path(__file__).resolve().parent.parent / "custom_components" / "never_dry" / "config_flow.py"
+        tree = ast.parse(source.read_text())
+
+        # A local can launder a stored value into a default:
+        #   d_display = current.get(...)  ->  default=d_display
+        # so any name assigned from a tainted expression is tainted too. One
+        # pass to a fixed point, because the laundering can be two deep.
+        tainted = set(self._STORED)
+        for _ in range(4):
+            grew = False
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Assign):
+                    continue
+                used = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)}
+                if not used & tainted:
+                    continue
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id not in tainted:
+                        tainted.add(target.id)
+                        grew = True
+            if not grew:
+                break
+
+        found = []
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("Optional", "Required")
+            ):
+                continue
+            for kw in node.keywords:
+                if kw.arg != "default":
+                    continue
+                names = {n.id for n in ast.walk(kw.value) if isinstance(n, ast.Name)}
+                field = ast.unparse(node.args[0]) if node.args else "?"
+                found.append((node.lineno, field, ast.unparse(kw.value), names & tainted))
+        return found
+
+    def test_the_form_declares_at_least_one_default(self):
+        # Guards the extractor: a silent zero here would pass the rule vacuously.
+        assert self._defaults()
+
+    def test_no_default_reads_the_stored_configuration(self):
+        offenders = [f"line {line}: {field} default={expr}" for line, field, expr, names in self._defaults() if names]
+        assert not offenders, (
+            "a default must be a constant; a stored value can only be suggested, "
+            "or the field cannot be cleared:\n  " + "\n  ".join(offenders)
+        )
