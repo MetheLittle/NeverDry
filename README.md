@@ -5,12 +5,43 @@
 [![Security](https://github.com/never-dry/NeverDry/actions/workflows/security.yml/badge.svg)](https://github.com/never-dry/NeverDry/actions/workflows/security.yml)
 [![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5)](https://github.com/hacs/integration)
 [![GitHub release](https://img.shields.io/github/v/release/never-dry/NeverDry)](https://github.com/never-dry/NeverDry/releases)
-[![Downloads](https://img.shields.io/github/downloads/never-dry/NeverDry/latest/total?color=41BDF5&label=downloads%20%28latest%29)](https://github.com/never-dry/NeverDry/releases)
+[![Downloads of the most downloaded release](https://img.shields.io/endpoint?url=https%3A%2F%2Fnever-dry.github.io%2FNeverDry%2Fbadges%2Fdownloads.json)](https://github.com/never-dry/NeverDry/releases)
+[![Downloads of the latest stable release](https://img.shields.io/github/downloads/never-dry/NeverDry/latest/total?color=41BDF5&label=downloads%20%28latest%20stable%29)](https://github.com/never-dry/NeverDry/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 [![HA Community](https://img.shields.io/badge/Home%20Assistant-Community%20thread-41BDF5?logo=home-assistant&logoColor=white)](https://community.home-assistant.io/t/neverdry-smart-irrigation-that-calculates-when-and-how-long-to-water-fao-56-water-balance-hacs/1013835)
-<!-- Active installs (Home Assistant analytics). Currently no data: `never_dry` is not yet listed
-     in analytics.home-assistant.io/custom_integrations.json (below HA's listing threshold).
-     Uncomment when it appears — the badge auto-populates:
+<!-- No installs badge here, and it is worth writing down why so nobody wires
+     one again. HACS publishes a `downloads` field per repository at
+     data-v2.hacs.xyz, and it looks like an install count until you check it:
+     for alandtse/tesla it reads 17709 while that repository's latest stable
+     release shows 18148 downloads on GitHub. It is the same quantity, taken
+     from a staler snapshot. For this repository it read 248 — v0.11.0's count
+     around 9 August — while the badge beside it was showing the live figure.
+     A second badge measuring the same thing, worse, under a name that claims
+     something else.
+
+          The two download badges answer different questions, and neither is a count
+     of people.
+
+     "Best release" is the most downloaded single release, which is the closest
+     honest proxy for reach: each person fetches a given release once, where the
+     sum across releases counts one long-standing user again at every update. No
+     badge service can compute a maximum over an array, so it is computed by
+     scripts/update_download_badges.py and published as a shields endpoint on
+     the Pages site (never-dry.github.io/NeverDry/badges/downloads.json). Its message carries the tag, so the figure cannot be read
+     as current for the version people install today.
+
+     "Latest stable" is the pace of the current version. It drops to zero the
+     day a version ships — it read 0 half an hour after 0.11.2 — and climbs as
+     people update.
+
+     Neither is installs. The one number that would be is the Home Assistant
+     analytics figure below, and it has no data yet.
+
+     Active installs (Home Assistant analytics) is the number that would actually
+     mean installs. There is no listing threshold — the feed publishes domains
+     with a single instance — so `never_dry` is simply absent: no instance with
+     custom-integration analytics enabled reports it yet. Uncomment when it
+     appears and the badge auto-populates:
 [![Active installs](https://img.shields.io/badge/dynamic/json?color=41BDF5&logo=home-assistant&label=active%20installs&suffix=%20installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/custom_integrations.json&query=$.never_dry.total)](https://analytics.home-assistant.io/custom_integrations.json)
 -->
 
@@ -394,6 +425,9 @@ Site exposure contributed by [philipgiuliani](https://github.com/philipgiuliani)
 ---
 
 ## Contributors
+
+Speak a language NeverDry does not? [`docs/translations.md`](docs/translations.md) lists what ships,
+who checked it, and how to add one.
 
 NeverDry is shaped by people who never pushed a commit as much as by people who
 did. A field report that explains *why* a valve times out is worth more than the
