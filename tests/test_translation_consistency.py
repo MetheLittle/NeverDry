@@ -290,3 +290,94 @@ def test_sectioned_fields_are_labelled_under_their_section():
                         )
 
     assert not errors, "Sectioned-form label inconsistencies:\n  " + "\n  ".join(errors)
+
+
+# ── Error codes must resolve in the flow that raises them ─────────────
+#
+# An error code is not text: Home Assistant looks it up under
+# ``<root>.error.<code>``, where the root is ``config`` for the setup wizard and
+# ``options`` for the Settings dialogs. A code with no entry there is not a
+# missing translation that falls back to English — the raw code is printed at
+# the user, which is what "flow_rate_required" looked like in the field.
+#
+# The two roots drifted because the delivery-mode checks lived only in the setup
+# step for a long time, so only ``config.error`` ever needed them. The moment
+# the same helper started serving the options steps too (GH #196), every code it
+# can raise had to resolve in both — and nothing was checking.
+
+_STRINGS = _COMPONENT / "strings.json"
+_IT_JSON = _COMPONENT / "translations" / "it.json"
+
+
+def _raised_error_codes() -> set[str]:
+    """Every error code ``config_flow.py`` can hand to a form."""
+    from never_dry import config_flow as cf
+
+    tree = ast.parse(_CONFIG_FLOW.read_text())
+    codes: set[str] = set()
+
+    for node in ast.walk(tree):
+        # _add_field_error(errors, FIELD, "code")
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_add_field_error"
+            and len(node.args) == 3
+            and isinstance(node.args[2], ast.Constant)
+        ):
+            codes.add(node.args[2].value)
+        # errors["base"] = "code" / errors[FIELD] = "code"
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
+            for target in node.targets:
+                if (
+                    isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "errors"
+                    and isinstance(node.value.value, str)
+                ):
+                    codes.add(node.value.value)
+        # errors={"base": "code"} passed straight to async_show_form
+        if isinstance(node, ast.keyword) and node.arg == "errors" and isinstance(node.value, ast.Dict):
+            for value in node.value.values:
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    codes.add(value.value)
+        # The ET-method validator returns its code.
+        if isinstance(node, ast.FunctionDef) and node.name == "_et_method_error":
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Return) and isinstance(inner.value, ast.Constant) and inner.value.value:
+                    codes.add(inner.value.value)
+
+    # The preset/override codes travel in a table rather than at the call site.
+    codes.update(pair[4] for pair in cf.PRESET_OVERRIDE_PAIRS)
+    return codes
+
+
+def test_every_raised_error_code_resolves_in_both_flows():
+    """A code with no entry is printed raw at the user, not translated late."""
+    codes = _raised_error_codes()
+    assert codes, "no error codes found — the extractor has drifted from the source"
+
+    missing: list[str] = []
+    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+        data = json.loads(path.read_text())
+        for root in ("config", "options"):
+            declared = data.get(root, {}).get("error", {})
+            missing += [f"{path.name}: {root}.error.{code}" for code in sorted(codes) if code not in declared]
+
+    assert not missing, "error codes with no entry to resolve to:\n  " + "\n  ".join(missing)
+
+
+def test_the_two_flows_declare_the_same_error_catalogue():
+    """One set of helpers serves both flows, so one catalogue serves both roots.
+
+    Divergence here is how a code ends up raisable somewhere it cannot be
+    read, which is invisible until a user is standing in front of it.
+    """
+    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+        data = json.loads(path.read_text())
+        config = set(data.get("config", {}).get("error", {}))
+        options = set(data.get("options", {}).get("error", {}))
+        assert config == options, (
+            f"{path.name}: config.error and options.error have drifted — "
+            f"only in config: {sorted(config - options)}; only in options: {sorted(options - config)}"
+        )

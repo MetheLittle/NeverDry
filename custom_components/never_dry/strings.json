@@ -273,7 +273,13 @@
     "error": {
       "efficiency_required": "Choose an efficiency: the system type is set to Custom, which takes its value from that field",
       "kc_required": "Choose a Kc: the plant family is set to Custom, which takes its value from that field",
-      "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field"
+      "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field",
+      "flow_rate_required": "Flow rate is required for estimated_flow delivery mode",
+      "flow_meter_required": "Flow meter sensor is required for flow_meter delivery mode",
+      "volume_entity_required": "Volume entity is required for volume_preset delivery mode",
+      "zone_already_exists": "A zone with this name already exists",
+      "too_many_zones": "Maximum number of zones reached (50)",
+      "zone_name_too_long": "Zone name is too long (max 64 characters)"
     },
     "abort": {
       "no_zones": "No zones configured"
