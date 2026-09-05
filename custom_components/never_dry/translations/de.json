@@ -25,7 +25,7 @@
           "d_max": "Obergenze des Defizit-Maßwert",
           "humidity_sensor": "Optional. Schaltet zusammen mit Windgeschwindigkeit und Sonnenstrahlung Penman-Monteith frei.",
           "wind_speed_sensor": "Optional. Schaltet zusammen mit Luftfeuchte und Sonnenstrahlung Penman-Monteith frei.",
-          "net_radiation_sensor": "Optional. Ein Pyranometer-Messwert in W/m². Zur Berechnung der Strahlungsbilanz für FAO-56, diese wird daher nicht extra erfragt.",
+          "net_radiation_sensor": "Optional. Ein Pyranometer-Messwert in W/m². Zur berechnung der Strahlungsbilanz für FAO-56, diese wird daher nicht extra erfragt.",
           "et_method": "Auf Automatisch lassen, es sei denn ein bestimmtes Modell soll explizit verwendet werden. Ein Modell deren nötige Sensoren nicht deklariert sind ist nicht möglich, und die Fehlermeldung weist darauf hin welcher Sensor fehlt. Das aktuell verwendete Modell wird im *Wasserbilanz-Modell*-Sensor im NeverDry Gerät angezeigt."
         }
       },
@@ -60,12 +60,12 @@
             }
           },
           "valve_and_pipe": {
-            "name": "Ventil und Rohrleitung",
+            "name": "Ventil und Rohreitung",
             "description": "Was wird zur Bewässerung genutzt: Das Ventil, wie wird die Bewässerungsmenge gemessen und welches Bewässerungssystem.",
             "data": {
               "valve": "Ventil-Schalter (optional)",
               "delivery_mode": "Wasserabgabe-Modus",
-              "flow_rate_lpm": "Geschätzte Durchflußmenge",
+              "flow_rate_lpm": "Bemessungs-Durchflußmenge",
               "flow_meter_sensor": "Durchflußmesser-Sensor – Summenzähler oder Durchflußmenge (nur für Ventil mit Durchflußsensor)",
               "volume_entity": "Zielvolumen-Entität (nur für Ventil mit Volumenvorgabe)",
               "system_type": "Beregnungsart",
@@ -76,8 +76,8 @@
               "valve": "Schalter-Entität die das Bewässerungsventil für diese Zone steuert. Leer lassen für Beobachtungs-Modus (kein Ventil)",
               "delivery_mode": "Wie das Ventil Wasser liefert. Geschätzter Durchfluß: Einfaches Ein-/Aus-Ventil, Dauer wird berechnet anhand der Durchflußmenge. Durchflußmesser: Ventil mit Durchfluß-Sensor, schließt beim erreichten Zielvolumen. Volumen-Vorgabe: Smartes Ventil mit Volumenziel, schließt sich dann selbst.",
               "flow_rate_lpm": "Die Summe aller Verbrauchswerte der in dieser Zone verwendeten Emitter – Sprinkler, Tropfer und Mikro-Sprüher – Angabe in Litern pro Stunde. Dieser Wert kann den Herstellerangaben des Emitters oder dem Bewässerungsplan entnommen werden; eine eigene Messung ist nicht nötig. Dieser Wert entspricht der zu liefernden Gesamt-Wassermenge für diese Bewässerungszone und ist zwingend erforderlich, da ohne diesen keine Bewässerungsdauer berechnet werden kann. Die tatsächliche Wassermenge der Zone wird im laufenden Betrieb gemessen; die Abweichung zwischen den beiden Werten sollte beobachtet werden.",
-              "flow_meter_sensor": "Beide Varianten sind geeignet. NeverDry unterscheidet sie anhand der Maßeinheit. Ein Summenzähler (L, m³) wird vor und nach der Bewässerung gelesen; die Differenz ergibt das gelieferte Volumen. Dies ist die genauere der beiden Methoden, da sie nicht von der Übermittlungsfrequenz abhängt. Alternativ wird der momentane Durchfluss (L/min, L/h, m³/h) über die Dauer der Bewässerung verwendet; hierbei bestimmt die Häufigkeit der Datenübermittlung durch das Ventil die Genauigkeit des Wertes. Erforderlich wenn der Bewässerungs-Modus Ventil mit Durchflussmesser verwendet wird.",
-              "volume_entity": "Zahlentität vom smarten Ventil, die ein Volumenziel in Litern bereit stellt. Erforderlich wenn der Bewässerungs-Modus smartes Ventil mit Volumenvorgabe verwendet wird.",
+              "flow_meter_sensor": "Beide Varianten sind geeignet. NeverDry unterscheidet sie anhand der Maßeinheit. Ein Summenzähler (L, m³) wird vor und nach der Bewässerung gelesen; die Differenz ergibt das gelieferte Volumen. Dies ist die genauere der beiden Methoden, da sie nicht von der Übermittlungsfrequenz abhängt. Alternativ wird der momentane Durchfluss (L/min, L/h, m³/h) über die Dauer der Bewässerung verwendet; hierbei bestimmt die Häufigkeit der Datenübermittlung durch das Ventil die Genauigkeit des Messwerts. Erforderlich wenn der Bewässerungs-Modus mit Durchflussmesser verwendet wird.",
+              "volume_entity": "Zahlentität vom smarten Ventil, die ein Volumenziel in Litern bereit stellt. Erforderlich wenn der Bewässerungs-Modus das Volumen des Ventils verwendet",
               "system_type": "Legt die Effizienz der Zone fest (Tropfbewässerung 0,92, Mikro-Sprinkler 0,80, Versenkregner 0,68, manuell 0,55). Benutzerdefiniert wählen, um unten einen eigenen Wert einzugeben.",
               "efficiency": "Wird nur verwendet, wenn die Effizienz benutzerdefiniert ist. Bei jeder anderen Einstellung wird dieses Feld ignoriert.",
               "delivery_timeout": "Maximale Wartezeit bei berechneter oder selbst schließender Bewässerung bevor das Ventil forciert geschlossen wird (Sicherheitsabschaltung)"
@@ -85,14 +85,14 @@
           },
           "scheduling": {
             "name": "Planung",
-            "description": "Wann wird bewässert: Nach Zeit, mit Defizitschwelle oder nur durch Aufruf.",
+            "description": "Wann wird bewässert: Mit Zeitschaltuhr, mit Defizitschwelle oder nur durch Aufruf.",
             "data": {
               "irrigation_mode": "Bewässerungs-Modus",
               "irrigation_time": "Tägliche Bewässerungszeit",
               "threshold": "Bewässerungsgrenzwert"
             },
             "data_description": {
-              "irrigation_time": "Tageszeit zu der NeverDry das Defizit prüft und, wenn dieser über dem Schwellenwert liegt, bewässert. Leer lassen, um die automatische Planung zu deaktivieren",
+              "irrigation_time": "Tageszeit zu der NeverDry das Defizit überprüft und, wenn er über dem Schwellenwert liegt, bewässert. Leer lassen, um den automatische Planung zu deaktivieren",
               "threshold": "Defizitwert; löst die automatische Bewässerung für diese Zone aus."
             }
           }
@@ -116,7 +116,7 @@
     "error": {
       "zone_name_too_long": "Zonen-Name zu lang (max. 64 Zeichen)",
       "too_many_zones": "Maximale Zonenanzahl erreicht (50)",
-      "flow_rate_required": "Die geschätzte Durchflußmenge muß angegeben werden: Der gewählte Bewässerungs-Modus berechnet daraus die Bewässerungsdauer.",
+      "flow_rate_required": "Die Bemessungs-Durchflußmenge muß angegeben werden: Der gewählte Bewässerungs-Modus berechnet daraus die Bewässerungsdauer.",
       "flow_meter_required": "Ein Durchflußmesser-Sensor muß angegeben werden – ein Summenzähler oder ein Durchflussmesser: Der gewählte Bewässerungs-Modus schließt das Ventil bei Erreichen des berechneten Volumen.",
       "volume_entity_required": "Eine Zielvolumen-Entität muß angegeben werden: Der gewählte Bewässerungs-Modus übernimmt vom Ventil das Volumen",
       "zone_already_exists": "Eine Zone mit diesem Namen existiert bereits",
@@ -196,9 +196,9 @@
             "data": {
               "valve": "Ventil-Schalter (optional)",
               "delivery_mode": "Wasserabgabe-Modus",
-              "flow_rate_lpm": "Geschätzte Durchflußmenge",
+              "flow_rate_lpm": "Bemessungs-Durchflußmenge",
               "flow_meter_sensor": "Durchflußmesser-Sensor – Summenzähler oder Durchflußmenge (nur für Ventil mit Durchflußsensor)",
-              "volume_entity": "Zielvolumen-Entität (nur für smartes Ventil mit Volumenvorgabe)",
+              "volume_entity": "Zielvolumen-Entität (nur für Smartes Ventil mit Volumenvorgabe)",
               "system_type": "Beregnungsart",
               "efficiency": "Benutzerdefinierte Effizienz",
               "delivery_timeout": "Sicherheitsabschaltung"
@@ -263,7 +263,7 @@
             "data": {
               "valve": "Ventil-Schalter (optional)",
               "delivery_mode": "Wasserabgabe-Modus",
-              "flow_rate_lpm": "Geschätzte Durchflußmenge",
+              "flow_rate_lpm": "Bemessungs-Durchflußmenge",
               "flow_meter_sensor": "Durchflußmesser-Sensor – Summenzähler oder Durchflußmenge (nur für Ventil mit Durchflußsensor)",
               "volume_entity": "Zielvolumen-Entität (nur für smartes Ventil mit Volumenvorgabe)",
               "system_type": "Beregnungsart",
@@ -303,7 +303,7 @@
       "microclimate_factor_required": "Wähle einen Mikroklimafaktor: Die Exposition ist auf benutzerdefiniert gesetzt, der Wert wird aus diesem Feld wird verwendet",
       "et_method_missing_sensors": "Dieses Modell benötigt Sensoren, welche nicht deklariert wurden. Die benötigten Sensoren auswählen oder das Modell auf Automatisch lassen.",
       "et_method_unknown": "Unbekanntes Evapotranspirations-Modell",
-      "flow_rate_required": "Die geschätzte Durchflußmenge muß angegeben werden: Der gewählte Bewässerungs-Modus berechnet daraus die Bewässerungsdauer.",
+      "flow_rate_required": "Die Bemessungs-Durchflußmenge muß angegeben werden: Der gewählte Bewässerungs-Modus berechnet daraus die Bewässerungsdauer.",
       "flow_meter_required": "Ein Durchflußmesser-Sensor muß angegeben werden – ein Summenzähler oder ein Durchflussmesser: Der gewählte Bewässerungs-Modus schließt das Ventil bei Erreichen des berechneten Volumen.",
       "volume_entity_required": "Eine Zielvolumen-Entität muß angegeben werden: Der gewählte Bewässerungs-Modus übernimmt vom Ventil das Volumen",
       "zone_already_exists": "Eine Zone mit diesem Namen existiert bereits",
@@ -387,12 +387,12 @@
         "state": {
           "et_simple": "Einfach (nur Temperatur)",
           "vwc_system": "Bodenfeuchte-Sensor",
-          "hargreaves": "Hargreaves-Samani (Tagesumfang)",
+          "hargreaves": "Hargreaves-Samani (Tagesschwankung)",
           "penman_monteith": "Penman-Monteith (FAO-56)"
         }
       },
       "model_input_derived_diurnal_range_c": {
-        "name": "Täglicher Temperaturbereich"
+        "name": "Tägliche Temperaturschwankung"
       },
       "model_input_derived_temp_max_c": {
         "name": "Tageshöchsttemperatur"
