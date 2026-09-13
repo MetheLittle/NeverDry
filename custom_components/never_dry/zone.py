@@ -183,12 +183,23 @@ class WaterCounters:
         """Add ``liters`` to every counter, rolling the yearly total on year change."""
         credited = round(liters, 1)
         self.last_volume_l = credited
-        self.session_water_l = credited
         self.total_water_l += credited
         if self.yearly_water_year != year:
             self.yearly_water_l = 0.0
             self.yearly_water_year = year
         self.yearly_water_l += credited
+
+    def end_session(self) -> None:
+        """Clear the running total for the session that just closed.
+
+        ``session_water_l`` answers "how much has this run delivered so far",
+        and once the run is over the honest answer is none: what it finally
+        delivered is ``last_volume_l``, which is a different question with its
+        own home. Leaving the running figure standing meant the card described
+        the previous irrigation under a label that says "session", with nothing
+        to say the run had ended.
+        """
+        self.session_water_l = 0.0
 
     def reset_yearly(self, *, year: int) -> None:
         """Clear the yearly total, preserving the lifetime one (user-invoked reset)."""
@@ -374,6 +385,7 @@ class Zone:
         """
         self.credit_delivery(delivery)
         self.counters.credit(delivery.liters_delivered, year=at.year)
+        self.counters.end_session()
         self.last_irrigated = at
         self.last_source = source
         self.last_duration_s = round(delivery.elapsed_s)
@@ -412,6 +424,7 @@ class Zone:
         # button the user just pressed would look broken.
         self.measured_deficit = None
         self.counters.credit(credited, year=at.year)
+        self.counters.end_session()
         self.last_irrigated = at
         self.last_source = source
         # Left alone when unknown rather than zeroed: the hose case has no

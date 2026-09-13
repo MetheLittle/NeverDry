@@ -1,7 +1,7 @@
 # Design — Water-Balance Reference Model
 
 **Status:** Draft (RFC)
-**Last updated:** 2026-07-23
+**Last updated:** 2026-09-09
 **Related:** #123, [Domain Object Model](design_domain_object_model.md), backlog AI-189 (bug), AI-174 (per-zone VWC RFC)
 
 ## Why this document exists
@@ -53,13 +53,29 @@ inert until a later phase wires today's `DrynessIndexSensor` ET/VWC fork onto it
 | **Rain** (→ `rain_delta`) | **System feed** | one sensor for all zones, applied to every zone's balance |
 | **Deficit** (`+ ET·Kc·Δt − rain − irrigation`) | **Zone** | authoritative state |
 | **Kc, threshold, area, valve, irrigation state** | **Zone** | — |
-| **VWC sensor + `field_capacity` + `root_depth`** | **Zone** | declared together on the zone; a site-level binding survives only where the migration has not reached |
+| **VWC sensor, system** (`vwc_sensor`, model params) | **System** | legacy. Drives the deficit in VWC mode, bypassing ET. Kept for installations the migration has not reached |
+| **VWC probe, per zone** (`vwc_sensor` on the zone) | **Zone** | shipped. Owns that zone's deficit once the zone declares the root depth to read it with; without it, publishes its reading beside the model's estimate and nothing more |
+| **`root_depth`, soil type** | **Zone** | declared on the zone. The soil type supplies `field_capacity`, so the root depth is the one number the user gives, and it is also the switch |
 
 So the only permanent system-level things are the two environmental **feeds**
-(temperature, rain). Everything else lives in the zone, the VWC model included:
-`vwc_sensor`, `field_capacity` and `root_depth` are declared on the zone, and a
-site-level binding survives only on installations the migration has not yet
-reached.
+(temperature, rain). Everything else lives in the zone, the VWC model included.
+
+The VWC row above was one line until 2026-09-09, reading "system-level until
+AI-174 lands". It had become false in one of its three parts and misleading in
+the other two, which is why it became three rows. A zone could bind its own
+probe, and that binding shipped without AI-174, because it gave the probe a role
+that did not require owning a deficit: characterising the soil, and revealing a
+hydraulic fault when water is delivered and the moisture does not move.
+
+On 2026-09-13 the model-level step landed too, and the row changed again.
+`field_capacity` and `root_depth` were described here as "not parameters at all,
+fixed at 0.30 / 0.30 in `const.py`, and the two numbers a per-zone probe would be
+best placed to establish". The first half is no longer true: the root depth is a
+zone field and the soil type is a dropdown that supplies the field capacity, so
+nothing runs on an unchosen constant any more. The second half still stands, and
+is the next thing worth building: the plateau a probe settles at after drainage
+*is* that soil's field capacity, so the measurement that could replace the
+declaration is already bound to the zone.
 
 ## Decisions
 
