@@ -232,6 +232,23 @@ class Zone:
     frame: ReferenceFrame = ReferenceFrame.ET
     deficit: Deficit = field(default=None)  # type: ignore[assignment]
 
+    #: The soil's own answer, when this zone has a probe that has been told what
+    #: to read its readings with. ``None`` means nobody measured, and the
+    #: estimate above answers for the zone.
+    #:
+    #: Separate from ``deficit`` rather than replacing it, because the estimate
+    #: must go on advancing underneath: it is the reserve the zone falls back on
+    #: the moment the probe stops being believed, and a reserve that started
+    #: rebuilding at that moment would begin at zero with the garden already dry.
+    #:
+    #: Everything that *acts* reads :attr:`acting_deficit`, never either of these
+    #: two directly. That is the whole point of the pair: the first version of
+    #: this had the dose reading the measurement and the trigger reading the
+    #: estimate, so a zone whose soil said thirty millimetres and whose weather
+    #: said two would never start, and one started by the weather would be dosed
+    #: by the soil.
+    measured_deficit: Deficit | None = None
+
     # ── Scheduling ──────────────────────────────────────────────────────────
     irrigation_mode: IrrigationMode = IrrigationMode.MANUAL
     irrigation_time: str | None = None
@@ -298,12 +315,17 @@ class Zone:
         """
         if self.efficiency <= 0:
             return 0.0
-        return self.deficit.as_liters(self.area_m2) / self.efficiency
+        return self.acting_deficit.as_liters(self.area_m2) / self.efficiency
+
+    @property
+    def acting_deficit(self) -> Deficit:
+        """The number this zone is acting on: the soil's when there is one, else the model's."""
+        return self.measured_deficit if self.measured_deficit is not None else self.deficit
 
     @property
     def needs_water(self) -> bool:
         """``True`` when the deficit has reached this zone's trigger threshold."""
-        return self.deficit.value_mm >= self.threshold_mm
+        return self.acting_deficit.value_mm >= self.threshold_mm
 
     def delivered_mm(self, liters: float) -> float:
         """Convert delivered litres into millimetres over this zone's area."""
@@ -314,8 +336,12 @@ class Zone:
     # ── The irrigation cycle ────────────────────────────────────────────────
 
     def begin_cycle(self) -> None:
-        """Open a cycle, snapshotting the deficit it starts from."""
-        self._cycle_baseline_mm = self.deficit.value_mm
+        """Open a cycle, snapshotting the deficit it starts from.
+
+        The acting one, so that the water delivered answers the same question
+        the decision to deliver it was answering.
+        """
+        self._cycle_baseline_mm = self.acting_deficit.value_mm
 
     def credit_delivery(self, delivery: Delivery) -> Deficit:
         """Credit delivered water against the deficit — *the* one formula.
@@ -326,9 +352,18 @@ class Zone:
         divergent copies in today's code are reconciled: the manual path used to
         subtract from the live value even mid-cycle.
         """
-        baseline = self._cycle_baseline_mm if self._cycle_baseline_mm is not None else self.deficit.value_mm
+        baseline = self._cycle_baseline_mm if self._cycle_baseline_mm is not None else self.acting_deficit.value_mm
         remaining = baseline - self.delivered_mm(delivery.liters_delivered)
         self.deficit = self.deficit.with_value(remaining).clamped()
+        # The measurement has not seen this water. A soil probe is stateless and
+        # only moves when it next reports, which on a battery device is minutes
+        # away: left standing, it would go on saying the zone is dry and, in
+        # reactive mode, ask for the same water again before the soil has had a
+        # chance to disagree. Withdrawing it here is the same rule the rest of
+        # the integration already follows -- a measurement that cannot have
+        # observed the event does not get to speak about it -- and the estimate,
+        # which *was* just credited, answers until a fresh reading arrives.
+        self.measured_deficit = None
         return self.deficit
 
     def settle(self, delivery: Delivery, *, source: str, at: datetime) -> Deficit:
@@ -371,6 +406,11 @@ class Zone:
         """
         credited = self.water_demand_l if credited_liters is None else credited_liters
         self.deficit = self.deficit.with_value(0.0).clamped()
+        # And the measurement with it, for the same reason a credited delivery
+        # withdraws it: the soil has not been read since the water arrived. Left
+        # standing it would win over the zero the moment anyone asked, and the
+        # button the user just pressed would look broken.
+        self.measured_deficit = None
         self.counters.credit(credited, year=at.year)
         self.last_irrigated = at
         self.last_source = source

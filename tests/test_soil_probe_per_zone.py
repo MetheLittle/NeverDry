@@ -500,3 +500,114 @@ def test_field_capacity_is_a_fraction_and_does_not():
     from never_dry.unit_convert import zone_input_to_metric
 
     assert zone_input_to_metric({CONF_ZONE_FIELD_CAPACITY: 0.25}, True)[CONF_ZONE_FIELD_CAPACITY] == 0.25
+
+
+class TestTheTriggerAndTheDoseAnswerTheSameQuestion:
+    """The defect the first version shipped with, caught before any beta.
+
+    The dose came from the entity property and the trigger from the domain
+    object, and only one of the two had been pointed at the measurement. A zone
+    whose soil said thirty millimetres and whose weather said two would never
+    have started; one started by the weather would have been dosed by the soil.
+    One number now, read through `acting_deficit`.
+    """
+
+    def _zone_with(self, hass_mock, *, estimate_mm, reading):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._zone.threshold_mm = 10.0
+        zone._zone_deficit = estimate_mm
+        zone._on_own_probe(_reading(reading))
+        return zone
+
+    def test_dry_soil_asks_for_water_though_the_weather_is_calm(self, hass_mock):
+        zone = self._zone_with(hass_mock, estimate_mm=2.0, reading="18.0")  # soil: 36 mm
+
+        assert zone.domain_zone.needs_water is True
+
+    def test_wet_soil_keeps_a_thirsty_estimate_quiet(self, hass_mock):
+        """The direction that matters most: not watering is the irreversible half."""
+        zone = self._zone_with(hass_mock, estimate_mm=30.0, reading="29.0")  # soil: 3 mm
+
+        assert zone.domain_zone.needs_water is False
+
+    def test_the_dose_is_taken_from_the_same_number(self, hass_mock):
+        zone = self._zone_with(hass_mock, estimate_mm=2.0, reading="18.0")
+
+        assert zone._zone.acting_deficit.value_mm == pytest.approx(36.0)
+        assert zone._zone.water_demand_l > zone._zone.deficit.as_liters(zone._zone.area_m2)
+
+
+class TestWaterTheSoilHasNotSeenYet:
+    """A stateless measurement does not fall when you water: it falls when it
+    next reports, and on a battery device that is minutes away.
+
+    Left standing it would go on saying the zone is dry and, in reactive mode,
+    ask for the same water again before the soil had a chance to disagree. The
+    rule applied is the one the rest of the integration already follows: a
+    measurement that cannot have observed the event does not get to speak
+    about it.
+    """
+
+    def _watered(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._zone.threshold_mm = 10.0
+        zone._zone_deficit = 12.0
+        zone._on_own_probe(_reading("18.0"))
+        assert zone.deficit_source == "zone_probe"
+        zone.credit_delivery(zone._zone.water_demand_l)
+        return zone
+
+    def test_a_delivery_withdraws_the_measurement(self, hass_mock):
+        assert self._watered(hass_mock)._zone.measured_deficit is None
+
+    def test_the_estimate_answers_until_a_fresh_reading_arrives(self, hass_mock):
+        zone = self._watered(hass_mock)
+
+        assert zone.deficit_source == "site_model"
+
+    def test_the_zone_does_not_immediately_ask_again(self, hass_mock):
+        """The re-irrigation loop this exists to prevent: with the measurement
+        left standing the trigger would fire on the very next broadcast, and the
+        only thing in its way is a ten-second limit on service calls."""
+        zone = self._watered(hass_mock)
+
+        assert zone.domain_zone.needs_water is False
+
+    def test_a_fresh_reading_gives_the_soil_its_voice_back(self, hass_mock):
+        zone = self._watered(hass_mock)
+
+        zone._on_own_probe(_reading("18.0"))
+
+        assert zone.deficit_source == "zone_probe"
+        assert zone.domain_zone.needs_water is True
+
+    def test_the_measurement_carries_the_frame_of_a_measurement(self, hass_mock):
+        """Not ET: one patch of soil, not comparable with a sibling's."""
+        from never_dry.water_balance_model import ReferenceFrame
+
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._on_own_probe(_reading("18.0"))
+
+        assert zone._zone.acting_deficit.frame is ReferenceFrame.VWC_PER_ZONE
+        assert zone._zone.deficit.frame is ReferenceFrame.ET
+
+    def test_marking_the_zone_irrigated_is_not_overruled_by_the_soil(self, hass_mock):
+        """The same rule at the other door, and this one has a button behind it.
+
+        `mark_irrigated` asserts an outcome rather than crediting an amount: the
+        user says the zone is full. A measurement taken before the water arrived
+        would have won over that zero the moment anyone asked, and the button
+        would have looked broken.
+        """
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._on_own_probe(_reading("18.0"))
+        assert zone._zone_deficit == pytest.approx(36.0)
+
+        zone.reset_deficit(source="manual")
+
+        assert zone._zone_deficit == 0.0
+        assert zone.deficit_source == "site_model"

@@ -98,6 +98,18 @@ So a probe has two roles, and the two boxes beside it decide which:
   a figure that carries the authority of a measurement always shows the half of
   it that was a declaration.
 
+**Where to put the probe.** About a third of the root depth down, and midway
+between two emitters. That is not fussiness: the reading is being taken to speak
+for the whole root zone, and a third of the way down is where it comes closest
+to doing so. Most of the water a plant takes up comes from the upper half of its
+roots, and a probe at the surface reads the layer that dries fastest while one
+at the bottom reads the layer that dries last.
+
+Declare the depth the **roots** reach, not the depth the probe sits at. The
+water has to refill the root zone, and a deficit computed over the top ten
+centimetres would have you watering little and often, which never reaches the
+lower roots and teaches the plant to stay shallow.
+
 **What to be careful about, if you fill them in.** A probe sits in one spot at
 one depth. If a zone mixes a ground cover and a shrub there is no single root
 depth that is right, and the number you pick moves both the dose and the timing

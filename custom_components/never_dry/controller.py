@@ -391,7 +391,7 @@ class IrrigationController:
             if zone is None:
                 return
             self._act_on(
-                self._scheduler.evaluate_scheduled(zone._zone, is_running=self._running),
+                self._scheduler.evaluate_scheduled(zone.domain_zone, is_running=self._running),
                 zone_name,
                 zone,
             )
@@ -406,7 +406,7 @@ class IrrigationController:
             if zone is None:
                 return
             decision = self._scheduler.evaluate_reactive(
-                zone._zone,
+                zone.domain_zone,
                 is_running=self._running,
                 # Asked, not stamped: the throttle is only spent on a call that
                 # actually goes ahead, which is what the old ordering achieved

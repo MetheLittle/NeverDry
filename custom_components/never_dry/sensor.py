@@ -2020,16 +2020,17 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
 
     @property
     def _zone_deficit(self) -> float:
-        """The number this zone acts on: the soil's when it is readable, else the model's.
+        """The number this zone acts on, from the one place that holds it.
 
-        The choice is made per reading rather than per configuration. There is
-        no probe *mode* to enter and leave, so a probe that goes quiet for an
-        afternoon and comes back costs nothing more than an afternoon on the
-        estimate, and one that dies costs nothing at all.
+        The choice between soil and estimate lives in the domain Zone, so that
+        the dose, the trigger and the published figure cannot answer different
+        questions. What lives here is only the part that needs a clock: whether
+        the measurement still speaks for the soil. Reading the value is also the
+        moment that is checked, because every decision in the integration goes
+        through this property and nothing guarantees it is preceded by a tick.
         """
-        if self._probe_drives and self._probe_implied_mm is not None and self._probe_is_fresh():
-            return self._probe_implied_mm
-        return self._zone.deficit.value_mm
+        self._review_probe_standing()
+        return self._zone.acting_deficit.value_mm
 
     @_zone_deficit.setter
     def _zone_deficit(self, value: float) -> None:
@@ -2039,6 +2040,30 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         # re-anchors the reserve on what the soil had just said, which is better
         # than letting it drift unobserved for a season.
         self._zone.deficit = self._zone.deficit.with_value(value)
+
+    @property
+    def domain_zone(self):
+        """The zone as the domain sees it, with its measurement's standing reviewed.
+
+        The controller reaches for this to decide, and the review has to happen
+        on the way rather than at a tick: nothing orders a tick's listeners, so a
+        decision could otherwise be taken on a measurement that a listener which
+        had not run yet was about to withdraw. Depending on registration order
+        for that would be a dependency nobody can see from either side.
+        """
+        self._review_probe_standing()
+        return self._zone
+
+    def _review_probe_standing(self) -> None:
+        """Withdraw the measurement when it can no longer speak for the soil.
+
+        Cheap enough to run on every read: a subtraction and a quantile over at
+        most forty numbers.
+        """
+        if not self._probe_drives:
+            return
+        if self._probe_implied_mm is None or not self._probe_is_fresh():
+            self._zone.measured_deficit = None
 
     def _warn_once_if_the_probe_went_quiet(self) -> None:
         """Say it in the log when a driving probe stops being believed, once.
@@ -2062,9 +2087,8 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
     @property
     def deficit_source(self) -> str:
         """Which of the two numbers is the one this zone is acting on."""
-        if self._probe_drives and self._probe_implied_mm is not None and self._probe_is_fresh():
-            return "zone_probe"
-        return "site_model"
+        self._review_probe_standing()
+        return "zone_probe" if self._zone.measured_deficit is not None else "site_model"
 
     def _probe_is_fresh(self) -> bool:
         """Whether the probe has spoken recently enough for its reading to stand.
@@ -2351,7 +2375,15 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._probe_silent_logged = False
 
         self._probe_vwc = vwc
-        self._probe_implied_mm = self._probe_model.step(VWCReading(vwc=vwc)).value_mm
+        measured = self._probe_model.step(VWCReading(vwc=vwc))
+        self._probe_implied_mm = measured.value_mm
+        if self._probe_drives:
+            # The whole value object, not just the number: it already carries
+            # VWC_PER_ZONE, which is the truthful frame for a measurement of one
+            # patch of soil and the one thing a hand-built Deficit here would get
+            # wrong. This is also what ends the wait after a delivery, because
+            # the reading that arrives now is the first that can have seen it.
+            self._zone.measured_deficit = measured
         if getattr(self, "hass", None):
             self.async_write_ha_state()
 
