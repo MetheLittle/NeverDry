@@ -31,7 +31,6 @@ from .const import (
     CONF_TEMP_MAX_SENSOR,
     CONF_TEMP_MIN_SENSOR,
     CONF_TEMP_SENSOR,
-    CONF_VWC_SENSOR,
     CONF_WIND_SPEED_SENSOR,
     CONF_ZONE_AREA,
     CONF_ZONE_DELIVERY_MODE,
@@ -172,12 +171,24 @@ def _et_method_field(current: dict | None = None) -> dict:
     the moment a sensor is picked in the same submission — and a user who cannot
     see Penman-Monteith has no way to learn which sensor unlocks it. The choice
     is validated on submit instead, and the error names the missing sensors.
+
+    Every method a *site* may choose, that is. The probe models are not among
+    them and never were offered as one for long: an entry that still stores one
+    opens on ``auto``, which is what the running model already degrades to.
     """
+    suggestion = _suggest(current, CONF_ET_METHOD)
+    stored = (suggestion.get("description") or {}).get("suggested_value")
+    if stored is not None and stored not in ET_METHOD_OPTIONS:
+        # Home Assistant renders a select whose value is not one of its options
+        # as an empty box, and an empty box submitted back changes the method
+        # without anyone choosing to. Saying `auto` here says out loud what the
+        # entry is already doing, instead of leaving a blank that means it.
+        suggestion = {"description": {"suggested_value": ET_METHOD_AUTO}}
     return {
         vol.Optional(
             CONF_ET_METHOD,
             default=DEFAULT_ET_METHOD,
-            **_suggest(current, CONF_ET_METHOD),
+            **suggestion,
         ): selector.SelectSelector(
             selector.SelectSelectorConfig(
                 # A list, not the tuple in const: Home Assistant validates this
@@ -207,6 +218,15 @@ def _et_method_error(user_input: dict) -> str | None:
     model = model_by_id(method)
     if model is None:
         return "et_method_unknown"
+    if not model.site_selectable:
+        # A probe model named as the site's. It reads the soil of one zone, so
+        # a site-level environment has nothing to give it however many sensors
+        # are declared: the way to choose it is to attach the probe to the zone
+        # that sits in that soil. Answering "sensors are missing" here sent the
+        # user looking for a binding that no form has offered since the probe
+        # moved onto the zone. Reachable from an entry stored before the option
+        # left the dropdown, or edited by hand.
+        return "et_method_zone_probe"
     if model.input_type not in RUNNABLE_INPUTS:
         # Written and tested, but nothing builds its input yet. It is not in the
         # dropdown either; this is the second lock, for an entry edited by hand
@@ -215,7 +235,6 @@ def _et_method_error(user_input: dict) -> str | None:
     env = Environment(
         temperature_sensor=user_input.get(CONF_TEMP_SENSOR) or "",
         rain_sensor=user_input.get(CONF_RAIN_SENSOR) or "",
-        soil_moisture_sensor=user_input.get(CONF_VWC_SENSOR),
         humidity_sensor=user_input.get(CONF_HUMIDITY_SENSOR),
         wind_speed_sensor=user_input.get(CONF_WIND_SPEED_SENSOR),
         net_radiation_sensor=user_input.get(CONF_NET_RADIATION_SENSOR),
@@ -1044,12 +1063,19 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                 user_input = _sensors_input_to_metric(user_input, imperial)
                 new_data = {**self._config_entry.data, **user_input}
                 # An optional entity field cleared by the user is simply absent
-                # from user_input — the merge above would silently keep the old
-                # value, so drop it explicitly. Every optional binding needs
-                # this, not just the probe: a method stays available on a sensor
-                # the user believes they removed, which is worse than the method
-                # disappearing, because the number keeps looking authoritative.
-                for key in (CONF_VWC_SENSOR, *(k for k, _ in _EXTRA_SENSORS)):
+                # from user_input, and the merge above would silently keep the
+                # old value, so drop it explicitly: a method stays available on
+                # a sensor the user believes they removed, which is worse than
+                # the method disappearing, because the number keeps looking
+                # authoritative.
+                #
+                # Only fields this form actually renders. The site probe is not
+                # one of them any more, and an absent key that was never on
+                # screen is not a cleared box: leaving it here deleted the
+                # legacy binding on every save, which on a multi-zone entry
+                # meant losing the probe before the repair could ask which zone
+                # it belongs to, and the repair then vanished unanswered.
+                for key in (k for k, _ in _EXTRA_SENSORS):
                     if key not in user_input:
                         new_data.pop(key, None)
                 if new_data != dict(self._config_entry.data):

@@ -34,11 +34,15 @@ CONF_ET_METHOD = "et_method"
 ET_METHOD_AUTO = "auto"
 DEFAULT_ET_METHOD = ET_METHOD_AUTO
 
-# The dropdown's options, richest first. Only the methods the integration can
-# actually RUN: Hargreaves-Samani and Penman-Monteith are written and tested but
-# nothing yet builds the input they read, so offering them would let a user pick
-# an option that raises on its first reading. They join this list in the same
-# change that feeds them, not before.
+# The dropdown's options, richest first: the methods a *site* may choose, which
+# is to say the model its zones run on when they have no probe of their own. A
+# zone that declares a soil probe never reads this, it runs on the measurement.
+#
+# Two exclusions, and they are not the same kind. A method whose input the host
+# cannot build yet would raise on its first reading, so it joins this list in
+# the same change that feeds it, not before. A method that is not a site-wide
+# choice at all is excluded for good: the probe models read the soil of one
+# zone, and the way to pick one is to attach a probe to that zone.
 #
 # Duplicated from ``water_balance_model`` on purpose: the form must offer these
 # without importing the model module, and a static list is what the translation
@@ -46,7 +50,6 @@ DEFAULT_ET_METHOD = ET_METHOD_AUTO
 # the two agree, so the mirror cannot drift.
 ET_METHOD_OPTIONS = (
     ET_METHOD_AUTO,
-    "vwc_system",
     "penman_monteith",
     "hargreaves",
     "et_simple",

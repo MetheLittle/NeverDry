@@ -124,7 +124,8 @@
       "kc_required": "Inserisci un Kc: la famiglia di piante è impostata su Personalizzato, che prende il valore da quel campo",
       "microclimate_factor_required": "Inserisci un fattore microclima: l'esposizione è impostata su Personalizzato, che prende il valore da quel campo",
       "et_method_missing_sensors": "Questo metodo richiede sensori che l'installazione non ha dichiarato. Indica i sensori richiesti, oppure lascia il metodo su Automatico.",
-      "et_method_unknown": "Metodo di evapotraspirazione sconosciuto."
+      "et_method_unknown": "Metodo di evapotraspirazione sconosciuto.",
+      "et_method_zone_probe": "Una sonda di umidità del suolo appartiene a una zona, non all'intero impianto. Impostala nelle opzioni di quella zona; il metodo scelto qui vale per le zone che non hanno una sonda propria."
     },
     "abort": {
       "already_configured": "NeverDry è già configurato"
@@ -303,6 +304,7 @@
       "microclimate_factor_required": "Inserisci un fattore microclima: l'esposizione è impostata su Personalizzato, che prende il valore da quel campo",
       "et_method_missing_sensors": "Questo metodo richiede sensori che l'installazione non ha dichiarato. Indica i sensori richiesti, oppure lascia il metodo su Automatico.",
       "et_method_unknown": "Metodo di evapotraspirazione sconosciuto.",
+      "et_method_zone_probe": "Una sonda di umidità del suolo appartiene a una zona, non all'intero impianto. Impostala nelle opzioni di quella zona; il metodo scelto qui vale per le zone che non hanno una sonda propria.",
       "flow_rate_required": "Serve la portata di progetto: la modalità di erogazione scelta ricava da quella la durata dell'irrigazione.",
       "flow_meter_required": "Serve il sensore di erogazione — un contatore cumulativo o una portata: la modalità scelta chiude la valvola al volume misurato.",
       "volume_entity_required": "Serve l'entità target del volume: la modalità scelta affida il dosaggio alla valvola stessa.",
@@ -375,8 +377,7 @@
         "auto": "Automatico — il metodo migliore che i miei sensori permettono",
         "et_simple": "Semplice (solo temperatura)",
         "hargreaves": "Hargreaves-Samani (temperatura max/min giornaliera)",
-        "penman_monteith": "Penman-Monteith (FAO-56, meteo completo)",
-        "vwc_system": "Sonda di umidità del suolo"
+        "penman_monteith": "Penman-Monteith (FAO-56, meteo completo)"
       }
     }
   },

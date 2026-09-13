@@ -124,7 +124,8 @@
       "kc_required": "Choose a Kc: the plant family is set to Custom, which takes its value from that field",
       "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field",
       "et_method_missing_sensors": "That method needs sensors this installation has not declared. Pick the sensors it requires, or leave the method on Automatic.",
-      "et_method_unknown": "Unknown evapotranspiration method."
+      "et_method_unknown": "Unknown evapotranspiration method.",
+      "et_method_zone_probe": "A soil moisture probe belongs to a zone, not to the whole installation. Set it in that zone's options; the method here is the one that zones without a probe of their own run on."
     },
     "abort": {
       "already_configured": "NeverDry is already configured"
@@ -303,6 +304,7 @@
       "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field",
       "et_method_missing_sensors": "That method needs sensors this installation has not declared. Pick the sensors it requires, or leave the method on Automatic.",
       "et_method_unknown": "Unknown evapotranspiration method.",
+      "et_method_zone_probe": "A soil moisture probe belongs to a zone, not to the whole installation. Set it in that zone's options; the method here is the one that zones without a probe of their own run on.",
       "flow_rate_required": "The design flow rate is needed: the delivery mode you chose works the watering duration out from it.",
       "flow_meter_required": "A delivery measurement sensor is needed — a cumulative counter or a flow rate: the delivery mode you chose closes the valve at the measured volume.",
       "volume_entity_required": "A volume target entity is needed: the delivery mode you chose leaves the dosing to the valve itself.",
@@ -375,8 +377,7 @@
         "auto": "Automatic — the best method my sensors support",
         "et_simple": "Simple (temperature only)",
         "hargreaves": "Hargreaves-Samani (daily max/min temperature)",
-        "penman_monteith": "Penman-Monteith (FAO-56, full weather)",
-        "vwc_system": "Soil moisture probe"
+        "penman_monteith": "Penman-Monteith (FAO-56, full weather)"
       }
     }
   },

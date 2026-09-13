@@ -124,7 +124,8 @@
       "kc_required": "Wähle einen Kc: Die Pflanzenfamilie ist auf benutzerdefiniert gesetzt, der Wert aus diesem Feld wird verwendet",
       "microclimate_factor_required": "Wähle einen Mikroklimafaktor: Die Exposition ist auf benutzerdefiniert gesetzt, der Wert wird aus diesem Feld wird verwendet",
       "et_method_missing_sensors": "Dieses Modell benötigt Sensoren, welche nicht deklariert wurden. Die benötigten Sensoren auswählen oder das Modell auf Automatisch lassen.",
-      "et_method_unknown": "Unbekanntes Evapotranspirations-Modell"
+      "et_method_unknown": "Unbekanntes Evapotranspirations-Modell",
+      "et_method_zone_probe": "Ein Bodenfeuchte-Sensor gehört zu einer Zone, nicht zur gesamten Installation. Den Sensor in den Optionen der betreffenden Zone festlegen; das Modell hier gilt für Zonen ohne eigenen Sensor."
     },
     "abort": {
       "already_configured": "NeverDry ist bereits konfiguriert"
@@ -303,6 +304,7 @@
       "microclimate_factor_required": "Wähle einen Mikroklimafaktor: Die Exposition ist auf benutzerdefiniert gesetzt, der Wert wird aus diesem Feld wird verwendet",
       "et_method_missing_sensors": "Dieses Modell benötigt Sensoren, welche nicht deklariert wurden. Die benötigten Sensoren auswählen oder das Modell auf Automatisch lassen.",
       "et_method_unknown": "Unbekanntes Evapotranspirations-Modell",
+      "et_method_zone_probe": "Ein Bodenfeuchte-Sensor gehört zu einer Zone, nicht zur gesamten Installation. Den Sensor in den Optionen der betreffenden Zone festlegen; das Modell hier gilt für Zonen ohne eigenen Sensor.",
       "flow_rate_required": "Die Bemessungs-Durchflußmenge muß angegeben werden: Der gewählte Bewässerungs-Modus berechnet daraus die Bewässerungsdauer.",
       "flow_meter_required": "Ein Durchflußmesser-Sensor muß angegeben werden – ein Summenzähler oder ein Durchflussmesser: Der gewählte Bewässerungs-Modus schließt das Ventil bei Erreichen des berechneten Volumen.",
       "volume_entity_required": "Eine Zielvolumen-Entität muß angegeben werden: Der gewählte Bewässerungs-Modus übernimmt vom Ventil das Volumen",
@@ -375,8 +377,7 @@
         "auto": "Automatisch — das beste Modell für die verfügbaren Sensoren",
         "et_simple": "Einfach (nur Temperatur)",
         "hargreaves": "Hargreaves-Samani (tägliche max./min. Temperatur)",
-        "penman_monteith": "Penman-Monteith (FAO-56, alle Wetter Sensoren)",
-        "vwc_system": "Bodenfeuchte-Sensor"
+        "penman_monteith": "Penman-Monteith (FAO-56, alle Wetter Sensoren)"
       }
     }
   },

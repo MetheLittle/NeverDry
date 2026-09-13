@@ -341,6 +341,17 @@ class WaterBalanceModel(abc.ABC):
     #: present and simply zero when not, so it never makes a model unavailable.
     required_sensors: ClassVar[frozenset[SensorKind]]
 
+    #: Whether a *site* may name this method in its own configuration. False
+    #: for the probe models: a probe measures the soil of one single zone, so it
+    #: is chosen by attaching it to that zone, not by naming a method for the
+    #: whole installation.
+    #:
+    #: It governs what the form offers and accepts, and nothing else. What the
+    #: automatic choice may *resolve* to is a separate question, answered by
+    #: ``models_offered_by``, and the two differ on purpose for installations
+    #: whose probe is still bound at site level.
+    site_selectable: ClassVar[bool] = True
+
     def __init__(self, *, d_max: float = DEFAULT_D_MAX, initial_mm: float = 0.0, source: str | None = None) -> None:
         """Initialise the model at ``initial_mm`` (default 0 — reference model D4)."""
         self._d_max = d_max
@@ -714,6 +725,12 @@ class VWCSystemModel(WaterBalanceModel):
 
     is_stateful: ClassVar[bool] = False
 
+    #: Not a site-wide choice. The soil this reads belongs to one zone, and the
+    #: zone is where the probe is declared; a site that named this method would
+    #: be asking for a measurement of soil the site does not have. Inherited by
+    #: :class:`VWCPerZoneModel`, which is chosen by the zone and never offered.
+    site_selectable: ClassVar[bool] = False
+
     def __init__(
         self,
         *,
@@ -1058,6 +1075,13 @@ def models_offered_by(env) -> tuple[type[WaterBalanceModel], ...]:
     be able to build the model's input. The second is what stops a site that
     declares humidity, wind and radiation from being handed Penman-Monteith by
     the automatic choice and crashing on its first reading.
+
+    Deliberately not filtered by ``site_selectable``. That flag governs what a
+    site may *name*; this is what a site may *run*, and the two differ for one
+    case that matters: an installation whose probe is still bound at site level
+    has been running on it, and must go on running on it until the migration or
+    the repair moves the binding onto a zone. Excluding it here would move such
+    a garden onto an ET estimate at the next restart, silently.
     """
     return tuple(
         model
