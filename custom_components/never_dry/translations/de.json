@@ -608,31 +608,31 @@
   },
   "common": {
     "notification_command_failed_title": "Ventilbefehl fehlgeschlagen",
-    "notification_command_failed_body": "Zone '{zone}': {operation} fehlgeschlagen ({error_detail}).",
+    "notification_command_failed_body": "Zone {zone}: {operation} fehlgeschlagen ({error_detail}).",
     "notification_unreachable_passive_title": "Ventil nicht erreichbar",
-    "notification_unreachable_passive_body": "Das Ventil der Zone '{zone}' ist seit {duration} nicht verfügbar.",
+    "notification_unreachable_passive_body": "Das Ventil der Zone {zone} ist seit {duration} nicht verfügbar.",
     "notification_unreachable_at_irrigation_title": "Ventil zum Zeitpunkt der Bewässerung nicht erreichbar",
-    "notification_unreachable_at_irrigation_body": "Die Bewässerung der Zone '{zone}' konnte nicht gestartet werden: Ventil nicht verfügbar ({reason}). Vor einem neuen Versuch die Ventilbatterie und das Zigbee-Netz überprüfen.",
+    "notification_unreachable_at_irrigation_body": "Die Bewässerung der Zone {zone} konnte nicht gestartet werden: Ventil nicht verfügbar ({reason}). Vor einem neuen Versuch die Ventilbatterie und das Zigbee-Netz überprüfen.",
     "notification_flow_meter_dead_title": "Keine Rückmeldung vom Durchflussmesser",
-    "notification_flow_meter_dead_body": "Keine Rückmeldung ({detail}) des Durchflussmessers der Zone '{zone}'. Die Bewässerung erfolgte mit der Soll-Durchflussrate anstatt übersprungen zu werden. Das Volumen wurde daher geschätzt und nicht gemessen. Prüfe die Durchflussmesser-Entität: Ein stummer Durchflussmesser ist wahrscheinlicher als ein wasserfreies Rohr.",
+    "notification_flow_meter_dead_body": "Keine Rückmeldung ({detail}) des Durchflussmessers der Zone {zone}. Die Bewässerung erfolgte mit der Soll-Durchflussrate anstatt übersprungen zu werden. Das Volumen wurde daher geschätzt und nicht gemessen. Prüfe die Durchflussmesser-Entität: Ein stummer Durchflussmesser ist wahrscheinlicher als ein wasserfreies Rohr.",
     "notification_delivery_uncredited_title": "Abgegebene Wassermenge konnte nicht angerechnet werden",
-    "notification_delivery_uncredited_body": "Die Bewässerungsmenge der Zone '{zone}' konnte nicht gemessen werden ({detail}).Die Zone hat keine Soll-Durchflussrate zur Schätzung, das Defizit bleibt daher unverändert und die Zone wird im nächsten Zyklus erneut bewässert. Trage die Soll-Durchflussrate für die Zone ein oder bringe den Durchflussmesser in Ordnung.",
+    "notification_delivery_uncredited_body": "Die Bewässerungsmenge der Zone {zone} konnte nicht gemessen werden ({detail}).Die Zone hat keine Soll-Durchflussrate zur Schätzung, das Defizit bleibt daher unverändert und die Zone wird im nächsten Zyklus erneut bewässert. Trage die Soll-Durchflussrate für die Zone ein oder bringe den Durchflussmesser in Ordnung.",
     "notification_stuck_open_title": "Ventil offen: Hauptwasserhahn schließen",
-    "notification_stuck_open_body": "Das Ventil der Zone '{zone}' meldet AUS, es fließt aber weiterhin Wasser ({flow}). Die Integration hat bereits eine Wiederherstellung versucht und für alle anderen Zonen einen Not-Aus ausgelöst. **Schließe jetzt den Hauptwasserhahn von Hand** und überprüfe das betroffene Ventil, bevor die Bewässerung fortgesetzt wird.",
+    "notification_stuck_open_body": "Das Ventil der Zone {zone} meldet AUS, es fließt aber weiterhin Wasser ({flow}). Die Integration hat bereits eine Wiederherstellung versucht und für alle anderen Zonen einen Not-Aus ausgelöst. **Schließe jetzt den Hauptwasserhahn von Hand** und überprüfe das betroffene Ventil, bevor die Bewässerung fortgesetzt wird.",
     "notification_leak_detected_title": "Undichtigkeit erkannt",
     "notification_leak_detected_body": "Durchfluss erkannt, obwohl alle Ventile geschlossen sind. Letzter Messwert: {flow}.",
     "notification_zone_disabled_title": "Zone deaktiviert",
-    "notification_zone_disabled_body": "Die Zone '{zone}' wurde nach {failures} aufeinanderfolgenden Fehlern automatisch deaktiviert.",
+    "notification_zone_disabled_body": "Die Zone {zone} wurde nach {failures} aufeinanderfolgenden Fehlern automatisch deaktiviert.",
     "notification_battery_low_title": "Niedriger Batteriestand",
     "notification_battery_low_body": "Der Batteriestand von {sensor_name} liegt bei {percent}%.",
     "notification_irrigation_ineffective_title": "Bewässerung scheint ineffektiv",
-    "notification_irrigation_ineffective_body": "Zone '{zone}': Die Bodenfeuchte ist nach der letzten Bewässerung nicht gestiegen.",
+    "notification_irrigation_ineffective_body": "Zone {zone}: Die Bodenfeuchte ist nach der letzten Bewässerung nicht gestiegen.",
     "notification_model_drift_title": "Modellabweichung erkannt",
-    "notification_model_drift_body": "Zone '{zone}': Die Korrelation zwischen Feuchtigkeit und Modell ist auf {correlation} gefallen.",
+    "notification_model_drift_body": "Zone {zone}: Die Korrelation zwischen Feuchtigkeit und Modell ist auf {correlation} gefallen.",
     "notification_water_me_now_title": "Manuelle Bewässerung empfohlen",
-    "notification_water_me_now_body": "Zone '{zone}': Defizit {deficit} über dem Schwellenwert; von Hand bewässern.",
+    "notification_water_me_now_body": "Zone {zone}: Defizit {deficit} über dem Schwellenwert; von Hand bewässern.",
     "notification_watchdog_triggered_title": "Ventil vom Sicherheits-Watchdog zwangsweise geschlossen",
-    "notification_watchdog_triggered_body": "Das Ventil der Zone '{zone}' ist länger als {duration_min} Min. geöffnet, ohne einen Schließbefehl erhalten zu haben. NeverDry hat es aus Sicherheitsgründen zwangsweise geschlossen. Prüfe, ob die Automatisierung oder die Wasserabgabe korrekt funktioniert."
+    "notification_watchdog_triggered_body": "Das Ventil der Zone {zone} ist länger als {duration_min} Min. geöffnet, ohne einen Schließbefehl erhalten zu haben. NeverDry hat es aus Sicherheitsgründen zwangsweise geschlossen. Prüfe, ob die Automatisierung oder die Wasserabgabe korrekt funktioniert."
   },
   "issues": {
     "soil_probe_needs_a_zone": {
@@ -641,7 +641,7 @@
         "step": {
           "confirm": {
             "title": "In welcher Zone befindet sich der Bodenfeuchte-Sensor?",
-            "description": "Der Bodenfeuchte-Sensor '{Sonde}' ist global deklariert, daher wird dieser derzeit von allen Zonen gelesen. Ein Sensor misst an einer einzigen Stelle Erde, mit der Art von Bepflanzung in der dieser steckt und deren Bewässerungsverlauf – der Wert ist nicht auf eine unabhängig davon bewässerte Zone übertragbar. \n\nTeile NeverDry mit, in welcher Zone dieser steckt. In der Zwischenzeit hat sich nichts geändert: Die Zonen verhalten sich genau wie zuvor und bleiben unverändert, bis eine Rückmeldung erfolgt ist.",
+            "description": "Der Bodenfeuchte-Sensor `{probe}` ist global deklariert, daher wird dieser derzeit von allen Zonen gelesen. Ein Sensor misst an einer einzigen Stelle Erde, mit der Art von Bepflanzung in der dieser steckt und deren Bewässerungsverlauf – der Wert ist nicht auf eine unabhängig davon bewässerte Zone übertragbar. \n\nTeile NeverDry mit, in welcher Zone dieser steckt. In der Zwischenzeit hat sich nichts geändert: Die Zonen verhalten sich genau wie zuvor und bleiben unverändert, bis eine Rückmeldung erfolgt ist.",
             "data": {
               "zone": "In welcher Zone befindet sich der Bodenfeuchte-Sensor?"
             },
