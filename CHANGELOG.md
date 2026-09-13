@@ -12,6 +12,20 @@ entry below links the design note that explains it properly — this is the summ
 not the argument.
 
 ### Added
+- **A zone can water by what its soil measures.** Give a zone's probe the depth
+  its roots reach and that zone stops estimating its deficit and starts reading
+  it. The weather model keeps running underneath the whole time, so a probe that
+  goes quiet costs an afternoon on the estimate rather than a season: a reading
+  older than that probe's own usual rhythm is set aside and the zone falls back,
+  with a line in the log. The depth is the one number no table holds, because a
+  lawn, a hedge and a pot differ by a factor of four on the same ground.
+  ([#234](https://github.com/never-dry/NeverDry/issues/234))
+- **Soil type as a choice rather than a number.** Sandy, loam, clay, or automatic
+  for a middle soil, and it supplies the field capacity the probe's reading is
+  measured against. Left on automatic the form tells you which soil it is
+  assuming, because a default nobody is told about is a hardcoded constant with a
+  dropdown in front of it. *Custom* is there for anyone who has measured their
+  own.
 - **Four ways to compute the water balance, and the site picks one.**
   Temperature-only, Hargreaves, Penman-Monteith, or a soil probe. *Automatic*
   takes the best your sensors support and says which one is running, because the
@@ -30,6 +44,17 @@ not the argument.
   the ones the running method actually computes appear.
 
 ### Changed
+- **The zone card speaks the language of whoever is looking at it.** About half
+  its labels used to be taken from the entity names, which Home Assistant
+  resolves once in the *server's* language: a household whose frontend was in
+  German saw German headings wrapped around Italian labels, and no translation
+  could have fixed it. Four cells were labelled with the zone's own name, and two
+  different quantities, water delivered and rain, were both called *Water*.
+- **Italian, read back against the running product rather than the file.** Around
+  seventy strings. A valve that is not answering had three different names; two
+  valve states had collapsed into one, so a valve that had never spoken and a
+  valve that had stopped answering read alike. Two of those defects were in the
+  English source and are fixed there too.
 - **The soil probe belongs to a zone, not to the installation.** A probe measures
   one patch of soil with one planting above it; declared once for everything it
   drove zones it knows nothing about. A zone that has one measures instead of
@@ -87,6 +112,17 @@ not the argument.
   meter had stopped answering.
 
 ### Fixed
+- **The soil-probe method could not be chosen by anyone**
+  ([#234](https://github.com/never-dry/NeverDry/issues/234)). Picking it answered
+  that sensors were missing, and no sensor you could declare would have satisfied
+  it: the check asked for a probe bound to the installation, and the probe moved
+  onto the zone several releases ago. The option is gone from the site menu,
+  which now describes the model your zones run on when they have no probe of
+  their own, and the error names the zone setting instead.
+- **Saving the model parameters no longer deletes an old site-wide probe.** On an
+  installation still waiting to be asked which zone its probe belongs to, opening
+  that form and pressing save lost the probe, and the question then disappeared
+  unanswered.
 - **A flow-metered valve no longer times out on a coarse counter** ([#173]). The
   verification window was a fixed 10 s, but a counter cannot move before its
   resolution divided by the flow rate — 50 s in the original report, around 60 s
