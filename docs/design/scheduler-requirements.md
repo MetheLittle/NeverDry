@@ -22,6 +22,30 @@ it deliberately does not implement a queue because a queue has memory of what is
 waiting. So the object is half built, and every request below runs into the
 missing half.
 
+## What is already built, and what is not
+
+This is not a green field, and the distinction matters for what the discussion
+is for. Everything **under** a run is in place and in production:
+
+- a `Scheduler` with a decision vocabulary already in use, `Decision`, `Trigger`
+  and `SkipReason`, so a refusal has a reason rather than a silence;
+- a domain `Zone` that owns its deficit and answers `needs_water` from the one
+  number it is acting on, whether that came from the weather model or from the
+  soil itself;
+- a delivery contract: a run has a defined end and has to show evidence that
+  water moved, with the valve state machine, the operator, the watchdog and the
+  reachability checks underneath it;
+- the water balance itself, four methods deep, now including a zone that reads
+  its own probe.
+
+What is missing is the layer **above** a run: ordering, waiting, preconditions,
+and stopping something already under way. That layer has no home today, which is
+why six requests that each need a piece of it have all stalled.
+
+So the discussion is not about where to start. It is about settling what that
+layer has to do, in the words of the people who need it, so it can be **wired**
+rather than invented.
+
 ## What it does today
 
 - **Reactive mode**: when a zone's deficit crosses its threshold, it waters. The
@@ -108,5 +132,8 @@ start earlier for the same finish. A well gate and a master pump are both
 preconditions on a run but at different scopes. An interruption for rain and a
 skip for rain read alike and are not the same mechanism.
 
-Those are questions for the people who asked, and the discussion linked from this
-document is where they are put.
+Those are questions for the people who asked, and they are put to them in
+**[discussion #239](https://github.com/never-dry/NeverDry/discussions/239)**,
+which stays open. Anything decided there comes back here as an edit, with the
+reasoning, so this file stops being a collection and becomes a design only when
+somebody has actually agreed to it.
