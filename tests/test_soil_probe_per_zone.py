@@ -23,9 +23,13 @@ from never_dry.const import (
     CONF_ZONE_FIELD_CAPACITY,
     CONF_ZONE_NAME,
     CONF_ZONE_ROOT_DEPTH,
+    CONF_ZONE_SOIL_TYPE,
     CONF_ZONE_VWC_SENSOR,
     CONF_ZONES,
     CONFIG_VERSION,
+    SOIL_TYPE_CLAY,
+    SOIL_TYPE_CUSTOM,
+    SOIL_TYPE_SANDY,
 )
 from never_dry.sensor import DrynessIndexSensor, IrrigationZoneSensor
 
@@ -36,12 +40,21 @@ def _zone(hass, dryness, **cfg):
     return IrrigationZoneSensor(hass, {CONF_ZONE_NAME: "Orto", CONF_ZONE_AREA: 20.0, **cfg}, dryness)
 
 
-#: A zone whose probe has been given the two numbers it is read with.
+#: A zone whose probe has been told what to read its readings with. The soil is
+#: named rather than left automatic so that the arithmetic in these tests stays
+#: legible: 0.30 field capacity, 0.30 m of roots, and a reading of 18 % gives 36
+#: mm. The automatic soil has its own tests below.
 DRIVEN = {
     CONF_ZONE_VWC_SENSOR: "sensor.orto_soil",
     CONF_ZONE_ROOT_DEPTH: 0.30,
+    CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
     CONF_ZONE_FIELD_CAPACITY: 0.30,
 }
+
+
+def _zone_of(hass, dryness, **cfg):
+    """A zone with an arbitrary ground configuration."""
+    return IrrigationZoneSensor(hass, {CONF_ZONE_NAME: "Orto", CONF_ZONE_AREA: 20.0, **cfg}, dryness)
 
 
 def _reading(value: str):
@@ -452,26 +465,32 @@ class TestWhatTheFormSaysAboutTheProbesRole:
     weather.
     """
 
-    def test_a_probe_without_its_numbers_is_told_it_will_not_drive(self):
+    def test_a_probe_without_a_root_depth_is_told_it_will_not_drive(self):
         from never_dry.config_flow import _probe_role_warnings
 
         warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil"})
 
         assert len(warnings) == 1
         assert "will not set" in warnings[0]
-        assert "root depth and field capacity" in warnings[0]
+        assert "root depth" in warnings[0]
 
-    def test_half_the_pair_names_the_half_that_is_missing(self):
+    def test_a_named_soil_and_a_depth_say_nothing_because_the_choice_was_made(self):
+        from never_dry.config_flow import _probe_role_warnings
+
+        assert _probe_role_warnings(dict(DRIVEN)) == []
+
+    def test_an_assumed_soil_is_named_rather_than_passed_over(self):
+        """The price of the automatic entry, and the condition that makes it fair.
+
+        A default nobody is told about is the hardcoded constant this replaced,
+        with a dropdown standing in front of it.
+        """
         from never_dry.config_flow import _probe_role_warnings
 
         warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil", CONF_ZONE_ROOT_DEPTH: 0.3})
 
-        assert "field capacity is missing" in warnings[0]
-
-    def test_the_complete_pair_says_nothing_because_the_choice_was_made(self):
-        from never_dry.config_flow import _probe_role_warnings
-
-        assert _probe_role_warnings(dict(DRIVEN)) == []
+        assert len(warnings) == 1
+        assert "medium soil" in warnings[0]
 
     def test_numbers_with_no_probe_to_read_are_flagged_as_unused(self):
         """The same shape as the ignored-override warnings: a value nobody reads."""
@@ -611,3 +630,74 @@ class TestWaterTheSoilHasNotSeenYet:
 
         assert zone._zone_deficit == 0.0
         assert zone.deficit_source == "site_model"
+
+
+class TestTheGroundIsChosenNotTyped:
+    """Field capacity and wilting point are one piece of information, not two.
+
+    They come off the same texture table and a gardener has neither to hand, so
+    asking for both as figures asks twice for something nobody owns. One choice
+    supplies them, which leaves the root depth as the only number the user must
+    give -- and that is the right one to have kept, because no table holds it: a
+    lawn, a hedge and a pot differ by a factor of four on the same ground.
+    """
+
+    def _zone(self, hass_mock, **cfg):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone_of(hass_mock, hub, **{CONF_ZONE_VWC_SENSOR: "sensor.orto_soil", **cfg})
+        zone._on_own_probe(_reading("18.0"))
+        return zone
+
+    def test_a_depth_alone_is_enough_because_the_soil_has_a_default(self, hass_mock):
+        zone = self._zone(hass_mock, **{CONF_ZONE_ROOT_DEPTH: 0.30})
+
+        assert zone._probe_drives is True
+        assert zone.deficit_source == "zone_probe"
+        # medium soil: (0.25 - 0.18) * 0.30 m * 1000
+        assert zone._zone_deficit == pytest.approx(21.0)
+
+    def test_without_a_depth_no_default_can_rescue_it(self, hass_mock):
+        """The switch is the depth, and nothing stands in for it."""
+        zone = self._zone(hass_mock)
+
+        assert zone._probe_drives is False
+        assert zone.deficit_source == "site_model"
+
+    def test_sand_and_clay_are_not_the_same_garden(self, hass_mock):
+        """The whole reason the choice is worth offering: same reading, same
+        roots, and a reservoir that differs by more than a factor of two."""
+        sandy = self._zone(hass_mock, **{CONF_ZONE_ROOT_DEPTH: 0.30, CONF_ZONE_SOIL_TYPE: SOIL_TYPE_SANDY})
+        clay = self._zone(hass_mock, **{CONF_ZONE_ROOT_DEPTH: 0.30, CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CLAY})
+
+        assert sandy._zone_deficit == pytest.approx(-9.0 + 9.0)  # (0.15 - 0.18) < 0, clamped to 0
+        assert clay._zone_deficit == pytest.approx(54.0)  # (0.36 - 0.18) * 0.30 * 1000
+
+    def test_the_assumed_soil_is_published_with_the_number_it_produced(self, hass_mock):
+        zone = self._zone(hass_mock, **{CONF_ZONE_ROOT_DEPTH: 0.30})
+
+        attrs = zone.extra_state_attributes
+
+        assert attrs["probe_soil_type"] == "auto"
+        assert attrs["probe_field_capacity"] == pytest.approx(0.25)
+
+    def test_custom_soil_reads_the_box(self, hass_mock):
+        zone = self._zone(hass_mock, **DRIVEN)
+
+        assert zone._zone_deficit == pytest.approx(36.0)
+
+    def test_custom_soil_with_an_empty_box_is_refused_by_the_form(self):
+        """The preset/override contract, fourth application: Custom says the
+        value is mine to give, and without it the zone would fall back to a
+        neutral default and behave as if nothing had been chosen."""
+        from never_dry.config_flow import _override_errors
+
+        errors = _override_errors({CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM})
+
+        assert errors.get(CONF_ZONE_FIELD_CAPACITY) == "field_capacity_required"
+
+    def test_a_named_soil_makes_the_box_dead_weight_and_says_so(self):
+        from never_dry.config_flow import _ignored_override_warnings
+
+        warnings = _ignored_override_warnings({CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CLAY, CONF_ZONE_FIELD_CAPACITY: 0.30})
+
+        assert any("Field capacity" in w for w in warnings)

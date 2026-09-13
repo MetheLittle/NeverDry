@@ -81,22 +81,31 @@ than the software's.
 
 The probe is declared **per zone**, in that zone's settings, and it reports a
 *fraction*: how much of the soil's volume is water. Millimetres of missing water
-only exist once two more numbers are known, and neither is guessable. How deep
-the roots go is a property of what you planted; how much water the soil holds
-once it has finished draining is a property of your ground. The same 18 %
-reading is 18 mm under a lawn and 72 mm under a hedge, and nothing in a moisture
-reading says which one it is standing in.
+only exist once two more things are known, and one of them is yours to say. How
+much water the soil holds once it has finished draining depends on your ground,
+and the **Soil type** dropdown answers that for you. How deep the roots go
+depends on what you planted, and nothing can answer that for you: the same 18 %
+reading is 18 mm of missing water under a lawn rooted 30 cm deep and 72 mm under
+a hedge rooted 60 cm deep (0.7 in and 2.8 in, under 12 in and 24 in of roots),
+and no moisture reading says which one it is standing in.
 
-So a probe has two roles, and the two boxes beside it decide which:
+So a probe has two roles, and the **Root depth** box beside it decides which:
 
 - **Probe alone.** The reading is shown next to the zone's figures and nothing
   else changes: the deficit keeps coming from the weather model. The form says
   so when you save, because believing otherwise is the easiest mistake to make
   here.
-- **Probe with root depth and field capacity.** That zone waters by what its
-  soil measures. The two numbers you typed are published beside the deficit, so
-  a figure that carries the authority of a measurement always shows the half of
-  it that was a declaration.
+- **Probe with a root depth.** That zone waters by what its soil measures. The
+  depth you typed and the soil that was assumed or chosen are published beside
+  the deficit, so a figure that carries the authority of a measurement always
+  shows the part of it that was a declaration.
+
+**About the soil type.** Left on *Automatic* a medium soil is assumed, which
+suits most gardens, and the form tells you so rather than passing over it. If
+you know your ground, say it: sandy soil holds about half the water a medium one
+does and clay about half again more, and that difference goes straight into how
+much every watering delivers. *Custom* is there for anyone who has measured
+their own field capacity, which is a better number than any table.
 
 **Where to put the probe.** About a third of the root depth down, and midway
 between two emitters. That is not fussiness: the reading is being taken to speak
@@ -106,9 +115,14 @@ roots, and a probe at the surface reads the layer that dries fastest while one
 at the bottom reads the layer that dries last.
 
 Declare the depth the **roots** reach, not the depth the probe sits at. The
-water has to refill the root zone, and a deficit computed over the top ten
-centimetres would have you watering little and often, which never reaches the
+water has to refill the root zone, and a deficit computed over the top 10 cm
+(4 in) alone would have you watering little and often, which never reaches the
 lower roots and teaches the plant to stay shallow.
+
+The form asks for this depth in metres or in inches, following the unit system
+your Home Assistant is set to, and the same is true everywhere else a length or
+a volume appears. Field capacity has no unit in either system: it is a fraction,
+the share of the soil's volume that is water.
 
 **What to be careful about, if you fill them in.** A probe sits in one spot at
 one depth. If a zone mixes a ground cover and a shrub there is no single root

@@ -50,7 +50,8 @@
               "microclimate_factor": "Custom microclimate factor (Advanced only)",
               "vwc_sensor": "Soil moisture probe (this zone)",
               "root_depth_m": "Root depth",
-              "field_capacity": "Field capacity"
+              "field_capacity": "Field capacity",
+              "soil_type": "Soil type"
             },
             "data_description": {
               "area_m2": "Surface area of this irrigation zone in square meters",
@@ -59,8 +60,9 @@
               "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value. Pick Custom to enter your own factor below.",
               "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground.",
               "vwc_sensor": "Optional. A probe buried in this zone, about a third of the root depth down and midway between two emitters. On its own it is shown beside the zone's figures and nothing else changes. Give it the root depth and field capacity below and this zone measures its deficit instead of estimating it.",
-              "root_depth_m": "Depth of the root zone the probe above speaks for. Together with field capacity it turns the reading into millimetres, and doing so hands this zone's deficit to the probe. Leave both empty to keep the probe as a measurement shown beside the model's estimate.",
-              "field_capacity": "Water content this soil holds after it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay. Read with the root depth above, and only when a probe is set."
+              "root_depth_m": "Depth of the root zone the probe above speaks for, and the one number here that no table holds: a lawn, a hedge and a pot differ by a factor of four on the same ground. Fill it in and this zone measures its deficit instead of estimating it. Leave it and the probe stays a reading shown beside the estimate.",
+              "field_capacity": "Only read when the soil type above is Custom. The water content this soil holds after it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay.",
+              "soil_type": "Optional. What this zone's ground is made of. It supplies the field capacity the probe's reading is measured against, so you do not have to know the number. Left on Automatic a medium soil is assumed, which is fair for most gardens and is said out loud when you save."
             }
           },
           "valve_and_pipe": {
@@ -129,7 +131,8 @@
       "microclimate_factor_required": "Choose a microclimate factor: the exposure is set to Custom, which takes its value from that field",
       "et_method_missing_sensors": "That method needs sensors this installation has not declared. Pick the sensors it requires, or leave the method on Automatic.",
       "et_method_unknown": "Unknown evapotranspiration method.",
-      "et_method_zone_probe": "A soil moisture probe belongs to a zone, not to the whole installation. Set it in that zone's options; the method here is the one that zones without a probe of their own run on."
+      "et_method_zone_probe": "A soil moisture probe belongs to a zone, not to the whole installation. Set it in that zone's options; the method here is the one that zones without a probe of their own run on.",
+      "field_capacity_required": "Choose a field capacity: the soil type is set to Custom, which takes its value from that field"
     },
     "abort": {
       "already_configured": "NeverDry is already configured"
@@ -187,7 +190,8 @@
               "microclimate_factor": "Custom microclimate factor (Advanced only)",
               "vwc_sensor": "Soil moisture probe (this zone)",
               "root_depth_m": "Root depth",
-              "field_capacity": "Field capacity"
+              "field_capacity": "Field capacity",
+              "soil_type": "Soil type"
             },
             "data_description": {
               "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
@@ -195,8 +199,9 @@
               "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value. Pick Custom to enter your own factor below.",
               "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground.",
               "vwc_sensor": "Optional. A probe buried in this zone, about a third of the root depth down and midway between two emitters. On its own it is shown beside the zone's figures and nothing else changes. Give it the root depth and field capacity below and this zone measures its deficit instead of estimating it.",
-              "root_depth_m": "Depth of the root zone the probe above speaks for. Together with field capacity it turns the reading into millimetres, and doing so hands this zone's deficit to the probe. Leave both empty to keep the probe as a measurement shown beside the model's estimate.",
-              "field_capacity": "Water content this soil holds after it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay. Read with the root depth above, and only when a probe is set."
+              "root_depth_m": "Depth of the root zone the probe above speaks for, and the one number here that no table holds: a lawn, a hedge and a pot differ by a factor of four on the same ground. Fill it in and this zone measures its deficit instead of estimating it. Leave it and the probe stays a reading shown beside the estimate.",
+              "field_capacity": "Only read when the soil type above is Custom. The water content this soil holds after it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay.",
+              "soil_type": "Optional. What this zone's ground is made of. It supplies the field capacity the probe's reading is measured against, so you do not have to know the number. Left on Automatic a medium soil is assumed, which is fair for most gardens and is said out loud when you save."
             }
           },
           "valve_and_pipe": {
@@ -258,7 +263,8 @@
               "microclimate_factor": "Custom microclimate factor (Advanced only)",
               "vwc_sensor": "Soil moisture probe (this zone)",
               "root_depth_m": "Root depth",
-              "field_capacity": "Field capacity"
+              "field_capacity": "Field capacity",
+              "soil_type": "Soil type"
             },
             "data_description": {
               "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
@@ -266,8 +272,9 @@
               "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value. Pick Custom to enter your own factor below.",
               "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground.",
               "vwc_sensor": "Optional. A probe buried in this zone, about a third of the root depth down and midway between two emitters. On its own it is shown beside the zone's figures and nothing else changes. Give it the root depth and field capacity below and this zone measures its deficit instead of estimating it.",
-              "root_depth_m": "Depth of the root zone the probe above speaks for. Together with field capacity it turns the reading into millimetres, and doing so hands this zone's deficit to the probe. Leave both empty to keep the probe as a measurement shown beside the model's estimate.",
-              "field_capacity": "Water content this soil holds after it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay. Read with the root depth above, and only when a probe is set."
+              "root_depth_m": "Depth of the root zone the probe above speaks for, and the one number here that no table holds: a lawn, a hedge and a pot differ by a factor of four on the same ground. Fill it in and this zone measures its deficit instead of estimating it. Leave it and the probe stays a reading shown beside the estimate.",
+              "field_capacity": "Only read when the soil type above is Custom. The water content this soil holds after it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay.",
+              "soil_type": "Optional. What this zone's ground is made of. It supplies the field capacity the probe's reading is measured against, so you do not have to know the number. Left on Automatic a medium soil is assumed, which is fair for most gardens and is said out loud when you save."
             }
           },
           "valve_and_pipe": {
@@ -322,7 +329,8 @@
       "volume_entity_required": "A volume target entity is needed: the delivery mode you chose leaves the dosing to the valve itself.",
       "zone_already_exists": "A zone with this name already exists",
       "too_many_zones": "Maximum number of zones reached (50)",
-      "zone_name_too_long": "Zone name is too long (max 64 characters)"
+      "zone_name_too_long": "Zone name is too long (max 64 characters)",
+      "field_capacity_required": "Choose a field capacity: the soil type is set to Custom, which takes its value from that field"
     },
     "abort": {
       "no_zones": "No zones configured"
@@ -390,6 +398,15 @@
         "et_simple": "Simple (temperature only)",
         "hargreaves": "Hargreaves-Samani (daily max/min temperature)",
         "penman_monteith": "Penman-Monteith (FAO-56, full weather)"
+      }
+    },
+    "soil_type": {
+      "options": {
+        "auto": "Automatic (a medium soil)",
+        "sandy": "Sandy or light, drains fast",
+        "loam": "Loam or medium",
+        "clay": "Clay or heavy, holds water",
+        "custom": "Custom (set the field capacity)"
       }
     }
   },

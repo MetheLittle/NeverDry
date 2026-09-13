@@ -50,6 +50,7 @@ from never_dry.const import (
     CONF_ZONE_NAME,
     CONF_ZONE_PLANT_FAMILY,
     CONF_ZONE_ROOT_DEPTH,
+    CONF_ZONE_SOIL_TYPE,
     CONF_ZONE_SYSTEM_TYPE,
     CONF_ZONE_THRESHOLD,
     CONF_ZONE_VALVE,
@@ -62,6 +63,7 @@ from never_dry.const import (
     EXPOSURE_CUSTOM,
     IRRIGATION_MODE_SCHEDULED,
     PLANT_FAMILY_CUSTOM,
+    SOIL_TYPE_CUSTOM,
     SYSTEM_TYPE_CUSTOM,
 )
 
@@ -145,6 +147,7 @@ FILLED = {
     CONF_ZONE_KC: 0.8,
     CONF_ZONE_VWC_SENSOR: "sensor.prato_moisture",
     CONF_ZONE_ROOT_DEPTH: 0.3,
+    CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
     CONF_ZONE_FIELD_CAPACITY: 0.25,
     CONF_ZONE_EXPOSURE: EXPOSURE_CUSTOM,
     CONF_ZONE_MICROCLIMATE_FACTOR: 1.1,
@@ -169,6 +172,7 @@ REFUSED_WHEN_EMPTY = {
     CONF_ZONE_MICROCLIMATE_FACTOR: "microclimate_factor_required",
     CONF_ZONE_EFFICIENCY: "efficiency_required",
     CONF_ZONE_FLOW_RATE: "flow_rate_required",
+    CONF_ZONE_FIELD_CAPACITY: "field_capacity_required",
 }
 
 

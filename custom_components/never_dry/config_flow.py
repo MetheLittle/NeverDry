@@ -47,6 +47,7 @@ from .const import (
     CONF_ZONE_NAME,
     CONF_ZONE_PLANT_FAMILY,
     CONF_ZONE_ROOT_DEPTH,
+    CONF_ZONE_SOIL_TYPE,
     CONF_ZONE_SYSTEM_TYPE,
     CONF_ZONE_THRESHOLD,
     CONF_ZONE_VALVE,
@@ -63,6 +64,7 @@ from .const import (
     DEFAULT_IRRIGATION_MODE,
     DEFAULT_IRRIGATION_TIME,
     DEFAULT_RAIN_SENSOR_TYPE,
+    DEFAULT_SOIL_TYPE,
     DEFAULT_T_BASE,
     DEFAULT_THRESHOLD,
     DELIVERY_MODE_ESTIMATED_FLOW,
@@ -82,6 +84,8 @@ from .const import (
     PLANT_FAMILIES,
     RAIN_TYPE_DAILY_TOTAL,
     RAIN_TYPE_EVENT,
+    SOIL_TYPE_AUTO,
+    SOIL_TYPES,
     SYSTEM_TYPE_CUSTOM,
     SYSTEM_TYPE_DRIP,
     SYSTEM_TYPE_MANUAL,
@@ -438,9 +442,15 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
     def _sug(key: str) -> dict:
         return _suggest(current, key)
 
-    # Nothing is collapsed here: a zone being created has to be seen once in
-    # full. The edit form collapses everything instead — there you already
-    # know what you came to change.
+    # Everything starts collapsed, here as in the edit form. The earlier reading
+    # was that a zone being created should be seen once in full; the form as it
+    # actually stands is seventeen fields, and opening all of them at once shows
+    # the length rather than the shape. Three closed headings say what will be
+    # asked and let it be answered one question at a time.
+    #
+    # Only the starting state can be set. Home Assistant renders each section as
+    # an independent collapsible: there is no way to make opening one close the
+    # others, because the form does not react to what the user does with it.
     return vol.Schema(
         {
             vol.Required(CONF_ZONE_NAME, **_sug(CONF_ZONE_NAME)): selector.TextSelector(),
@@ -492,6 +502,15 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
                             )
                         ),
                         vol.Optional(
+                            CONF_ZONE_SOIL_TYPE, default=DEFAULT_SOIL_TYPE, **_sug(CONF_ZONE_SOIL_TYPE)
+                        ): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=list(SOIL_TYPES.keys()),
+                                translation_key="soil_type",
+                                mode="dropdown",
+                            )
+                        ),
+                        vol.Optional(
                             CONF_ZONE_FIELD_CAPACITY, **_sug(CONF_ZONE_FIELD_CAPACITY)
                         ): selector.NumberSelector(
                             selector.NumberSelectorConfig(min=0.05, max=0.6, step=0.01, mode="box")
@@ -517,7 +536,7 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
                         ),
                     }
                 ),
-                {"collapsed": False},
+                {"collapsed": True},
             ),
             vol.Required(SECTION_VALVE): section(
                 vol.Schema(
@@ -592,7 +611,7 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
                         ),
                     }
                 ),
-                {"collapsed": False},
+                {"collapsed": True},
             ),
             vol.Required(SECTION_SCHEDULING): section(
                 vol.Schema(
@@ -630,7 +649,7 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
                         ),
                     }
                 ),
-                {"collapsed": False},
+                {"collapsed": True},
             ),
         }
     )
@@ -700,6 +719,14 @@ PRESET_OVERRIDE_PAIRS = (
         "microclimate_factor_required",
         "Microclimate factor",
     ),
+    (
+        CONF_ZONE_SOIL_TYPE,
+        SOIL_TYPES,
+        "field_capacity",
+        CONF_ZONE_FIELD_CAPACITY,
+        "field_capacity_required",
+        "Field capacity",
+    ),
 )
 
 
@@ -740,6 +767,7 @@ def _flatten_sections(user_input: dict) -> dict:
 _SECTION_OF_FIELD = {
     CONF_ZONE_EFFICIENCY: SECTION_VALVE,
     CONF_ZONE_KC: SECTION_GROUND,
+    CONF_ZONE_FIELD_CAPACITY: SECTION_GROUND,
     CONF_ZONE_MICROCLIMATE_FACTOR: SECTION_GROUND,
     CONF_ZONE_FLOW_RATE: SECTION_VALVE,
     CONF_ZONE_FLOW_METER_SENSOR: SECTION_VALVE,
@@ -841,7 +869,7 @@ def _zone_errors(user_input: dict) -> dict[str, str]:
 
 
 def _probe_role_warnings(zone: dict) -> list[str]:
-    """Say which role the probe will actually play, when the pair does not agree.
+    """Say which role the probe will actually play, and on what ground.
 
     The defect this exists for is not a wrong number, it is a belief. A user who
     binds a soil probe to a zone reasonably concludes that the zone now waters by
@@ -849,27 +877,35 @@ def _probe_role_warnings(zone: dict) -> list[str]:
     from the weather. The report that led here said it in those words: the sensor
     is "ignored completely, but still in the settings".
 
+    The second warning is the price of the automatic soil. Assuming a middle
+    ground is a fair default, and it is only fair while it is **said**: an
+    assumption nobody is told about is the hardcoded constant we just removed,
+    with a dropdown in front of it.
+
     Warned rather than refused, on the soft-confirm step that already carries the
-    ignored-override warnings. Requiring the pair would make anyone who opened a
+    ignored-override warnings. Requiring the depth would make anyone who opened a
     zone to change its area decide about its model, and turn an edit into a
     change of behaviour.
     """
     probe = zone.get(CONF_ZONE_VWC_SENSOR)
     depth = zone.get(CONF_ZONE_ROOT_DEPTH)
-    capacity = zone.get(CONF_ZONE_FIELD_CAPACITY)
-    declared = [name for name, value in (("root depth", depth), ("field capacity", capacity)) if value is not None]
 
-    if probe and len(declared) < 2:
-        missing = "root depth and field capacity" if not declared else ("field capacity" if depth else "root depth")
+    if probe and depth is None:
         return [
-            f"Soil probe: {missing} is missing, so the probe will be shown but will not set this"
-            " zone's deficit - the site's model keeps doing that. Fill both in to water by what"
-            " the soil measures"
+            "Soil probe: no root depth, so the probe will be shown but will not set this zone's"
+            " deficit - the site's model keeps doing that. Give the depth its roots reach and the"
+            " zone waters by what the soil measures"
         ]
-    if not probe and declared:
+    if not probe and depth is not None:
         return [
-            f"Soil probe: {' and '.join(declared)} will not be used, because this zone has no probe"
-            " to read. Pick one, or clear the fields"
+            "Soil probe: the root depth will not be used, because this zone has no probe to read."
+            " Pick one, or clear the field"
+        ]
+    if probe and zone.get(CONF_ZONE_SOIL_TYPE, DEFAULT_SOIL_TYPE) == SOIL_TYPE_AUTO:
+        return [
+            "Soil probe: this zone will measure its deficit assuming a medium soil, since no soil"
+            " type was chosen. Sandy ground holds about half that water and clay about half again"
+            " more, so pick yours if you know it"
         ]
     return []
 
@@ -1366,6 +1402,16 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                                     step=0.5 if imperial else 0.05,
                                     mode="box",
                                     unit_of_measurement="in" if imperial else "m",
+                                )
+                            ),
+                            vol.Optional(
+                                CONF_ZONE_SOIL_TYPE,
+                                description={"suggested_value": _d(CONF_ZONE_SOIL_TYPE, DEFAULT_SOIL_TYPE)},
+                            ): selector.SelectSelector(
+                                selector.SelectSelectorConfig(
+                                    options=list(SOIL_TYPES.keys()),
+                                    translation_key="soil_type",
+                                    mode="dropdown",
                                 )
                             ),
                             vol.Optional(

@@ -96,19 +96,26 @@ CONF_ZONE_BATTERY_SENSOR = "battery_sensor"
 # reading is not transferable to a zone watered independently — which is why the
 # installation-wide binding it replaces was a design error, not a shortcut.
 CONF_ZONE_VWC_SENSOR = "vwc_sensor"
-# The two numbers that turn that reading into millimetres:
-# D = (field_capacity - vwc) * root_depth * 1000. They are also the switch. A
-# probe declared without them is telemetry, exactly as before; a probe declared
-# with them owns the zone's deficit. Optional on purpose: making them required
-# would force a decision about the model on anyone who opened the zone to change
-# its area, and the form warns instead, which is the mechanism this project
-# already uses where refusing would trap the user.
+# What turns that reading into millimetres: D = (field_capacity - vwc) *
+# root_depth * 1000. The soil type below supplies the field capacity, so the one
+# number left to declare is the root depth, and the root depth is therefore the
+# switch. A probe declared without it is telemetry, exactly as before; a probe
+# declared with it owns the zone's deficit.
 #
-# Root depth is a property of the *planting* and field capacity one of the
-# *soil*, so both belong to the zone and neither to the installation. There is
-# deliberately no default: a value nobody chose would switch on a model nobody
-# asked for, and a deficit scaled by a guess still looks like a measurement.
+# Optional on purpose: making it required would force a decision about the model
+# on anyone who opened the zone to change its area, and the form warns instead,
+# which is the mechanism this project already uses where refusing would trap the
+# user.
+#
+# Root depth is a property of the *planting* and no table has it: a lawn, a hedge
+# and a pot differ by a factor of four on the same ground. So it stays a figure,
+# with deliberately no default, because a value nobody chose would switch on a
+# model nobody asked for and a deficit scaled by a guess still looks like a
+# measurement. The soil is the opposite case, which is why it gets a dropdown.
 CONF_ZONE_ROOT_DEPTH = "root_depth_m"
+#: The ground, chosen rather than typed. Supplies the field capacity, which is
+#: why the box below is only read behind the Custom entry.
+CONF_ZONE_SOIL_TYPE = "soil_type"
 CONF_ZONE_FIELD_CAPACITY = "field_capacity"
 
 #: A reading older than this is refused however rarely the probe speaks. It is a
@@ -213,6 +220,42 @@ EXPOSURES = {
     EXPOSURE_REFLECTED_HEAT: {"label": "Reflected heat (paving, south-facing wall)", "factor": 1.20},
     EXPOSURE_CUSTOM: {"label": "Custom (set the factor)", "factor": None},
 }
+
+# ── Soil type: the ground under the zone ────────────────────────────────
+# Field capacity and wilting point are not two questions. They are read off the
+# same texture table and a gardener has neither number to hand, so asking for
+# both as figures would be asking twice for something nobody owns. One choice
+# supplies the pair.
+#
+# Values are mid-range from FAO-56 Table 19 (typical soil water characteristics,
+# m3/m3). The spread inside a texture class is wide, which is the honest reason
+# the Custom entry exists: anyone who has measured their own field capacity has
+# a better number than any table.
+#
+# ``field_capacity: None`` marks the custom entry, per the preset/override
+# contract above. ``label`` is developer-facing only, as everywhere else: the
+# dropdown text comes from selector.soil_type in the translations.
+#
+# The wilting point is carried and **not yet read by anything**. It is the floor
+# of the reservoir, and the reservoir is what turns a threshold in millimetres
+# into "water when half of it is gone" (AI-225). It is here because it arrives
+# with its companion from the same row, and splitting the row would mean
+# revisiting this table to add a column nobody could sanity-check on its own.
+SOIL_TYPE_AUTO = "auto"
+SOIL_TYPE_SANDY = "sandy"
+SOIL_TYPE_LOAM = "loam"
+SOIL_TYPE_CLAY = "clay"
+SOIL_TYPE_CUSTOM = "custom"
+
+SOIL_TYPES = {
+    SOIL_TYPE_AUTO: {"label": "Automatic (a middle soil)", "field_capacity": 0.25, "wilting_point": 0.12},
+    SOIL_TYPE_SANDY: {"label": "Sandy / light, drains fast", "field_capacity": 0.15, "wilting_point": 0.06},
+    SOIL_TYPE_LOAM: {"label": "Loam / medium", "field_capacity": 0.25, "wilting_point": 0.12},
+    SOIL_TYPE_CLAY: {"label": "Clay / heavy, holds water", "field_capacity": 0.36, "wilting_point": 0.22},
+    SOIL_TYPE_CUSTOM: {"label": "Custom (set the field capacity)", "field_capacity": None, "wilting_point": None},
+}
+
+DEFAULT_SOIL_TYPE = SOIL_TYPE_AUTO
 
 DEFAULT_EXPOSURE = EXPOSURE_FULL_SUN
 DEFAULT_MICROCLIMATE_FACTOR = 1.0

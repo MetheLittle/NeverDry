@@ -79,6 +79,7 @@ from .const import (
     CONF_ZONE_NAME,
     CONF_ZONE_PLANT_FAMILY,
     CONF_ZONE_ROOT_DEPTH,
+    CONF_ZONE_SOIL_TYPE,
     CONF_ZONE_SYSTEM_TYPE,
     CONF_ZONE_THRESHOLD,
     CONF_ZONE_VALVE,
@@ -99,6 +100,7 @@ from .const import (
     DEFAULT_MICROCLIMATE_FACTOR,
     DEFAULT_RAIN_SENSOR_TYPE,
     DEFAULT_ROOT_DEPTH,
+    DEFAULT_SOIL_TYPE,
     DEFAULT_T_BASE,
     DEFAULT_THRESHOLD,
     DELIVERY_DURATION_MARGIN,
@@ -118,6 +120,7 @@ from .const import (
     PROBE_STALE_BACKSTOP_S,
     RAIN_TYPE_EVENT,
     SAFETY_LAYER_SPREAD,
+    SOIL_TYPES,
     SYSTEM_TYPES,
     UNUSUAL_FLOW_MAX_LPM,
     VALVE_STARTUP_GRACE_S,
@@ -1905,7 +1908,16 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         # upgrade, because the values it has never been asked for are absent:
         # the model moves the day the user fills them in, and not before.
         self._own_root_depth = zone_config.get(CONF_ZONE_ROOT_DEPTH)
-        self._own_field_capacity = zone_config.get(CONF_ZONE_FIELD_CAPACITY)
+        # The soil type decides and the box is read only behind Custom: the same
+        # preset/override contract as the system type, the plant family and the
+        # exposure. Which leaves the root depth as the one number the user has to
+        # supply, and therefore as the switch -- and it is the right one to have
+        # kept, because no table holds it. A lawn, a hedge and a pot differ by a
+        # factor of four on the same ground, and only the person who planted
+        # them knows which it is.
+        self._soil_type = zone_config.get(CONF_ZONE_SOIL_TYPE, DEFAULT_SOIL_TYPE)
+        preset = SOIL_TYPES.get(self._soil_type, SOIL_TYPES[DEFAULT_SOIL_TYPE])["field_capacity"]
+        self._own_field_capacity = zone_config.get(CONF_ZONE_FIELD_CAPACITY) if preset is None else preset
         self._probe_drives = bool(self._own_probe) and None not in (
             self._own_root_depth,
             self._own_field_capacity,
@@ -2886,6 +2898,11 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             # to show both.
             attrs["probe_root_depth_m"] = self._own_root_depth
             attrs["probe_field_capacity"] = self._own_field_capacity
+            # The soil alongside the number it produced. With the automatic
+            # entry this is the whole of what the zone was told about its
+            # ground, and an assumption that is not visible is the hardcoded
+            # constant this replaced with a dropdown in front of it.
+            attrs["probe_soil_type"] = self._soil_type
             attrs["probe_fresh"] = self._probe_is_fresh()
         attrs["total_water_delivered_l"] = round(self._total_water_delivered, 1)
         attrs["yearly_water_delivered_l"] = round(self._yearly_water_delivered, 1)
