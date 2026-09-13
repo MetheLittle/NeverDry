@@ -14,12 +14,15 @@ from .const import (
     CONF_T_BASE,
     CONF_ZONE_AREA,
     CONF_ZONE_FLOW_RATE,
+    CONF_ZONE_ROOT_DEPTH,
     CONF_ZONE_THRESHOLD,
 )
 
 # ── Conversion factors ─────────────────────────────────────
 MM_TO_IN = 1.0 / 25.4
 IN_TO_MM = 25.4
+#: Root depth is entered in inches on an imperial form and stored in metres.
+IN_TO_M = 0.0254
 M2_TO_FT2 = 10.7639
 FT2_TO_M2 = 1.0 / 10.7639
 #: One US liquid gallon in litres; volumes convert with its inverse.
@@ -60,8 +63,8 @@ def zone_input_to_metric(user_input: dict, is_imperial: bool) -> dict:
     """Convert UI values to metric storage.
 
     Flow rate is entered in L/h (metric) or gal/h (imperial) and is always
-    stored in L/min. Area (ft²→m²) and threshold (in→mm) are converted only
-    when the form was shown in imperial units.
+    stored in L/min. Area (ft² to m²), threshold (in to mm) and root depth
+    (in to m) are converted only when the form was shown in imperial units.
     """
     out = dict(user_input)
     if out.get(CONF_ZONE_FLOW_RATE) is not None:
@@ -74,4 +77,8 @@ def zone_input_to_metric(user_input: dict, is_imperial: bool) -> dict:
             out[CONF_ZONE_AREA] = out[CONF_ZONE_AREA] * FT2_TO_M2
         if out.get(CONF_ZONE_THRESHOLD) is not None:
             out[CONF_ZONE_THRESHOLD] = out[CONF_ZONE_THRESHOLD] * IN_TO_MM
+        if out.get(CONF_ZONE_ROOT_DEPTH) is not None:
+            out[CONF_ZONE_ROOT_DEPTH] = out[CONF_ZONE_ROOT_DEPTH] * IN_TO_M
+    # Field capacity is a fraction of a volume by a volume and has no unit, so
+    # it crosses this boundary unchanged in either system.
     return out

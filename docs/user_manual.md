@@ -59,8 +59,7 @@ sensible answer, and you can override the choice if you do.
 |---|---|---|---|---|---|
 | **Simple (temperature)** | required | — | — | — | — |
 | **Hargreaves-Samani** | required | — | — | — | — |
-| **Penman-Monteith (FAO-56)** | required | required | required | improves it | — |
-| **Soil moisture probe** | — | — | — | — | required |
+| **Penman-Monteith (FAO-56)** | required | required | required | improves it | - |
 
 Two entries in that table need a word:
 
@@ -76,31 +75,54 @@ Two entries in that table need a word:
 **You are never asked for daily maximum and minimum temperature.** NeverDry
 observes them from the thermometer it already reads.
 
-**A soil probe supports the model — it does not replace it.** This is worth
-being clear about, because the opposite is what most people expect.
+**A soil probe waters its zone, once you tell it what to read the reading with.**
+This is the part worth reading slowly, because half of it is your decision rather
+than the software's.
 
-The probe is declared **per zone**, in that zone's settings. What it does *not*
-do is decide the zone's water deficit. A probe reads one spot, at one depth,
-under whatever plant happens to be above it — and two zones on the same soil sit
-at systematically different moisture whenever the irrigation is unbalanced or one
-gets more shade on the ground. Those are circumstances of a spot, not facts about
-how much water the zone needs, so letting the deficit follow the reading would
-feed a plumbing imbalance back into the model as if it were information about the
-soil.
+The probe is declared **per zone**, in that zone's settings, and it reports a
+*fraction*: how much of the soil's volume is water. Millimetres of missing water
+only exist once two more numbers are known, and neither is guessable. How deep
+the roots go is a property of what you planted; how much water the soil holds
+once it has finished draining is a property of your ground. The same 18 %
+reading is 18 mm under a lawn and 72 mm under a hedge, and nothing in a moisture
+reading says which one it is standing in.
 
-There is also a plainer reason: a probe that dies — battery, corrosion, a cable
-cut by a spade — would freeze the deficit and stop the watering, with nothing to
-tell you. With the model in charge, a dead probe simply leaves you with the
-estimate you had before.
+So a probe has two roles, and the two boxes beside it decide which:
 
-What the probe *is* for:
+- **Probe alone.** The reading is shown next to the zone's figures and nothing
+  else changes: the deficit keeps coming from the weather model. The form says
+  so when you save, because believing otherwise is the easiest mistake to make
+  here.
+- **Probe with root depth and field capacity.** That zone waters by what its
+  soil measures. The two numbers you typed are published beside the deficit, so
+  a figure that carries the authority of a measurement always shows the half of
+  it that was a declaration.
+
+**What to be careful about, if you fill them in.** A probe sits in one spot at
+one depth. If a zone mixes a ground cover and a shrub there is no single root
+depth that is right, and the number you pick moves both the dose and the timing
+in the same direction: shallow roots mean small doses *and* longer waits, which
+is the opposite of what a shallow-rooted plant wants. This is the same
+assumption NeverDry already makes when it asks for one plant family per zone, so
+the answer is the same: a zone should be a group of plants that drink alike.
+
+**If the probe dies, nothing stops.** The weather model keeps running underneath
+the whole time, published or not, so there is a current estimate ready at every
+moment rather than one that starts rebuilding at the worst possible time. A
+probe that goes quiet for longer than it usually does is set aside and the zone
+falls back to the estimate, which is recorded in the log; when it speaks again
+it is believed again. The bar it is judged against is its *own* observed
+rhythm, not a fixed number, because one probe reports every thirty seconds and
+another twice a day.
+
+Whatever role it has, the probe also earns its place two other ways:
 
 - **Seeing what your soil actually holds.** The level the moisture settles at
-  after a good watering drains away is your real field capacity, which today is
-  a default value the software guesses.
+  after a good watering drains away is your real field capacity, which is
+  exactly the number the second box is asking for.
 - **Catching a hydraulic fault.** If a zone delivers thirty litres and its
-  moisture does not move, something is wrong at the tap or the emitter — and
-  this is the only signal in the whole system that can reveal it.
+  moisture does not move, something is wrong at the tap or the emitter, and this
+  is the only signal in the whole system that can reveal it.
 
 The reading is published on the zone's *Volume* sensor
 (`probe_water_content`), alongside the deficit that reading alone would imply, so

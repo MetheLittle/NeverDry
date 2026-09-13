@@ -96,6 +96,31 @@ CONF_ZONE_BATTERY_SENSOR = "battery_sensor"
 # reading is not transferable to a zone watered independently — which is why the
 # installation-wide binding it replaces was a design error, not a shortcut.
 CONF_ZONE_VWC_SENSOR = "vwc_sensor"
+# The two numbers that turn that reading into millimetres:
+# D = (field_capacity - vwc) * root_depth * 1000. They are also the switch. A
+# probe declared without them is telemetry, exactly as before; a probe declared
+# with them owns the zone's deficit. Optional on purpose: making them required
+# would force a decision about the model on anyone who opened the zone to change
+# its area, and the form warns instead, which is the mechanism this project
+# already uses where refusing would trap the user.
+#
+# Root depth is a property of the *planting* and field capacity one of the
+# *soil*, so both belong to the zone and neither to the installation. There is
+# deliberately no default: a value nobody chose would switch on a model nobody
+# asked for, and a deficit scaled by a guess still looks like a measurement.
+CONF_ZONE_ROOT_DEPTH = "root_depth_m"
+CONF_ZONE_FIELD_CAPACITY = "field_capacity"
+
+#: A reading older than this is refused however rarely the probe speaks. It is a
+#: backstop, not the verdict: the verdict comes from the probe's own observed
+#: cadence (``environment.silence_floor``), which needs samples this may not yet
+#: have: a probe dead since installation never establishes one. A soil probe
+#: that cannot manage a reading a day cannot inform a daily irrigation anyway.
+PROBE_STALE_BACKSTOP_S = 24 * 3600
+
+#: How many gaps between readings the freshness bar is derived from.
+PROBE_CADENCE_WINDOW = 40
+
 CONF_ZONE_IRRIGATION_MODE = "irrigation_mode"
 CONF_ZONE_IRRIGATION_TIME = "irrigation_time"
 CONF_ZONE_HW_MAX_DURATION_TOPIC = "hw_max_duration_topic"

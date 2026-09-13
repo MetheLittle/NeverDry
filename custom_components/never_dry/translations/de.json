@@ -48,7 +48,9 @@
               "kc": "Benutzerdefinierter Pflanzen-Koeffizient Kc (überschreibt die Pflanzenfamilie)",
               "exposure": "Standort-Exposition",
               "microclimate_factor": "Benutzerdefinierter Mikroklimafaktor (nur für Fortgeschrittene)",
-              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)"
+              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)",
+              "root_depth_m": "Wurzeltiefe",
+              "field_capacity": "Feldkapazität"
             },
             "data_description": {
               "area_m2": "Fläche dieser Bewässerungszone in Quadratmetern",
@@ -56,7 +58,9 @@
               "kc": "Wird nur verwendet, wenn die Pflanzenfamilie benutzerdefiniert ist. Bei jeder anderen Pflanzenfamilie gilt die saisonale Kurve und dieses Feld wird ignoriert.",
               "exposure": "Wie viel Sonne und Wind bekommt diese Zone im Vergleich zu einem offenen Gelände? Multipliziert den Kc, damit die Zone ihre saisonale Kurve behält anstatt nur einen festen Wert zu nutzen. Benutzerdefiniert wählen, um unten einen eigenen Faktor einzugeben.",
               "microclimate_factor": "Wird nur verwendet, wenn die Standort-Exposition benutzerdefiniert ist. Bereich 0,1–1,5; über 1,0 für Zonen, die schneller trocknen als offenes Gelände.",
-              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone in Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Wenn angegeben misst diese Zone ihr Defizit anstatt es zu berechnen – und ignoriert das globale Modell vollständig."
+              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone in Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Allein wird er neben den Werten der Zone angezeigt und sonst ändert sich nichts. Mit der Wurzeltiefe und der Feldkapazität unten misst diese Zone ihr Defizit, anstatt es zu berechnen.",
+              "root_depth_m": "Tiefe des Wurzelraums, für den die Sonde oben spricht. Zusammen mit der Feldkapazität wird der Messwert in Millimeter umgerechnet, und damit übernimmt die Sonde das Defizit dieser Zone. Beide Felder leer lassen, um die Sonde als Messwert neben der Schätzung des Modells zu behalten.",
+              "field_capacity": "Wassergehalt, den dieser Boden nach dem Abtropfen hält, als Bruchteil: etwa 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton. Wird zusammen mit der Wurzeltiefe gelesen, und nur wenn eine Sonde gesetzt ist."
             }
           },
           "valve_and_pipe": {
@@ -181,14 +185,18 @@
               "kc": "Benutzerdefinierter Pflanzen-Koeffizient Kc",
               "exposure": "Standort-Exposition",
               "microclimate_factor": "Benutzerdefinierter Mikroklimafaktor (nur für Fortgeschrittene)",
-              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)"
+              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)",
+              "root_depth_m": "Wurzeltiefe",
+              "field_capacity": "Feldkapazität"
             },
             "data_description": {
               "plant_family": "Setzt die saisonale Kc-Kurve für das, was hier wächst. Benutzerdefiniert wählen, um unten einen festen Kc zu setzen.",
               "kc": "Wird nur verwendet, wenn die Pflanzenfamilie benutzerdefiniert ist. Bei jeder anderen Pflanzenfamilie gilt die saisonale Kurve und dieses Feld wird ignoriert.",
               "exposure": "Wie viel Sonne und Wind bekommt diese Zone im Vergleich zu einem offenen Gelände? Multipliziert den Kc, damit die Zone ihre saisonale Kurve behält anstatt nur einen festen Wert zu nutzen. Benutzerdefiniert wählen, um unten einen eigenen Faktor einzugeben.",
               "microclimate_factor": "Wird nur verwendet, wenn die Standort-Exposition benutzerdefiniert ist. Bereich 0,1–1,5; über 1,0 für Zonen, die schneller trocknen als offenes Gelände.",
-              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone in Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Wenn angegeben misst diese Zone ihr Defizit anstatt es zu berechnen – und ignoriert das globale Modell vollständig."
+              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone in Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Allein wird er neben den Werten der Zone angezeigt und sonst ändert sich nichts. Mit der Wurzeltiefe und der Feldkapazität unten misst diese Zone ihr Defizit, anstatt es zu berechnen.",
+              "root_depth_m": "Tiefe des Wurzelraums, für den die Sonde oben spricht. Zusammen mit der Feldkapazität wird der Messwert in Millimeter umgerechnet, und damit übernimmt die Sonde das Defizit dieser Zone. Beide Felder leer lassen, um die Sonde als Messwert neben der Schätzung des Modells zu behalten.",
+              "field_capacity": "Wassergehalt, den dieser Boden nach dem Abtropfen hält, als Bruchteil: etwa 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton. Wird zusammen mit der Wurzeltiefe gelesen, und nur wenn eine Sonde gesetzt ist."
             }
           },
           "valve_and_pipe": {
@@ -248,14 +256,18 @@
               "kc": "Benutzerdefinierter Pflanzen-Koeffizient Kc",
               "exposure": "Standort-Exposition",
               "microclimate_factor": "Benutzerdefinierter Mikroklimafaktor (nur für Fortgeschrittene)",
-              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)"
+              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)",
+              "root_depth_m": "Wurzeltiefe",
+              "field_capacity": "Feldkapazität"
             },
             "data_description": {
               "plant_family": "Setzt die saisonale Kc-Kurve für das, was hier wächst. Benutzerdefiniert wählen, um unten einen festen Kc zu setzen.",
               "kc": "Wird nur verwendet, wenn die Pflanzenfamilie benutzerdefiniert ist. Bei jeder anderen Pflanzenfamilie gilt die saisonale Kurve und dieses Feld wird ignoriert.",
               "exposure": "Wie viel Sonne und Wind bekommt diese Zone im Vergleich zu einem offenen Gelände? Multipliziert den Kc, damit die Zone ihre saisonale Kurve behält anstatt nur einen festen Wert zu nutzen. Benutzerdefiniert wählen, um unten einen eigenen Faktor einzugeben.",
               "microclimate_factor": "Wird nur verwendet, wenn die Standort-Exposition benutzerdefiniert ist. Bereich 0,1–1,5; über 1,0 für Zonen, die schneller trocknen als offenes Gelände.",
-              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone in Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Wenn angegeben misst diese Zone ihr Defizit anstatt es zu berechnen – und ignoriert das globale Modell vollständig."
+              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone in Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Allein wird er neben den Werten der Zone angezeigt und sonst ändert sich nichts. Mit der Wurzeltiefe und der Feldkapazität unten misst diese Zone ihr Defizit, anstatt es zu berechnen.",
+              "root_depth_m": "Tiefe des Wurzelraums, für den die Sonde oben spricht. Zusammen mit der Feldkapazität wird der Messwert in Millimeter umgerechnet, und damit übernimmt die Sonde das Defizit dieser Zone. Beide Felder leer lassen, um die Sonde als Messwert neben der Schätzung des Modells zu behalten.",
+              "field_capacity": "Wassergehalt, den dieser Boden nach dem Abtropfen hält, als Bruchteil: etwa 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton. Wird zusammen mit der Wurzeltiefe gelesen, und nur wenn eine Sonde gesetzt ist."
             }
           },
           "valve_and_pipe": {

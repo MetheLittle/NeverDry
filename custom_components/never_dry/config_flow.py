@@ -37,6 +37,7 @@ from .const import (
     CONF_ZONE_DELIVERY_TIMEOUT,
     CONF_ZONE_EFFICIENCY,
     CONF_ZONE_EXPOSURE,
+    CONF_ZONE_FIELD_CAPACITY,
     CONF_ZONE_FLOW_METER_SENSOR,
     CONF_ZONE_FLOW_RATE,
     CONF_ZONE_IRRIGATION_MODE,
@@ -45,6 +46,7 @@ from .const import (
     CONF_ZONE_MICROCLIMATE_FACTOR,
     CONF_ZONE_NAME,
     CONF_ZONE_PLANT_FAMILY,
+    CONF_ZONE_ROOT_DEPTH,
     CONF_ZONE_SYSTEM_TYPE,
     CONF_ZONE_THRESHOLD,
     CONF_ZONE_VALVE,
@@ -473,6 +475,27 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
                         vol.Optional(CONF_ZONE_VWC_SENSOR, **_sug(CONF_ZONE_VWC_SENSOR)): selector.EntitySelector(
                             selector.EntitySelectorConfig(domain="sensor", device_class="moisture")
                         ),
+                        # The two numbers that turn the reading above into
+                        # millimetres, and by doing so hand it the deficit. Left
+                        # empty the probe stays what it was, a measurement shown
+                        # beside the model's estimate; filled in, the zone reads
+                        # its water from the soil. No default on purpose: this
+                        # pair is a decision, and a decision nobody made must not
+                        # arrive pre-made.
+                        vol.Optional(CONF_ZONE_ROOT_DEPTH, **_sug(CONF_ZONE_ROOT_DEPTH)): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=2.0 if is_imperial else 0.05,
+                                max=79.0 if is_imperial else 2.0,
+                                step=0.5 if is_imperial else 0.05,
+                                mode="box",
+                                unit_of_measurement="in" if is_imperial else "m",
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_ZONE_FIELD_CAPACITY, **_sug(CONF_ZONE_FIELD_CAPACITY)
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(min=0.05, max=0.6, step=0.01, mode="box")
+                        ),
                         vol.Optional(
                             CONF_ZONE_EXPOSURE, default=DEFAULT_EXPOSURE, **_sug(CONF_ZONE_EXPOSURE)
                         ): selector.SelectSelector(
@@ -817,6 +840,40 @@ def _zone_errors(user_input: dict) -> dict[str, str]:
     return errors
 
 
+def _probe_role_warnings(zone: dict) -> list[str]:
+    """Say which role the probe will actually play, when the pair does not agree.
+
+    The defect this exists for is not a wrong number, it is a belief. A user who
+    binds a soil probe to a zone reasonably concludes that the zone now waters by
+    what the soil says; nothing contradicted that, and the deficit went on coming
+    from the weather. The report that led here said it in those words: the sensor
+    is "ignored completely, but still in the settings".
+
+    Warned rather than refused, on the soft-confirm step that already carries the
+    ignored-override warnings. Requiring the pair would make anyone who opened a
+    zone to change its area decide about its model, and turn an edit into a
+    change of behaviour.
+    """
+    probe = zone.get(CONF_ZONE_VWC_SENSOR)
+    depth = zone.get(CONF_ZONE_ROOT_DEPTH)
+    capacity = zone.get(CONF_ZONE_FIELD_CAPACITY)
+    declared = [name for name, value in (("root depth", depth), ("field capacity", capacity)) if value is not None]
+
+    if probe and len(declared) < 2:
+        missing = "root depth and field capacity" if not declared else ("field capacity" if depth else "root depth")
+        return [
+            f"Soil probe: {missing} is missing, so the probe will be shown but will not set this"
+            " zone's deficit - the site's model keeps doing that. Fill both in to water by what"
+            " the soil measures"
+        ]
+    if not probe and declared:
+        return [
+            f"Soil probe: {' and '.join(declared)} will not be used, because this zone has no probe"
+            " to read. Pick one, or clear the fields"
+        ]
+    return []
+
+
 def _ignored_override_warnings(zone: dict) -> list[str]:
     """Tell the user which values will not be used, and why.
 
@@ -907,8 +964,10 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors.update(zone_errors)
             else:
                 zone_metric = _zone_input_to_metric(user_input, imperial)
-                self._pending_warnings = _unusual_zone_values(zone_metric, imperial) + _ignored_override_warnings(
-                    zone_metric
+                self._pending_warnings = (
+                    _unusual_zone_values(zone_metric, imperial)
+                    + _probe_role_warnings(zone_metric)
+                    + _ignored_override_warnings(zone_metric)
                 )
                 if self._pending_warnings:
                     self._pending_zone = zone_metric
@@ -1114,7 +1173,11 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                     data_schema=_zone_schema_initial(imperial, submitted),
                     errors=errors,
                 )
-            self._pending_warnings = _unusual_zone_values(user_input, imperial) + _ignored_override_warnings(user_input)
+            self._pending_warnings = (
+                _unusual_zone_values(user_input, imperial)
+                + _probe_role_warnings(user_input)
+                + _ignored_override_warnings(user_input)
+            )
             if self._pending_warnings:
                 self._pending_zone = user_input
                 self._pending_form = submitted
@@ -1180,8 +1243,10 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
             user_input = _zone_input_to_metric(user_input, imperial)
             errors = _zone_errors(user_input)
             if not errors:
-                self._pending_warnings = _unusual_zone_values(user_input, imperial) + _ignored_override_warnings(
-                    user_input
+                self._pending_warnings = (
+                    _unusual_zone_values(user_input, imperial)
+                    + _probe_role_warnings(user_input)
+                    + _ignored_override_warnings(user_input)
                 )
                 if self._pending_warnings:
                     self._pending_zone = user_input
@@ -1286,6 +1351,28 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                                 description={"suggested_value": _d(CONF_ZONE_VWC_SENSOR, None)},
                             ): selector.EntitySelector(
                                 selector.EntitySelectorConfig(domain="sensor", device_class="moisture")
+                            ),
+                            # Empty here too on a zone that never had them: a
+                            # suggestion would be the same unchosen value,
+                            # switching on a model with one less chance of being
+                            # noticed.
+                            vol.Optional(
+                                CONF_ZONE_ROOT_DEPTH,
+                                description={"suggested_value": _d(CONF_ZONE_ROOT_DEPTH, None)},
+                            ): selector.NumberSelector(
+                                selector.NumberSelectorConfig(
+                                    min=2.0 if imperial else 0.05,
+                                    max=79.0 if imperial else 2.0,
+                                    step=0.5 if imperial else 0.05,
+                                    mode="box",
+                                    unit_of_measurement="in" if imperial else "m",
+                                )
+                            ),
+                            vol.Optional(
+                                CONF_ZONE_FIELD_CAPACITY,
+                                description={"suggested_value": _d(CONF_ZONE_FIELD_CAPACITY, None)},
+                            ): selector.NumberSelector(
+                                selector.NumberSelectorConfig(min=0.05, max=0.6, step=0.01, mode="box")
                             ),
                             vol.Optional(
                                 CONF_ZONE_EXPOSURE,

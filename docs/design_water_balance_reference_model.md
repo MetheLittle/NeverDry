@@ -27,7 +27,7 @@ a given deficit defined?**
 |---|---|---|
 | **ET** | the system **temperature** sensor (ET input) + the system **rain** sensor | **Yes** — all zones read the same two sensors; they differ only by Kc (an ET multiplier) and irrigation history |
 | **VWC, system probe** (today) | one **system moisture** sensor | Yes — all zones scale the same current reading by Kc |
-| **VWC, per-zone probe** (target, AI-174) | **that zone's own moisture** sensor | **No** — each zone measures a different patch of soil |
+| **VWC, per-zone probe** (shipped) | **that zone's own moisture** sensor | **No**: each zone measures a different patch of soil |
 
 The load-bearing consequence: **two deficits are comparable only if they share a
 reference frame.** ET-mode siblings are comparable (shared weather). Two zones
@@ -53,13 +53,13 @@ inert until a later phase wires today's `DrynessIndexSensor` ET/VWC fork onto it
 | **Rain** (→ `rain_delta`) | **System feed** | one sensor for all zones, applied to every zone's balance |
 | **Deficit** (`+ ET·Kc·Δt − rain − irrigation`) | **Zone** | authoritative state |
 | **Kc, threshold, area, valve, irrigation state** | **Zone** | — |
-| **VWC sensor + `field_capacity` + `root_depth`** | **System (interim)** | until AI-174 → then per-zone |
+| **VWC sensor + `field_capacity` + `root_depth`** | **Zone** | declared together on the zone; a site-level binding survives only where the migration has not reached |
 
 So the only permanent system-level things are the two environmental **feeds**
-(temperature, rain). Everything else lives in the zone. The VWC model
-(`vwc_sensor`, `field_capacity`, `root_depth`) is system-level only until the
-per-zone VWC work (AI-174) lands, after which nothing but the feeds remains
-shared.
+(temperature, rain). Everything else lives in the zone, the VWC model included:
+`vwc_sensor`, `field_capacity` and `root_depth` are declared on the zone, and a
+site-level binding survives only on installations the migration has not yet
+reached.
 
 ## Decisions
 
@@ -134,14 +134,20 @@ even for users who care about a uniform starting point.
 counter ("rain received since this zone existed"), so 0 at creation is correct
 by definition, not a bug (see D3).
 
-### D5 — VWC deficit target is **per-zone**
-Today the VWC deficit is computed at system level (`DrynessIndexSensor._deficit`
-from one probe, scaled by Kc per zone) — benign because it is a *stateless
-measurement* recomputed each reading, and all zones track the same current
-value (no drift, no seeding bug). The **target** (AI-174) is per-zone probes:
-each zone computes its own deficit from its own sensor, or falls back to the ET
-model. When that lands, `DrynessIndexSensor._deficit` disappears entirely and
-the hub becomes pure plumbing.
+### D5 - VWC deficit is **per-zone**, and the zone declares what it is read with
+A zone computes its own deficit from its own probe, or falls back to the ET
+model. What took this from target to shipped is the pair that turns a fraction
+into millimetres: `root_depth` is a property of the planting and
+`field_capacity` one of the soil, so both are the zone's, and a probe declared
+without them stays a published measurement rather than becoming the deficit.
+That is also the opt-in. Nothing changes on an installation that has never been
+asked for the pair, and the estimate keeps running underneath a driving probe so
+that a probe going quiet costs an afternoon rather than a season.
+
+The system-level VWC deficit (`DrynessIndexSensor._deficit` from one probe,
+scaled by Kc per zone) remains for installations whose binding has not been
+moved. It is benign for the reason it always was: a *stateless measurement*
+recomputed each reading, with no drift and no seeding bug.
 
 ## What is kept vs retired
 
@@ -149,7 +155,7 @@ the hub becomes pure plumbing.
 |---|---|
 | `DrynessIndexSensor` as input hub (temp + rain → broadcast) | **Keep** — its real job |
 | `DrynessIndexSensor._deficit` as **ET accumulator** | **Retire** — dead weight + the #123 seed bug |
-| `DrynessIndexSensor._deficit` as **VWC system measurement** | **Interim** — stateless, benign; removed by AI-174 (per-zone probe) |
+| `DrynessIndexSensor._deficit` as **VWC system measurement** | **Legacy**: stateless and benign, kept for bindings the migration has not moved |
 | "Dryness Index" display entity | Derived (max/mean of zones) or dropped |
 | `IrrigationZoneSensor._zone_deficit` | **Keep — authoritative** |
 
