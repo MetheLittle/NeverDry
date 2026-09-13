@@ -123,6 +123,27 @@ computed. Adjacent rather than central: it is about what a run is, not when it
 happens, but it lands on the same concurrency and stopping rules as everything
 above.
 
+## What each request already has to hold on to
+
+None of the six starts from nothing, and this is the table to read first when
+coming back to this file cold. Each request attaches to something that exists
+and works today.
+
+| request | what it attaches to |
+|---|---|
+| **#231** finish before sunrise | the zone already computes its expected duration. "Finish by sunrise" is that number subtracted from sunrise; the number exists |
+| **#138** skip before rain | a refusal to water already carries a `SkipReason` and is published rather than silent. A forecast gate is one more reason in a list that already has a home |
+| **#74** one valve at a time | the controller already refuses to start a zone while another runs. The refusal has to become a **wait**, which is the same decision with memory attached, and memory is exactly what `next_eligible` was written to avoid |
+| **#74** cycle and soak | a run already has a defined end and must show that water moved. A pass is that run, repeated, with a gap |
+| **#95** master pump | a valve is already opened, confirmed, watched and closed by `ValveOperator` and the driver. A master is another valve with an ordering rule around it, not a new kind of thing |
+| **#213** interrupt a run | stopping early works, and since the delivery contract a run that ends short credits exactly what it delivered. What is missing is who may call it, and on what evidence |
+| **#214** manual run of N minutes | in `estimated_flow` the duration **is** the dose. The mode exists; what is missing is asking for one without the model choosing the number |
+
+Read down the right-hand column and the shape of the missing layer appears
+without anyone designing it. It has to **wait**, **order**, **refuse with a
+reason**, **repeat**, and **stop something already under way**. Five verbs, one
+object, and four of the five already have a vocabulary somewhere in the code.
+
 ## What this document does not do
 
 It does not propose a design, name an object, or say which of the requests above
