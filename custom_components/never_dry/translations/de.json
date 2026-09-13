@@ -48,7 +48,10 @@
               "kc": "Benutzerdefinierter Pflanzen-Koeffizient Kc (überschreibt die Pflanzenfamilie)",
               "exposure": "Standort-Exposition",
               "microclimate_factor": "Benutzerdefinierter Mikroklimafaktor (nur für Fortgeschrittene)",
-              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)"
+              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)",
+              "root_depth_m": "Wurzeltiefe",
+              "field_capacity": "Feldkapazität",
+              "soil_type": "Bodentyp"
             },
             "data_description": {
               "area_m2": "Fläche dieser Bewässerungszone in Quadratmetern",
@@ -56,7 +59,10 @@
               "kc": "Wird nur verwendet, wenn die Pflanzenfamilie benutzerdefiniert ist. Bei jeder anderen Pflanzenfamilie gilt die saisonale Kurve und dieses Feld wird ignoriert.",
               "exposure": "Wie viel Sonne und Wind bekommt diese Zone im Vergleich zu einem offenen Gelände? Multipliziert den Kc, damit die Zone ihre saisonale Kurve behält anstatt nur einen festen Wert zu nutzen. Benutzerdefiniert wählen, um unten einen eigenen Faktor einzugeben.",
               "microclimate_factor": "Wird nur verwendet, wenn die Standort-Exposition benutzerdefiniert ist. Bereich 0,1–1,5; über 1,0 für Zonen, die schneller trocknen als offenes Gelände.",
-              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone in Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Wenn angegeben misst diese Zone ihr Defizit anstatt es zu berechnen – und ignoriert das globale Modell vollständig."
+              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone etwa in einem Drittel der Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Allein wird er neben den Werten der Zone angezeigt und sonst ändert sich nichts. Mit der Wurzeltiefe unten misst diese Zone ihr Defizit, anstatt es zu berechnen.",
+              "root_depth_m": "Tiefe des Wurzelraums, für den die Sonde oben spricht, und die einzige Zahl hier, die in keiner Tabelle steht: Rasen, Hecke und Topf unterscheiden sich auf demselben Boden um das Vierfache. Ausgefüllt misst diese Zone ihr Defizit, anstatt es zu berechnen. Leer gelassen bleibt die Sonde ein Messwert neben der Schätzung.",
+              "field_capacity": "Wird nur gelesen, wenn der Bodentyp oben auf Benutzerdefiniert steht. Wassergehalt, den dieser Boden nach dem Abtropfen hält, als Bruchteil: etwa 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton.",
+              "soil_type": "Optional. Woraus der Boden dieser Zone besteht. Er liefert die Feldkapazität, gegen die der Messwert der Sonde gemessen wird, sodass die Zahl nicht bekannt sein muss. Auf Automatisch wird ein mittlerer Boden angenommen, was für die meisten Gärten passt und beim Speichern ausdrücklich genannt wird."
             }
           },
           "valve_and_pipe": {
@@ -124,7 +130,9 @@
       "kc_required": "Wähle einen Kc: Die Pflanzenfamilie ist auf benutzerdefiniert gesetzt, der Wert aus diesem Feld wird verwendet",
       "microclimate_factor_required": "Wähle einen Mikroklimafaktor: Die Exposition ist auf benutzerdefiniert gesetzt, der Wert wird aus diesem Feld wird verwendet",
       "et_method_missing_sensors": "Dieses Modell benötigt Sensoren, welche nicht deklariert wurden. Die benötigten Sensoren auswählen oder das Modell auf Automatisch lassen.",
-      "et_method_unknown": "Unbekanntes Evapotranspirations-Modell"
+      "et_method_unknown": "Unbekanntes Evapotranspirations-Modell",
+      "et_method_zone_probe": "Ein Bodenfeuchte-Sensor gehört zu einer Zone, nicht zur gesamten Installation. Den Sensor in den Optionen der betreffenden Zone festlegen; das Modell hier gilt für Zonen ohne eigenen Sensor.",
+      "field_capacity_required": "Eine Feldkapazität wählen: der Bodentyp steht auf Benutzerdefiniert und nimmt seinen Wert aus diesem Feld"
     },
     "abort": {
       "already_configured": "NeverDry ist bereits konfiguriert"
@@ -180,14 +188,20 @@
               "kc": "Benutzerdefinierter Pflanzen-Koeffizient Kc",
               "exposure": "Standort-Exposition",
               "microclimate_factor": "Benutzerdefinierter Mikroklimafaktor (nur für Fortgeschrittene)",
-              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)"
+              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)",
+              "root_depth_m": "Wurzeltiefe",
+              "field_capacity": "Feldkapazität",
+              "soil_type": "Bodentyp"
             },
             "data_description": {
               "plant_family": "Setzt die saisonale Kc-Kurve für das, was hier wächst. Benutzerdefiniert wählen, um unten einen festen Kc zu setzen.",
               "kc": "Wird nur verwendet, wenn die Pflanzenfamilie benutzerdefiniert ist. Bei jeder anderen Pflanzenfamilie gilt die saisonale Kurve und dieses Feld wird ignoriert.",
               "exposure": "Wie viel Sonne und Wind bekommt diese Zone im Vergleich zu einem offenen Gelände? Multipliziert den Kc, damit die Zone ihre saisonale Kurve behält anstatt nur einen festen Wert zu nutzen. Benutzerdefiniert wählen, um unten einen eigenen Faktor einzugeben.",
               "microclimate_factor": "Wird nur verwendet, wenn die Standort-Exposition benutzerdefiniert ist. Bereich 0,1–1,5; über 1,0 für Zonen, die schneller trocknen als offenes Gelände.",
-              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone in Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Wenn angegeben misst diese Zone ihr Defizit anstatt es zu berechnen – und ignoriert das globale Modell vollständig."
+              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone etwa in einem Drittel der Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Allein wird er neben den Werten der Zone angezeigt und sonst ändert sich nichts. Mit der Wurzeltiefe unten misst diese Zone ihr Defizit, anstatt es zu berechnen.",
+              "root_depth_m": "Tiefe des Wurzelraums, für den die Sonde oben spricht, und die einzige Zahl hier, die in keiner Tabelle steht: Rasen, Hecke und Topf unterscheiden sich auf demselben Boden um das Vierfache. Ausgefüllt misst diese Zone ihr Defizit, anstatt es zu berechnen. Leer gelassen bleibt die Sonde ein Messwert neben der Schätzung.",
+              "field_capacity": "Wird nur gelesen, wenn der Bodentyp oben auf Benutzerdefiniert steht. Wassergehalt, den dieser Boden nach dem Abtropfen hält, als Bruchteil: etwa 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton.",
+              "soil_type": "Optional. Woraus der Boden dieser Zone besteht. Er liefert die Feldkapazität, gegen die der Messwert der Sonde gemessen wird, sodass die Zahl nicht bekannt sein muss. Auf Automatisch wird ein mittlerer Boden angenommen, was für die meisten Gärten passt und beim Speichern ausdrücklich genannt wird."
             }
           },
           "valve_and_pipe": {
@@ -247,14 +261,20 @@
               "kc": "Benutzerdefinierter Pflanzen-Koeffizient Kc",
               "exposure": "Standort-Exposition",
               "microclimate_factor": "Benutzerdefinierter Mikroklimafaktor (nur für Fortgeschrittene)",
-              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)"
+              "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)",
+              "root_depth_m": "Wurzeltiefe",
+              "field_capacity": "Feldkapazität",
+              "soil_type": "Bodentyp"
             },
             "data_description": {
               "plant_family": "Setzt die saisonale Kc-Kurve für das, was hier wächst. Benutzerdefiniert wählen, um unten einen festen Kc zu setzen.",
               "kc": "Wird nur verwendet, wenn die Pflanzenfamilie benutzerdefiniert ist. Bei jeder anderen Pflanzenfamilie gilt die saisonale Kurve und dieses Feld wird ignoriert.",
               "exposure": "Wie viel Sonne und Wind bekommt diese Zone im Vergleich zu einem offenen Gelände? Multipliziert den Kc, damit die Zone ihre saisonale Kurve behält anstatt nur einen festen Wert zu nutzen. Benutzerdefiniert wählen, um unten einen eigenen Faktor einzugeben.",
               "microclimate_factor": "Wird nur verwendet, wenn die Standort-Exposition benutzerdefiniert ist. Bereich 0,1–1,5; über 1,0 für Zonen, die schneller trocknen als offenes Gelände.",
-              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone in Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Wenn angegeben misst diese Zone ihr Defizit anstatt es zu berechnen – und ignoriert das globale Modell vollständig."
+              "vwc_sensor": "Optional. Ein Sensor, der in dieser Zone etwa in einem Drittel der Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Allein wird er neben den Werten der Zone angezeigt und sonst ändert sich nichts. Mit der Wurzeltiefe unten misst diese Zone ihr Defizit, anstatt es zu berechnen.",
+              "root_depth_m": "Tiefe des Wurzelraums, für den die Sonde oben spricht, und die einzige Zahl hier, die in keiner Tabelle steht: Rasen, Hecke und Topf unterscheiden sich auf demselben Boden um das Vierfache. Ausgefüllt misst diese Zone ihr Defizit, anstatt es zu berechnen. Leer gelassen bleibt die Sonde ein Messwert neben der Schätzung.",
+              "field_capacity": "Wird nur gelesen, wenn der Bodentyp oben auf Benutzerdefiniert steht. Wassergehalt, den dieser Boden nach dem Abtropfen hält, als Bruchteil: etwa 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton.",
+              "soil_type": "Optional. Woraus der Boden dieser Zone besteht. Er liefert die Feldkapazität, gegen die der Messwert der Sonde gemessen wird, sodass die Zahl nicht bekannt sein muss. Auf Automatisch wird ein mittlerer Boden angenommen, was für die meisten Gärten passt und beim Speichern ausdrücklich genannt wird."
             }
           },
           "valve_and_pipe": {
@@ -303,12 +323,14 @@
       "microclimate_factor_required": "Wähle einen Mikroklimafaktor: Die Exposition ist auf benutzerdefiniert gesetzt, der Wert wird aus diesem Feld wird verwendet",
       "et_method_missing_sensors": "Dieses Modell benötigt Sensoren, welche nicht deklariert wurden. Die benötigten Sensoren auswählen oder das Modell auf Automatisch lassen.",
       "et_method_unknown": "Unbekanntes Evapotranspirations-Modell",
+      "et_method_zone_probe": "Ein Bodenfeuchte-Sensor gehört zu einer Zone, nicht zur gesamten Installation. Den Sensor in den Optionen der betreffenden Zone festlegen; das Modell hier gilt für Zonen ohne eigenen Sensor.",
       "flow_rate_required": "Die Soll-Durchflußrate muß angegeben werden: Der gewählte Bewässerungs-Modus berechnet daraus die Bewässerungsdauer.",
       "flow_meter_required": "Ein Durchflußmesser-Sensor muß angegeben werden – ein Summenzähler oder ein Durchflussmesser: Der gewählte Bewässerungs-Modus schließt das Ventil bei Erreichen des berechneten Volumen.",
       "volume_entity_required": "Eine Zielvolumen-Entität muß angegeben werden: Der gewählte Bewässerungs-Modus übernimmt vom Ventil das Volumen",
       "zone_already_exists": "Eine Zone mit diesem Namen existiert bereits",
       "too_many_zones": "Maximale Zonenanzahl erreicht (50)",
-      "zone_name_too_long": "Zonen-Name zu lang (max. 64 Zeichen)"
+      "zone_name_too_long": "Zonen-Name zu lang (max. 64 Zeichen)",
+      "field_capacity_required": "Eine Feldkapazität wählen: der Bodentyp steht auf Benutzerdefiniert und nimmt seinen Wert aus diesem Feld"
     },
     "abort": {
       "no_zones": "Keine Zonen angelegt"
@@ -375,8 +397,16 @@
         "auto": "Automatisch — das beste Modell für die verfügbaren Sensoren",
         "et_simple": "Einfach (nur Temperatur)",
         "hargreaves": "Hargreaves-Samani (tägliche max./min. Temperatur)",
-        "penman_monteith": "Penman-Monteith (FAO-56, alle Wetter Sensoren)",
-        "vwc_system": "Bodenfeuchte-Sensor"
+        "penman_monteith": "Penman-Monteith (FAO-56, alle Wetter Sensoren)"
+      }
+    },
+    "soil_type": {
+      "options": {
+        "auto": "Automatisch (ein mittlerer Boden)",
+        "sandy": "Sandig oder leicht, schnell dränend",
+        "loam": "Lehm oder mittel",
+        "clay": "Ton oder schwer, hält Wasser",
+        "custom": "Benutzerdefiniert (Feldkapazität eintragen)"
       }
     }
   },

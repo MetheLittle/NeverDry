@@ -11,6 +11,7 @@ these tests hold is mostly about *them*: what happens on upgrade, what happens
 while the question is unanswered, and what is never decided on their behalf.
 """
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,10 +20,16 @@ from never_dry.const import (
     CONF_TEMP_SENSOR,
     CONF_VWC_SENSOR,
     CONF_ZONE_AREA,
+    CONF_ZONE_FIELD_CAPACITY,
     CONF_ZONE_NAME,
+    CONF_ZONE_ROOT_DEPTH,
+    CONF_ZONE_SOIL_TYPE,
     CONF_ZONE_VWC_SENSOR,
     CONF_ZONES,
     CONFIG_VERSION,
+    SOIL_TYPE_CLAY,
+    SOIL_TYPE_CUSTOM,
+    SOIL_TYPE_SANDY,
 )
 from never_dry.sensor import DrynessIndexSensor, IrrigationZoneSensor
 
@@ -31,6 +38,30 @@ HUB = {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r"}
 
 def _zone(hass, dryness, **cfg):
     return IrrigationZoneSensor(hass, {CONF_ZONE_NAME: "Orto", CONF_ZONE_AREA: 20.0, **cfg}, dryness)
+
+
+#: A zone whose probe has been told what to read its readings with. The soil is
+#: named rather than left automatic so that the arithmetic in these tests stays
+#: legible: 0.30 field capacity, 0.30 m of roots, and a reading of 18 % gives 36
+#: mm. The automatic soil has its own tests below.
+DRIVEN = {
+    CONF_ZONE_VWC_SENSOR: "sensor.orto_soil",
+    CONF_ZONE_ROOT_DEPTH: 0.30,
+    CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
+    CONF_ZONE_FIELD_CAPACITY: 0.30,
+}
+
+
+def _zone_of(hass, dryness, **cfg):
+    """A zone with an arbitrary ground configuration."""
+    return IrrigationZoneSensor(hass, {CONF_ZONE_NAME: "Orto", CONF_ZONE_AREA: 20.0, **cfg}, dryness)
+
+
+def _reading(value: str):
+    """A probe state-change event carrying ``value``."""
+    event = MagicMock()
+    event.data = {"new_state": MagicMock(state=value)}
+    return event
 
 
 class TestAZoneWithItsOwnProbe:
@@ -58,17 +89,24 @@ class TestAZoneWithItsOwnProbe:
         # an irrigation is what reveals a delivery that moved no water.
         assert attrs["probe_implied_deficit_mm"] == pytest.approx(36.0)
 
-    def test_the_reading_does_not_touch_the_deficit(self, hass_mock):
-        """The rejected design, kept as a test so it cannot come back by accident."""
+    def test_the_reading_does_not_touch_the_deficit_until_the_zone_says_how_to_read_it(self, hass_mock):
+        """The old rule, now circumstantiated rather than deleted.
+
+        It was never "a probe must not drive the deficit". It was "a probe must
+        not drive it *on its own*, with nobody having said what to read it
+        with": a reading is a fraction, and the millimetres only exist once a
+        root depth and a field capacity have been declared for this patch of
+        soil. Without them nothing has changed, and that is what this holds.
+        """
         hub = DrynessIndexSensor(hass_mock, dict(HUB))
         zone = _zone(hass_mock, hub, **{CONF_ZONE_VWC_SENSOR: "sensor.orto_soil"})
         zone._zone_deficit = 4.0
 
-        event = MagicMock()
-        event.data = {"new_state": MagicMock(state="18.0")}
-        zone._on_own_probe(event)
+        zone._on_own_probe(_reading("18.0"))
 
+        assert zone._probe_drives is False
         assert zone._zone_deficit == 4.0
+        assert zone.deficit_source == "site_model"
 
     def test_the_zone_keeps_integrating_the_model(self, hass_mock):
         """A probe adds a measurement; it does not switch the model off.
@@ -261,3 +299,405 @@ class TestTheQuestionAsked:
 
         assert not created
         assert deleted
+
+
+class TestTheProbeDrivesOnceItIsToldWhatToReadItWith:
+    """The two numbers are the switch, and they are also the responsibility.
+
+    A fraction becomes millimetres by being multiplied by a root depth, and no
+    root depth is right for every planting: the same 18 % reading is 18 mm under
+    a lawn and 72 mm under a hedge. NeverDry cannot know which, the gardener can,
+    and the act of typing the pair is the act of saying so. What the integration
+    owes in return is to never pretend the number was measured when half of it
+    was declared -- which is why the scaling is published beside the result.
+    """
+
+    def test_both_numbers_present_hands_the_deficit_to_the_soil(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._zone_deficit = 4.0
+
+        zone._on_own_probe(_reading("18.0"))
+
+        # (0.30 - 0.18) * 0.30 m * 1000
+        assert zone._zone_deficit == pytest.approx(36.0)
+        assert zone.deficit_source == "zone_probe"
+
+    def test_the_zone_numbers_are_used_and_not_the_site_ones(self, hass_mock):
+        """The whole point of moving them onto the zone."""
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **{**DRIVEN, CONF_ZONE_ROOT_DEPTH: 0.60})
+
+        zone._on_own_probe(_reading("18.0"))
+
+        assert zone._zone_deficit == pytest.approx(72.0)
+
+    def test_what_scaled_the_reading_is_published_beside_it(self, hass_mock):
+        """A declaration wearing the clothes of a measurement has to say so."""
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._on_own_probe(_reading("18.0"))
+
+        attrs = zone.extra_state_attributes
+
+        assert attrs["deficit_source"] == "zone_probe"
+        assert attrs["probe_root_depth_m"] == 0.30
+        assert attrs["probe_field_capacity"] == 0.30
+
+    def test_a_zone_with_no_probe_says_the_model_answers_for_it(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        assert _zone(hass_mock, hub).extra_state_attributes["deficit_source"] == "site_model"
+
+
+class TestTheModelKeepsRunningUnderneath:
+    """The reserve is not rebuilt after the failure; it was never switched off.
+
+    A probe fails when its battery does, which is to say without warning and
+    usually in the dry half of the year. A reserve that started integrating at
+    that moment would start from zero with the garden already thirsty, so the
+    estimate advances the whole time, published or not.
+    """
+
+    def test_the_estimate_advances_while_the_probe_is_driving(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._zone_deficit = 1.0
+        zone._on_own_probe(_reading("18.0"))
+
+        zone._on_et_update(1.0, 0.3, 0.0)
+
+        assert zone._et_deficit > 1.0, "the reserve stopped advancing"
+        assert zone._zone_deficit == pytest.approx(36.0), "the published number left the soil"
+
+    def test_the_estimate_is_not_seeded_from_the_soil_each_tick(self, hass_mock):
+        """The trap in sharing one accessor: the integration would restart from
+        the probe every hour and the reserve would only ever be one tick old."""
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._zone_deficit = 1.0
+        zone._on_own_probe(_reading("18.0"))
+
+        zone._on_et_update(1.0, 0.3, 0.0)
+        first = zone._et_deficit
+        zone._on_et_update(1.0, 0.3, 0.0)
+
+        assert zone._et_deficit > first
+        assert first < 36.0, "the reserve was seeded from the probe instead of integrating"
+
+
+class TestAProbeThatStopsSpeaking:
+    """The failure the freshness check exists for, and the only one that is silent.
+
+    A probe whose battery dies keeps its last value on display for as long as
+    anyone cares to look. Believed, it would report damp soil from June until
+    September and the zone would never be watered again -- a fault that presents
+    as nothing at all.
+    """
+
+    def _driven_zone(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._zone_deficit = 4.0
+        zone._on_own_probe(_reading("18.0"))
+        return zone
+
+    def test_quiet_for_longer_than_it_has_ever_been_falls_back(self, hass_mock):
+        zone = self._driven_zone(hass_mock)
+        zone._probe_intervals.extend([300.0, 310.0, 305.0])
+        zone._probe_last_seen = datetime.now(UTC) - timedelta(minutes=20)
+
+        assert zone._probe_is_fresh() is False
+        assert zone.deficit_source == "site_model"
+        assert zone._zone_deficit == 4.0
+
+    def test_quiet_within_its_own_cadence_is_believed(self, hass_mock):
+        """The bar is this probe's habit, never a constant: one sensor speaks
+        every thirty seconds and another twice a day."""
+        zone = self._driven_zone(hass_mock)
+        zone._probe_intervals.extend([300.0, 310.0, 305.0])
+        zone._probe_last_seen = datetime.now(UTC) - timedelta(minutes=2)
+
+        assert zone._probe_is_fresh() is True
+        assert zone._zone_deficit == pytest.approx(36.0)
+
+    def test_with_no_cadence_yet_the_reading_still_stands(self, hass_mock):
+        """No samples is not evidence of silence, and refusing a good reading
+        would send the zone onto the estimate for no reason at all."""
+        zone = self._driven_zone(hass_mock)
+
+        assert not zone._probe_intervals
+        assert zone._probe_is_fresh() is True
+
+    def test_the_backstop_catches_a_probe_that_never_established_one(self, hass_mock):
+        """The case its own bar cannot see: dead before it ever had a habit."""
+        zone = self._driven_zone(hass_mock)
+        zone._probe_last_seen = datetime.now(UTC) - timedelta(hours=48)
+
+        assert not zone._probe_intervals
+        assert zone._probe_is_fresh() is False
+        assert zone._zone_deficit == 4.0
+
+    def test_the_fall_is_said_out_loud_once(self, hass_mock, caplog):
+        zone = self._driven_zone(hass_mock)
+        zone._probe_last_seen = datetime.now(UTC) - timedelta(hours=48)
+
+        zone._on_et_update(1.0, 0.3, 0.0)
+        zone._on_et_update(1.0, 0.3, 0.0)
+
+        assert sum("stopped reporting" in r.message for r in caplog.records) == 1
+
+    def test_speaking_again_is_enough_to_be_believed_again(self, hass_mock):
+        """No mode to leave: an afternoon of quiet costs an afternoon."""
+        zone = self._driven_zone(hass_mock)
+        zone._probe_last_seen = datetime.now(UTC) - timedelta(hours=48)
+        assert zone.deficit_source == "site_model"
+
+        zone._on_own_probe(_reading("18.0"))
+
+        assert zone.deficit_source == "zone_probe"
+
+
+class TestWhatTheFormSaysAboutTheProbesRole:
+    """The defect behind the report was a belief, not a number.
+
+    Binding a probe to a zone reads as "this zone now waters by what the soil
+    says". Nothing contradicted it, and the deficit went on coming from the
+    weather.
+    """
+
+    def test_a_probe_without_a_root_depth_is_told_it_will_not_drive(self):
+        from never_dry.config_flow import _probe_role_warnings
+
+        warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil"})
+
+        assert len(warnings) == 1
+        assert "will not set" in warnings[0]
+        assert "root depth" in warnings[0]
+
+    def test_a_named_soil_and_a_depth_say_nothing_because_the_choice_was_made(self):
+        from never_dry.config_flow import _probe_role_warnings
+
+        assert _probe_role_warnings(dict(DRIVEN)) == []
+
+    def test_an_assumed_soil_is_named_rather_than_passed_over(self):
+        """The price of the automatic entry, and the condition that makes it fair.
+
+        A default nobody is told about is the hardcoded constant this replaced,
+        with a dropdown standing in front of it.
+        """
+        from never_dry.config_flow import _probe_role_warnings
+
+        warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil", CONF_ZONE_ROOT_DEPTH: 0.3})
+
+        assert len(warnings) == 1
+        assert "medium soil" in warnings[0]
+
+    def test_numbers_with_no_probe_to_read_are_flagged_as_unused(self):
+        """The same shape as the ignored-override warnings: a value nobody reads."""
+        from never_dry.config_flow import _probe_role_warnings
+
+        warnings = _probe_role_warnings({CONF_ZONE_ROOT_DEPTH: 0.3, CONF_ZONE_FIELD_CAPACITY: 0.25})
+
+        assert "will not be used" in warnings[0]
+
+    def test_a_zone_with_neither_is_not_lectured(self):
+        from never_dry.config_flow import _probe_role_warnings
+
+        assert _probe_role_warnings({CONF_ZONE_NAME: "Orto"}) == []
+
+
+def test_root_depth_is_a_length_and_crosses_the_unit_boundary():
+    """Entered in inches on an imperial form, stored in metres like everything else."""
+    from never_dry.unit_convert import zone_input_to_metric
+
+    metric = zone_input_to_metric({CONF_ZONE_ROOT_DEPTH: 12.0}, True)
+
+    assert metric[CONF_ZONE_ROOT_DEPTH] == pytest.approx(0.3048)
+
+
+def test_field_capacity_is_a_fraction_and_does_not():
+    from never_dry.unit_convert import zone_input_to_metric
+
+    assert zone_input_to_metric({CONF_ZONE_FIELD_CAPACITY: 0.25}, True)[CONF_ZONE_FIELD_CAPACITY] == 0.25
+
+
+class TestTheTriggerAndTheDoseAnswerTheSameQuestion:
+    """The defect the first version shipped with, caught before any beta.
+
+    The dose came from the entity property and the trigger from the domain
+    object, and only one of the two had been pointed at the measurement. A zone
+    whose soil said thirty millimetres and whose weather said two would never
+    have started; one started by the weather would have been dosed by the soil.
+    One number now, read through `acting_deficit`.
+    """
+
+    def _zone_with(self, hass_mock, *, estimate_mm, reading):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._zone.threshold_mm = 10.0
+        zone._zone_deficit = estimate_mm
+        zone._on_own_probe(_reading(reading))
+        return zone
+
+    def test_dry_soil_asks_for_water_though_the_weather_is_calm(self, hass_mock):
+        zone = self._zone_with(hass_mock, estimate_mm=2.0, reading="18.0")  # soil: 36 mm
+
+        assert zone.domain_zone.needs_water is True
+
+    def test_wet_soil_keeps_a_thirsty_estimate_quiet(self, hass_mock):
+        """The direction that matters most: not watering is the irreversible half."""
+        zone = self._zone_with(hass_mock, estimate_mm=30.0, reading="29.0")  # soil: 3 mm
+
+        assert zone.domain_zone.needs_water is False
+
+    def test_the_dose_is_taken_from_the_same_number(self, hass_mock):
+        zone = self._zone_with(hass_mock, estimate_mm=2.0, reading="18.0")
+
+        assert zone._zone.acting_deficit.value_mm == pytest.approx(36.0)
+        assert zone._zone.water_demand_l > zone._zone.deficit.as_liters(zone._zone.area_m2)
+
+
+class TestWaterTheSoilHasNotSeenYet:
+    """A stateless measurement does not fall when you water: it falls when it
+    next reports, and on a battery device that is minutes away.
+
+    Left standing it would go on saying the zone is dry and, in reactive mode,
+    ask for the same water again before the soil had a chance to disagree. The
+    rule applied is the one the rest of the integration already follows: a
+    measurement that cannot have observed the event does not get to speak
+    about it.
+    """
+
+    def _watered(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._zone.threshold_mm = 10.0
+        zone._zone_deficit = 12.0
+        zone._on_own_probe(_reading("18.0"))
+        assert zone.deficit_source == "zone_probe"
+        zone.credit_delivery(zone._zone.water_demand_l)
+        return zone
+
+    def test_a_delivery_withdraws_the_measurement(self, hass_mock):
+        assert self._watered(hass_mock)._zone.measured_deficit is None
+
+    def test_the_estimate_answers_until_a_fresh_reading_arrives(self, hass_mock):
+        zone = self._watered(hass_mock)
+
+        assert zone.deficit_source == "site_model"
+
+    def test_the_zone_does_not_immediately_ask_again(self, hass_mock):
+        """The re-irrigation loop this exists to prevent: with the measurement
+        left standing the trigger would fire on the very next broadcast, and the
+        only thing in its way is a ten-second limit on service calls."""
+        zone = self._watered(hass_mock)
+
+        assert zone.domain_zone.needs_water is False
+
+    def test_a_fresh_reading_gives_the_soil_its_voice_back(self, hass_mock):
+        zone = self._watered(hass_mock)
+
+        zone._on_own_probe(_reading("18.0"))
+
+        assert zone.deficit_source == "zone_probe"
+        assert zone.domain_zone.needs_water is True
+
+    def test_the_measurement_carries_the_frame_of_a_measurement(self, hass_mock):
+        """Not ET: one patch of soil, not comparable with a sibling's."""
+        from never_dry.water_balance_model import ReferenceFrame
+
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._on_own_probe(_reading("18.0"))
+
+        assert zone._zone.acting_deficit.frame is ReferenceFrame.VWC_PER_ZONE
+        assert zone._zone.deficit.frame is ReferenceFrame.ET
+
+    def test_marking_the_zone_irrigated_is_not_overruled_by_the_soil(self, hass_mock):
+        """The same rule at the other door, and this one has a button behind it.
+
+        `mark_irrigated` asserts an outcome rather than crediting an amount: the
+        user says the zone is full. A measurement taken before the water arrived
+        would have won over that zero the moment anyone asked, and the button
+        would have looked broken.
+        """
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._on_own_probe(_reading("18.0"))
+        assert zone._zone_deficit == pytest.approx(36.0)
+
+        zone.reset_deficit(source="manual")
+
+        assert zone._zone_deficit == 0.0
+        assert zone.deficit_source == "site_model"
+
+
+class TestTheGroundIsChosenNotTyped:
+    """Field capacity and wilting point are one piece of information, not two.
+
+    They come off the same texture table and a gardener has neither to hand, so
+    asking for both as figures asks twice for something nobody owns. One choice
+    supplies them, which leaves the root depth as the only number the user must
+    give -- and that is the right one to have kept, because no table holds it: a
+    lawn, a hedge and a pot differ by a factor of four on the same ground.
+    """
+
+    def _zone(self, hass_mock, **cfg):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone_of(hass_mock, hub, **{CONF_ZONE_VWC_SENSOR: "sensor.orto_soil", **cfg})
+        zone._on_own_probe(_reading("18.0"))
+        return zone
+
+    def test_a_depth_alone_is_enough_because_the_soil_has_a_default(self, hass_mock):
+        zone = self._zone(hass_mock, **{CONF_ZONE_ROOT_DEPTH: 0.30})
+
+        assert zone._probe_drives is True
+        assert zone.deficit_source == "zone_probe"
+        # medium soil: (0.25 - 0.18) * 0.30 m * 1000
+        assert zone._zone_deficit == pytest.approx(21.0)
+
+    def test_without_a_depth_no_default_can_rescue_it(self, hass_mock):
+        """The switch is the depth, and nothing stands in for it."""
+        zone = self._zone(hass_mock)
+
+        assert zone._probe_drives is False
+        assert zone.deficit_source == "site_model"
+
+    def test_sand_and_clay_are_not_the_same_garden(self, hass_mock):
+        """The whole reason the choice is worth offering: same reading, same
+        roots, and a reservoir that differs by more than a factor of two."""
+        sandy = self._zone(hass_mock, **{CONF_ZONE_ROOT_DEPTH: 0.30, CONF_ZONE_SOIL_TYPE: SOIL_TYPE_SANDY})
+        clay = self._zone(hass_mock, **{CONF_ZONE_ROOT_DEPTH: 0.30, CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CLAY})
+
+        assert sandy._zone_deficit == pytest.approx(-9.0 + 9.0)  # (0.15 - 0.18) < 0, clamped to 0
+        assert clay._zone_deficit == pytest.approx(54.0)  # (0.36 - 0.18) * 0.30 * 1000
+
+    def test_the_assumed_soil_is_published_with_the_number_it_produced(self, hass_mock):
+        zone = self._zone(hass_mock, **{CONF_ZONE_ROOT_DEPTH: 0.30})
+
+        attrs = zone.extra_state_attributes
+
+        assert attrs["probe_soil_type"] == "auto"
+        assert attrs["probe_field_capacity"] == pytest.approx(0.25)
+
+    def test_custom_soil_reads_the_box(self, hass_mock):
+        zone = self._zone(hass_mock, **DRIVEN)
+
+        assert zone._zone_deficit == pytest.approx(36.0)
+
+    def test_custom_soil_with_an_empty_box_is_refused_by_the_form(self):
+        """The preset/override contract, fourth application: Custom says the
+        value is mine to give, and without it the zone would fall back to a
+        neutral default and behave as if nothing had been chosen."""
+        from never_dry.config_flow import _override_errors
+
+        errors = _override_errors({CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM})
+
+        assert errors.get(CONF_ZONE_FIELD_CAPACITY) == "field_capacity_required"
+
+    def test_a_named_soil_makes_the_box_dead_weight_and_says_so(self):
+        from never_dry.config_flow import _ignored_override_warnings
+
+        warnings = _ignored_override_warnings({CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CLAY, CONF_ZONE_FIELD_CAPACITY: 0.30})
+
+        assert any("Field capacity" in w for w in warnings)

@@ -448,15 +448,21 @@ def test_the_form_options_mirror_the_catalogue():
     that makes the duplication safe, in both directions: a method that runs and
     is missing here is unreachable from the UI, and a method listed here that
     does *not* run is an option that raises when chosen.
+
+    Two conditions on the right-hand side, because "runs" and "is a site's to
+    name" are different things. The probe models run, and are reached by
+    attaching a probe to a zone; a site naming one would be asking for a
+    measurement of soil the site does not have.
     """
     from never_dry.const import ET_METHOD_AUTO, ET_METHOD_OPTIONS
 
-    runnable = tuple(m.method_id for m in MODEL_CATALOGUE if m.input_type in RUNNABLE_INPUTS)
+    runnable = tuple(m.method_id for m in MODEL_CATALOGUE if m.input_type in RUNNABLE_INPUTS and m.site_selectable)
     expected = (ET_METHOD_AUTO, *runnable)
     assert tuple(ET_METHOD_OPTIONS) == expected, (
-        "the dropdown must offer exactly the methods that run: add a method here "
-        "in the change that builds its input, not in the one that writes the class"
+        "the dropdown must offer exactly the methods that run and that a site may name: "
+        "add a method here in the change that builds its input, not in the one that writes the class"
     )
+    assert "vwc_system" not in ET_METHOD_OPTIONS, "the probe is chosen on the zone that sits in that soil"
 
 
 class TestDiurnalRange:

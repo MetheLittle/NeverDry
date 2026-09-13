@@ -27,7 +27,7 @@ a given deficit defined?**
 |---|---|---|
 | **ET** | the system **temperature** sensor (ET input) + the system **rain** sensor | **Yes** — all zones read the same two sensors; they differ only by Kc (an ET multiplier) and irrigation history |
 | **VWC, system probe** (today) | one **system moisture** sensor | Yes — all zones scale the same current reading by Kc |
-| **VWC, per-zone probe** (target, AI-174) | **that zone's own moisture** sensor | **No** — each zone measures a different patch of soil |
+| **VWC, per-zone probe** (shipped) | **that zone's own moisture** sensor | **No**: each zone measures a different patch of soil |
 
 The load-bearing consequence: **two deficits are comparable only if they share a
 reference frame.** ET-mode siblings are comparable (shared weather). Two zones
@@ -53,28 +53,29 @@ inert until a later phase wires today's `DrynessIndexSensor` ET/VWC fork onto it
 | **Rain** (→ `rain_delta`) | **System feed** | one sensor for all zones, applied to every zone's balance |
 | **Deficit** (`+ ET·Kc·Δt − rain − irrigation`) | **Zone** | authoritative state |
 | **Kc, threshold, area, valve, irrigation state** | **Zone** | — |
-| **VWC sensor, system** (`vwc_sensor`, model params) | **System** | drives the deficit in VWC mode, bypassing ET |
-| **VWC probe, per zone** (`vwc_sensor` on the zone) | **Zone** | shipped. It does *not* own the zone's deficit: it publishes its reading and the deficit that reading alone would imply, beside the model's. AI-174 is the model-level work that would let a zone's deficit follow its own probe |
-| **`field_capacity`, `root_depth`** | **Neither** | not exposed in any form, system or zone. Fixed at 0.30 / 0.30 in `const.py` |
+| **VWC sensor, system** (`vwc_sensor`, model params) | **System** | legacy. Drives the deficit in VWC mode, bypassing ET. Kept for installations the migration has not reached |
+| **VWC probe, per zone** (`vwc_sensor` on the zone) | **Zone** | shipped. Owns that zone's deficit once the zone declares the root depth to read it with; without it, publishes its reading beside the model's estimate and nothing more |
+| **`root_depth`, soil type** | **Zone** | declared on the zone. The soil type supplies `field_capacity`, so the root depth is the one number the user gives, and it is also the switch |
 
 So the only permanent system-level things are the two environmental **feeds**
-(temperature, rain). Everything else lives in the zone, or is on its way there.
+(temperature, rain). Everything else lives in the zone, the VWC model included.
 
 The VWC row above was one line until 2026-09-09, reading "system-level until
 AI-174 lands". It had become false in one of its three parts and misleading in
-the other two, which is why it is now three rows. A zone can bind its own probe
-today, and that binding shipped without AI-174, because it gave the probe a role
-that does not require owning a deficit: characterising the soil, and revealing a
-hydraulic fault when water is delivered and the moisture does not move. What
-AI-174 still owes is the model-level step, a zone's deficit following its own
-probe.
+the other two, which is why it became three rows. A zone could bind its own
+probe, and that binding shipped without AI-174, because it gave the probe a role
+that did not require owning a deficit: characterising the soil, and revealing a
+hydraulic fault when water is delivered and the moisture does not move.
 
-`field_capacity` and `root_depth` are the part worth reading twice. They are not
-system-level parameters, they are not parameters at all: no form writes them, so
-every installation runs on 0.30 / 0.30. They are also the two numbers a per-zone
-probe would be best placed to establish, since the plateau a probe settles at
-after drainage *is* that soil's field capacity. The measurement that could fix
-the constant is already bound to the zone, and the constant is still a constant.
+On 2026-09-13 the model-level step landed too, and the row changed again.
+`field_capacity` and `root_depth` were described here as "not parameters at all,
+fixed at 0.30 / 0.30 in `const.py`, and the two numbers a per-zone probe would be
+best placed to establish". The first half is no longer true: the root depth is a
+zone field and the soil type is a dropdown that supplies the field capacity, so
+nothing runs on an unchosen constant any more. The second half still stands, and
+is the next thing worth building: the plateau a probe settles at after drainage
+*is* that soil's field capacity, so the measurement that could replace the
+declaration is already bound to the zone.
 
 ## Decisions
 
@@ -149,14 +150,20 @@ even for users who care about a uniform starting point.
 counter ("rain received since this zone existed"), so 0 at creation is correct
 by definition, not a bug (see D3).
 
-### D5 — VWC deficit target is **per-zone**
-Today the VWC deficit is computed at system level (`DrynessIndexSensor._deficit`
-from one probe, scaled by Kc per zone) — benign because it is a *stateless
-measurement* recomputed each reading, and all zones track the same current
-value (no drift, no seeding bug). The **target** (AI-174) is per-zone probes:
-each zone computes its own deficit from its own sensor, or falls back to the ET
-model. When that lands, `DrynessIndexSensor._deficit` disappears entirely and
-the hub becomes pure plumbing.
+### D5 - VWC deficit is **per-zone**, and the zone declares what it is read with
+A zone computes its own deficit from its own probe, or falls back to the ET
+model. What took this from target to shipped is the pair that turns a fraction
+into millimetres: `root_depth` is a property of the planting and
+`field_capacity` one of the soil, so both are the zone's, and a probe declared
+without them stays a published measurement rather than becoming the deficit.
+That is also the opt-in. Nothing changes on an installation that has never been
+asked for the pair, and the estimate keeps running underneath a driving probe so
+that a probe going quiet costs an afternoon rather than a season.
+
+The system-level VWC deficit (`DrynessIndexSensor._deficit` from one probe,
+scaled by Kc per zone) remains for installations whose binding has not been
+moved. It is benign for the reason it always was: a *stateless measurement*
+recomputed each reading, with no drift and no seeding bug.
 
 ## What is kept vs retired
 
@@ -164,7 +171,7 @@ the hub becomes pure plumbing.
 |---|---|
 | `DrynessIndexSensor` as input hub (temp + rain → broadcast) | **Keep** — its real job |
 | `DrynessIndexSensor._deficit` as **ET accumulator** | **Retire** — dead weight + the #123 seed bug |
-| `DrynessIndexSensor._deficit` as **VWC system measurement** | **Interim** — stateless, benign; removed by AI-174 (per-zone probe) |
+| `DrynessIndexSensor._deficit` as **VWC system measurement** | **Legacy**: stateless and benign, kept for bindings the migration has not moved |
 | "Dryness Index" display entity | Derived (max/mean of zones) or dropped |
 | `IrrigationZoneSensor._zone_deficit` | **Keep — authoritative** |
 

@@ -1,25 +1,52 @@
 # Translations
 
-NeverDry ships its interface text in the files under
-`custom_components/never_dry/translations/`. Home Assistant picks the one
-matching the user's language and falls back to English when there is none.
+NeverDry ships its interface text in **two** places, and a language is not
+done until both are.
+
+1. **The integration catalogue**, under `custom_components/never_dry/translations/`.
+   Home Assistant picks the file matching the user's language and falls back to
+   English when there is none. This covers the configuration forms, the errors,
+   the notifications, the entity names and the repairs.
+2. **The zone card's own dictionary**, inside
+   `custom_components/never_dry/www/never-dry-zone-card.js`. A Lovelace card is
+   frontend code and cannot read the integration's translation files, so it
+   carries its own. This covers everything written on the card.
+
+They are separate files with separate keys, and translating one leaves half the
+product in English. Both are listed per language in the table below for that
+reason: "Spanish: done" is a sentence that could mean either half, so the table
+does not let anyone write it.
 
 ## What ships, and who checked it
 
-| Language | File | Provenance |
-|---|---|---|
-| English | `en.json` | Source language. Written by the maintainer; every string originates here. |
-| Italian | `it.json` | Human translated and checked by a native speaker. |
+| Language | Catalogue | Card | Read back |
+|---|---|---|---|
+| English | source | source | n/a, every string originates here |
+| Italian | complete | complete | **against the running product**, 2026-09-13 |
+| German | complete | complete | file only, by @MetheLittle; not yet run |
+| Spanish | machine-assisted, **not read back** | in review (#226) | no |
 
-Every language listed above is **human checked**. That is a deliberate bar, not
-a description of how things happen to stand: a mistranslated label in a form
-that decides how much water reaches a garden is not a cosmetic problem, and a
-machine translation nobody has read is indistinguishable from a correct one
-until it is in front of a user.
+**Read back** is the column that matters, and it is deliberately not a yes or a
+no. There are two different verifications behind that word and they do not catch
+the same things:
 
-If a language ever ships without that check, this table says so in its own row
-rather than leaving the reader to assume. An unchecked translation is better
-than no translation, but only when it is labelled.
+- **File only** means somebody who speaks the language read the strings against
+  the English. That catches wrong words. It does not catch two labels that are
+  each correct and, side by side on a screen, say the same thing.
+- **Against the running product** means somebody installed it, used it, and read
+  the labels where they appear. That is the one that catches the rest.
+
+The distinction is not theoretical. The Italian was "human checked" for months
+while the card called a valve that had never spoken and a valve that had stopped
+answering by the same name, and showed `open (verified)` as a tick. Both were
+found in seconds from a screenshot, by people who had already read the file
+carefully. The same two defects had been copied into Spanish before anyone
+noticed.
+
+A machine translation nobody has read is indistinguishable from a correct one
+until it is in front of a user, so it ships **labelled**, in its own row, rather
+than leaving the reader to assume. An unchecked translation is better than no
+translation, but only when it says so.
 
 ## Contributing a language
 
@@ -28,10 +55,18 @@ The shortest path, and the one that credits you automatically:
 1. Copy `custom_components/never_dry/translations/en.json` to `<code>.json`,
    using the Home Assistant language code (`de`, `fr`, `nl`, …).
 2. Translate the **values**. Leave every key untouched, and leave the
-   `{placeholders}` in braces exactly as they are — they are filled in at
+   `{placeholders}` in braces exactly as they are: they are filled in at
    runtime with names, numbers and units.
-3. Open a pull request. Your commits carry your authorship, so GitHub records
+3. **Add your language to the card's dictionary too**, in
+   `custom_components/never_dry/www/never-dry-zone-card.js`. Copy the `en`
+   block, keep the keys, translate the values. Skipping this leaves the card
+   in English and the language only half done.
+4. Open a pull request. Your commits carry your authorship, so GitHub records
    the contribution without anyone having to remember to.
+
+Either half on its own is a welcome contribution and will be merged. It just
+does not make the language complete, and the table above will say which half is
+missing until the other arrives.
 
 If a pull request is inconvenient, open an issue with the file attached and it
 will be added for you — but say so, because the commit will then be authored by

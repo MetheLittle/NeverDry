@@ -67,6 +67,7 @@ from .const import (
     CONF_ZONE_DELIVERY_TIMEOUT,
     CONF_ZONE_EFFICIENCY,
     CONF_ZONE_EXPOSURE,
+    CONF_ZONE_FIELD_CAPACITY,
     CONF_ZONE_FLOW_METER_SENSOR,
     CONF_ZONE_FLOW_RATE,
     CONF_ZONE_HW_MAX_DURATION_PAYLOAD,
@@ -77,6 +78,8 @@ from .const import (
     CONF_ZONE_MICROCLIMATE_FACTOR,
     CONF_ZONE_NAME,
     CONF_ZONE_PLANT_FAMILY,
+    CONF_ZONE_ROOT_DEPTH,
+    CONF_ZONE_SOIL_TYPE,
     CONF_ZONE_SYSTEM_TYPE,
     CONF_ZONE_THRESHOLD,
     CONF_ZONE_VALVE,
@@ -97,6 +100,7 @@ from .const import (
     DEFAULT_MICROCLIMATE_FACTOR,
     DEFAULT_RAIN_SENSOR_TYPE,
     DEFAULT_ROOT_DEPTH,
+    DEFAULT_SOIL_TYPE,
     DEFAULT_T_BASE,
     DEFAULT_THRESHOLD,
     DELIVERY_DURATION_MARGIN,
@@ -112,14 +116,17 @@ from .const import (
     MICROCLIMATE_FACTOR_MAX,
     MICROCLIMATE_FACTOR_MIN,
     PLANT_FAMILIES,
+    PROBE_CADENCE_WINDOW,
+    PROBE_STALE_BACKSTOP_S,
     RAIN_TYPE_EVENT,
     SAFETY_LAYER_SPREAD,
+    SOIL_TYPES,
     SYSTEM_TYPES,
     UNUSUAL_FLOW_MAX_LPM,
     VALVE_STARTUP_GRACE_S,
 )
 from .controller import IrrigationController
-from .environment import DEFAULT_LATITUDE, Environment, RainSensorType
+from .environment import DEFAULT_LATITUDE, Environment, RainSensorType, silence_floor
 from .services import async_setup_services
 from .session_flow import MIN_PUBLICATION_SAMPLES
 from .unit_convert import LITERS_TO_GALLONS, LPM_TO_GPH, LPM_TO_LPH
@@ -1895,16 +1902,47 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._own_probe_warned = False
         self._probe_vwc: float | None = None
         self._probe_implied_mm: float | None = None
+
+        # The two numbers that scale the reading, and the switch. A probe with
+        # both owns this zone's deficit; a probe without them is telemetry,
+        # exactly as it was. Nothing about an existing installation changes on
+        # upgrade, because the values it has never been asked for are absent:
+        # the model moves the day the user fills them in, and not before.
+        self._own_root_depth = zone_config.get(CONF_ZONE_ROOT_DEPTH)
+        # The soil type decides and the box is read only behind Custom: the same
+        # preset/override contract as the system type, the plant family and the
+        # exposure. Which leaves the root depth as the one number the user has to
+        # supply, and therefore as the switch -- and it is the right one to have
+        # kept, because no table holds it. A lawn, a hedge and a pot differ by a
+        # factor of four on the same ground, and only the person who planted
+        # them knows which it is.
+        self._soil_type = zone_config.get(CONF_ZONE_SOIL_TYPE, DEFAULT_SOIL_TYPE)
+        preset = SOIL_TYPES.get(self._soil_type, SOIL_TYPES[DEFAULT_SOIL_TYPE])["field_capacity"]
+        self._own_field_capacity = zone_config.get(CONF_ZONE_FIELD_CAPACITY) if preset is None else preset
+        self._probe_drives = bool(self._own_probe) and None not in (
+            self._own_root_depth,
+            self._own_field_capacity,
+        )
+        # When the zone has not declared them the site's values are used, as
+        # before, and only to publish the implied deficit beside the model's.
         self._probe_model = (
             VWCPerZoneModel(
                 source=self._zone_name,
-                field_capacity=dryness_sensor._field_cap,
-                root_depth=dryness_sensor._root_depth,
+                field_capacity=(self._own_field_capacity if self._probe_drives else dryness_sensor._field_cap),
+                root_depth=(self._own_root_depth if self._probe_drives else dryness_sensor._root_depth),
                 d_max=self._d_max,
             )
             if self._own_probe
             else None
         )
+        # When the probe last spoke, and how long it usually goes between
+        # readings. A probe that dies keeps its last value on display, so
+        # freshness is the whole safety of letting it drive: without it a
+        # battery that fails in June would report damp soil until September and
+        # the zone would never be watered again.
+        self._probe_last_seen: datetime | None = None
+        self._probe_intervals: deque[float] = deque(maxlen=PROBE_CADENCE_WINDOW)
+        self._probe_silent_logged = False
 
         # Efficiency: the system type decides, per the preset/override
         # contract in const. Only the custom type (default_efficiency: None)
@@ -1983,12 +2021,111 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._zone.efficiency = value
 
     @property
-    def _zone_deficit(self) -> float:
+    def _et_deficit(self) -> float:
+        """The site model's number for this zone, integrated whether published or not.
+
+        It never stops advancing. When a probe drives the zone this is the
+        reserve, and a reserve that had to be rebuilt after the probe failed
+        would be no reserve at all: the failure arrives with the garden already
+        dry, which is the worst moment to start integrating from zero.
+        """
         return self._zone.deficit.value_mm
+
+    @property
+    def _zone_deficit(self) -> float:
+        """The number this zone acts on, from the one place that holds it.
+
+        The choice between soil and estimate lives in the domain Zone, so that
+        the dose, the trigger and the published figure cannot answer different
+        questions. What lives here is only the part that needs a clock: whether
+        the measurement still speaks for the soil. Reading the value is also the
+        moment that is checked, because every decision in the integration goes
+        through this property and nothing guarantees it is preceded by a tick.
+        """
+        self._review_probe_standing()
+        return self._zone.acting_deficit.value_mm
 
     @_zone_deficit.setter
     def _zone_deficit(self, value: float) -> None:
+        # Always the model's state, never the probe's: the probe is stateless
+        # and recomputes from its next reading, so there is nothing on that side
+        # to write to. A delivery credited while the probe drives therefore
+        # re-anchors the reserve on what the soil had just said, which is better
+        # than letting it drift unobserved for a season.
         self._zone.deficit = self._zone.deficit.with_value(value)
+
+    @property
+    def domain_zone(self):
+        """The zone as the domain sees it, with its measurement's standing reviewed.
+
+        The controller reaches for this to decide, and the review has to happen
+        on the way rather than at a tick: nothing orders a tick's listeners, so a
+        decision could otherwise be taken on a measurement that a listener which
+        had not run yet was about to withdraw. Depending on registration order
+        for that would be a dependency nobody can see from either side.
+        """
+        self._review_probe_standing()
+        return self._zone
+
+    def _review_probe_standing(self) -> None:
+        """Withdraw the measurement when it can no longer speak for the soil.
+
+        Cheap enough to run on every read: a subtraction and a quantile over at
+        most forty numbers.
+        """
+        if not self._probe_drives:
+            return
+        if self._probe_implied_mm is None or not self._probe_is_fresh():
+            self._zone.measured_deficit = None
+
+    def _warn_once_if_the_probe_went_quiet(self) -> None:
+        """Say it in the log when a driving probe stops being believed, once.
+
+        A zone quietly back on the estimate is the failure this whole freshness
+        check exists to survive, and surviving it silently would only move the
+        surprise later. Not a notification: judging a device is one thing, and
+        telling the user their model is wrong is another, which NeverDry does not
+        do.
+        """
+        if not self._probe_drives or self._probe_silent_logged or self._probe_is_fresh():
+            return
+        self._probe_silent_logged = True
+        _LOGGER.warning(
+            "Zone '%s': probe '%s' has stopped reporting, so the deficit falls back to the "
+            "site model until it speaks again",
+            self._zone_name,
+            self._own_probe,
+        )
+
+    @property
+    def deficit_source(self) -> str:
+        """Which of the two numbers is the one this zone is acting on."""
+        self._review_probe_standing()
+        return "zone_probe" if self._zone.measured_deficit is not None else "site_model"
+
+    def _probe_is_fresh(self) -> bool:
+        """Whether the probe has spoken recently enough for its reading to stand.
+
+        The bar is the probe's **own** observed cadence, never a constant: one
+        sensor publishes every thirty seconds and another twice a day, and a
+        number picked here would call one of them dead. Below the sample count a
+        quantile needs, there is no bar and the verdict is simply not available
+        -- absence of evidence is not evidence of silence, and refusing a
+        perfectly good reading would send the zone onto the estimate for no
+        reason.
+
+        The backstop is the one exception, and it is a backstop rather than a
+        verdict: a probe dead since installation never produces the intervals
+        its own bar would be derived from, so without it the very case this
+        exists to catch would be the one case it could not see.
+        """
+        if self._probe_last_seen is None:
+            return False
+        age_s = (datetime.now(UTC) - self._probe_last_seen).total_seconds()
+        if age_s > PROBE_STALE_BACKSTOP_S:
+            return False
+        floor_s = silence_floor(list(self._probe_intervals))
+        return floor_s is None or age_s <= floor_s
 
     @property
     def _deficit_at_irrigation_start(self) -> float | None:
@@ -2102,6 +2239,12 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         """
         if self._own_probe:
             self.async_on_remove(async_track_state_change_event(self.hass, [self._own_probe], self._on_own_probe))
+            # A subscription only fires on change, so without this a zone would
+            # sit on the estimate after every restart until its probe happened
+            # to publish again. Reading the state now costs nothing and carries
+            # its own timestamp, so a stale one stays stale.
+            with contextlib.suppress(Exception):
+                self._on_own_probe(None)
 
         last = await self.async_get_last_state()
         if last and last.attributes:
@@ -2184,8 +2327,9 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             kc = self._get_current_kc()
             self._zone_deficit = max(
                 0.0,
-                min(self._zone_deficit + et_h * kc * dt_h - rain, self._d_max),
+                min(self._et_deficit + et_h * kc * dt_h - rain, self._d_max),
             )
+        self._warn_once_if_the_probe_went_quiet()
         if getattr(self, "hass", None):
             self.async_write_ha_state()
 
@@ -2231,8 +2375,28 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
                     raw,
                 )
             return
+        # The state's own timestamp where there is one: it says when the probe
+        # spoke, which is the quantity being measured, rather than when this
+        # callback got round to it.
+        stamp = getattr(state, "last_updated", None)
+        seen = stamp if isinstance(stamp, datetime) and stamp.tzinfo else datetime.now(UTC)
+        if self._probe_last_seen is not None:
+            gap_s = (seen - self._probe_last_seen).total_seconds()
+            if gap_s > 0:
+                self._probe_intervals.append(gap_s)
+        self._probe_last_seen = seen
+        self._probe_silent_logged = False
+
         self._probe_vwc = vwc
-        self._probe_implied_mm = self._probe_model.step(VWCReading(vwc=vwc)).value_mm
+        measured = self._probe_model.step(VWCReading(vwc=vwc))
+        self._probe_implied_mm = measured.value_mm
+        if self._probe_drives:
+            # The whole value object, not just the number: it already carries
+            # VWC_PER_ZONE, which is the truthful frame for a measurement of one
+            # patch of soil and the one thing a hand-built Deficit here would get
+            # wrong. This is also what ends the wait after a delivery, because
+            # the reading that arrives now is the first that can have seen it.
+            self._zone.measured_deficit = measured
         if getattr(self, "hass", None):
             self.async_write_ha_state()
 
@@ -2707,6 +2871,7 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             "volume_liters": round(self.volume_liters, 1),
             "duration_s": self.duration_s,
             "deficit_mm": round(self._zone_deficit, 2),
+            "deficit_source": self.deficit_source,
             "irrigating": self._irrigating,
             "awaiting_valve": self._awaiting_valve,
         }
@@ -2756,6 +2921,19 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             # water. The deficit above is the model's, and stays the model's.
             attrs["probe_water_content"] = round(self._probe_vwc, 3)
             attrs["probe_implied_deficit_mm"] = round(self._probe_implied_mm, 2)
+        if self._probe_drives:
+            # What the reading was multiplied by, published beside what it
+            # produced. The number carries the authority of a measurement and
+            # the scale of a declaration, and the only honest way to show it is
+            # to show both.
+            attrs["probe_root_depth_m"] = self._own_root_depth
+            attrs["probe_field_capacity"] = self._own_field_capacity
+            # The soil alongside the number it produced. With the automatic
+            # entry this is the whole of what the zone was told about its
+            # ground, and an assumption that is not visible is the hardcoded
+            # constant this replaced with a dropdown in front of it.
+            attrs["probe_soil_type"] = self._soil_type
+            attrs["probe_fresh"] = self._probe_is_fresh()
         attrs["total_water_delivered_l"] = round(self._total_water_delivered, 1)
         attrs["yearly_water_delivered_l"] = round(self._yearly_water_delivered, 1)
         attrs["yearly_water_year"] = self._yearly_water_year

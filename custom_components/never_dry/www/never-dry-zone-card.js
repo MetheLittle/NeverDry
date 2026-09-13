@@ -90,9 +90,27 @@ const I18N = {
     secLast: "Last session",
     secTotals: "Totals",
     secParams: "Parameters",
+    lblVolume: "Volume",
+    lblDuration: "Duration",
+    lblLastIrrigated: "Last irrigated",
+    lblLastDuration: "Last duration",
+    lblLastVolume: "Last volume",
+    lblSessionWater: "Session water",
+    lblYearlyWater: "Irrigated this year",
+    lblRainYearly: "Rain this year",
+    lblDeficit: "Deficit",
+    lblArea: "Area",
+    lblKc: "Crop coefficient Kc",
+    lblEfficiency: "Efficiency",
+    lblMode: "Irrigation mode",
+    lblIrrigationTime: "Irrigation time",
+    lblThreshold: "Threshold",
+    stop: "Stop",
+    markIrrigated: "Mark irrigated",
+    resetValve: "Reset valve",
   },
   it: {
-    selectZone: "Seleziona una zona nell'editor della scheda.",
+    selectZone: "Seleziona una zona nella scheda.",
     noEntities: "Nessuna entità NeverDry trovata per questo dispositivo.",
     noZones: "Nessuna zona NeverDry trovata.",
     zone: "Zona",
@@ -112,8 +130,8 @@ const I18N = {
     meterGuardOff: "non puo' verificare l'apertura",
     meterMeasuring: "in misura",
     maintenance: "Manutenzione",
-    unreachable: "Valvola non raggiungibile",
-    waitingForValve: "in attesa di risposta",
+    unreachable: "Valvola non risponde",
+    waitingForValve: "in attesa del primo contatto",
     secWarnings: "Da guardare",
     warn_timeout_caps_duration: "Oltre il timeout — la zona si fermerà prima di arrivare all'obiettivo",
     warn_no_guard_flow: "Nessuna portata di progetto — la durata prevista è ignota",
@@ -122,13 +140,13 @@ const I18N = {
     awaitingValve: "sto aprendo la valvola…",
     flowLearning: "in apprendimento",
     ofDesign: "del progetto",
-    warn_valve_unreachable: "Valvola non raggiungibile — controlla il collegamento radio o le batterie",
+    warn_valve_unreachable: "La valvola non risponde: controlla il collegamento radio o le batterie",
     measuredMoisture: "Umidità misurata",
     unreachableHint: "controlla il collegamento radio o le batterie",
     valve: "Valvola",
-    modelRate: "Tasso ET di riferimento",
-    modelMeasured: "Letti dai sensori",
-    modelDerived: "Calcolati da NeverDry",
+    modelRate: "Evapotraspirazione di riferimento",
+    modelMeasured: "Misurati dai sensori",
+    modelDerived: "Ricavati da NeverDry",
     measured_temperature_c: "Temperatura",
     measured_humidity_pct: "Umidità relativa",
     measured_wind_raw: "Velocità del vento",
@@ -136,7 +154,7 @@ const I18N = {
     measured_soil_moisture_raw: "Umidità del suolo (grezza)",
     derived_temp_max_c: "Massima giornaliera",
     derived_temp_min_c: "Minima giornaliera",
-    derived_diurnal_range_c: "Escursione giornaliera",
+    derived_diurnal_range_c: "Escursione termica giornaliera",
     derived_solar_mj: "Energia solare giornaliera",
     derived_extraterrestrial_mj: "Radiazione extraterrestre",
     derived_net_radiation_mj: "Radiazione netta",
@@ -145,17 +163,35 @@ const I18N = {
     derived_deficit_mm: "Deficit",
     exposure: "Esposizione",
     configure: "Configura questa zona",
-    expDeepShade: "Ombra piena",
+    expDeepShade: "Ombra profonda",
     expMorningSun: "Sole al mattino",
     expAfternoonSun: "Sole al pomeriggio",
     expFullSun: "Pieno sole",
     expWindy: "Ventoso",
     expReflectedHeat: "Calore riflesso",
-    expCustom: "Personalizzata",
-    secNext: "Prossima sessione",
-    secLast: "Ultima sessione",
+    expCustom: "Personalizzato",
+    secNext: "Prossima irrigazione",
+    secLast: "Ultima irrigazione",
     secTotals: "Totali",
     secParams: "Parametri",
+    lblVolume: "Volume",
+    lblDuration: "Durata",
+    lblLastIrrigated: "Data e ora",
+    lblLastDuration: "Ultima durata",
+    lblLastVolume: "Ultimo volume",
+    lblSessionWater: "Acqua erogata finora",
+    lblYearlyWater: "Acqua irrigata quest'anno",
+    lblRainYearly: "Acqua piovuta quest'anno",
+    lblDeficit: "Deficit",
+    lblArea: "Area",
+    lblKc: "Coefficiente colturale Kc",
+    lblEfficiency: "Efficienza",
+    lblMode: "Modalità di irrigazione",
+    lblIrrigationTime: "Orario di irrigazione",
+    lblThreshold: "Soglia",
+    stop: "Stop",
+    markIrrigated: "Segna come irrigata",
+    resetValve: "Ripristina valvola",
   },
   de: {
     selectZone: "Eine Zone im Karten-Editor auswählen.",
@@ -222,6 +258,24 @@ const I18N = {
     secLast: "Letzte Bewässerung",
     secTotals: "Summen",
     secParams: "Parameter",
+    lblVolume: "Volumen",
+    lblDuration: "Dauer",
+    lblLastIrrigated: "Zuletzt bewässert",
+    lblLastDuration: "Letzte Dauer",
+    lblLastVolume: "Letztes Volumen",
+    lblSessionWater: "Wasser dieser Bewässerung",
+    lblYearlyWater: "Bewässert dieses Jahr",
+    lblRainYearly: "Regen dieses Jahr",
+    lblDeficit: "Defizit",
+    lblArea: "Fläche",
+    lblKc: "Pflanzenkoeffizient Kc",
+    lblEfficiency: "Wirkungsgrad",
+    lblMode: "Bewässerungsmodus",
+    lblIrrigationTime: "Bewässerungszeit",
+    lblThreshold: "Schwellenwert",
+    stop: "Stopp",
+    markIrrigated: "Als bewässert markieren",
+    resetValve: "Ventil zurücksetzen",
   },
 };
 
@@ -241,7 +295,7 @@ const VALVE_STATE_I18N = {
     idle: "ferma",
     closed: "chiusa",
     open: "aperta",
-    open_verified: "aperta ✓",
+    open_verified: "aperta (verificata)",
     req_open: "apertura…",
     req_close: "chiusura…",
     maintenance: "manutenzione",
@@ -467,16 +521,6 @@ class NeverDryZoneCard extends HTMLElement {
     return "NeverDry zone";
   }
 
-  /** Localized short label for an entity = its friendly_name minus device prefix. */
-  _label(st, fallback) {
-    const fn = st && st.attributes && st.attributes.friendly_name;
-    if (fn) {
-      const dn = this._deviceName();
-      return fn.startsWith(dn + " ") ? fn.slice(dn.length + 1) : fn;
-    }
-    return fallback;
-  }
-
   // ---- rendering --------------------------------------------------------
 
   _render() {
@@ -567,9 +611,9 @@ class NeverDryZoneCard extends HTMLElement {
     // friendly_name; "irrigateNow" has a dedicated static string for emphasis.
     this._actionDefs = [
       { role: "btnIrrigate", icon: "mdi:sprinkler", i18n: "irrigateNow", cls: "primary" },
-      { role: "btnStop", icon: "mdi:stop", cls: "warn" },
-      { role: "btnMark", icon: "mdi:water-check", cls: "" },
-      { role: "btnReset", icon: "mdi:lock-reset", cls: "warn" },
+      { role: "btnStop", icon: "mdi:stop", i18n: "stop", cls: "warn" },
+      { role: "btnMark", icon: "mdi:water-check", i18n: "markIrrigated", cls: "" },
+      { role: "btnReset", icon: "mdi:lock-reset", i18n: "resetValve", cls: "warn" },
     ];
     this._el.actions.innerHTML = "";
     this._actionBtns = {};
@@ -609,7 +653,7 @@ class NeverDryZoneCard extends HTMLElement {
     // through formatEntityState → unit-system + locale aware.
     const deficit = numState(ents.deficit);
     const threshold = numState(ents.threshold);
-    this._el.barLbl.textContent = this._label(ents.deficit, "Deficit");
+    this._el.barLbl.textContent = t(this._hass, "lblDeficit");
     if (deficit != null && threshold != null && threshold > 0) {
       const pct = Math.max(0, Math.min(100, (deficit / threshold) * 100));
       this._el.barFill.style.width = `${pct}%`;
@@ -635,15 +679,15 @@ class NeverDryZoneCard extends HTMLElement {
       ...((ents.deficit && ents.deficit.attributes) || {}),
     };
     this._fillSection("next", t(hass, "secNext"), [
-      ["mdi:cup-water", ents.volume, "Volume"],
-      ["mdi:timer-sand", ents.duration, "Duration", "duration"],
+      ["mdi:cup-water", ents.volume, "lblVolume"],
+      ["mdi:timer-sand", ents.duration, "lblDuration", "duration"],
     ]);
     const _carrier = ents.deficit || ents.volume;
     const _irrigating = !!(_carrier && _carrier.attributes && _carrier.attributes.irrigating === true);
     const lastRows = [
-      ["mdi:clock-outline", ents.lastIrrigated, "Last irrigated"],
-      ["mdi:history", ents.lastDuration, "Last duration", "duration"],
-      ["mdi:water-outline", ents.lastVolume, "Last volume"],
+      ["mdi:clock-outline", ents.lastIrrigated, "lblLastIrrigated"],
+      ["mdi:history", ents.lastDuration, "lblLastDuration", "duration"],
+      ["mdi:water-outline", ents.lastVolume, "lblLastVolume"],
     ];
     // Session water is a LIVE progress indicator: when idle it is 0 (not
     // persisted across restarts) or just duplicates Last volume, so show it
@@ -651,12 +695,12 @@ class NeverDryZoneCard extends HTMLElement {
     // every delivery mode once the driver abstraction reports a real-time
     // delivered volume — measured or calculated (AI-128 / AI-186).
     if (_irrigating) {
-      lastRows.push(["mdi:water", ents.sessionWater, "Session water"]);
+      lastRows.push(["mdi:water", ents.sessionWater, "lblSessionWater"]);
     }
     this._fillSection("last", t(hass, "secLast"), lastRows);
     this._fillSection("totals", t(hass, "secTotals"), [
-      ["mdi:water-plus", ents.yearlyWater, "Yearly water"],
-      ["mdi:weather-rainy", ents.rain, "Rain"],
+      ["mdi:water-plus", ents.yearlyWater, "lblYearlyWater"],
+      ["mdi:weather-rainy", ents.rain, "lblRainYearly"],
     ]);
     // Static / config parameters last.
     this._fillWarnings(_zoneAttrs.warnings);
@@ -669,14 +713,14 @@ class NeverDryZoneCard extends HTMLElement {
     this._fillSection(
       "params",
       t(hass, "secParams"),
-      [["mdi:target", ents.threshold, "Threshold"]],
+      [["mdi:target", ents.threshold, "lblThreshold"]],
       this._moistureCell(_zoneAttrs) +
         this._rows([
-          ["mdi:texture-box", ents.area, "Area"],
-          ["mdi:leaf", ents.kc, "Kc"],
-          ["mdi:percent", ents.efficiency, "Efficiency"],
-          ["mdi:cog", ents.irrigationMode, "Mode"],
-          ["mdi:clock-time-six", ents.irrigationTime, "Irrigation time"],
+          ["mdi:texture-box", ents.area, "lblArea"],
+          ["mdi:leaf", ents.kc, "lblKc"],
+          ["mdi:percent", ents.efficiency, "lblEfficiency"],
+          ["mdi:cog", ents.irrigationMode, "lblMode"],
+          ["mdi:clock-time-six", ents.irrigationTime, "lblIrrigationTime"],
         ]) +
         this._exposureCell(ents) +
         this._rows([["mdi:speedometer", ents.flowRate, t(hass, "designFlow")]]) +
@@ -692,7 +736,7 @@ class NeverDryZoneCard extends HTMLElement {
       const btn = this._actionBtns[d.role];
       const st = ents[d.role];
       btn.disabled = !st;
-      const lbl = d.i18n ? t(hass, d.i18n) : this._label(st, d.role);
+      const lbl = t(hass, d.i18n);
       btn.querySelector(".nd-btn-lbl").textContent = lbl;
     }
   }
@@ -1013,10 +1057,17 @@ class NeverDryZoneCard extends HTMLElement {
 
   _rows(items) {
     return items
-      .map(([icon, st, fallback, fmt]) => {
+      .map(([icon, st, labelKey, fmt]) => {
         const v = fmt === "duration" ? fmtDuration(this._hass, st) : fmtState(this._hass, st);
         if (v === null) return "";
-        const label = this._label(st, fallback);
+        // The card's own dictionary, never the entity's friendly_name. That name
+        // is resolved once, server-side, in the server's language, so a card
+        // reading it shows one language to every viewer whatever their own is.
+        // It is also absent on the zone sensors that carry no name of their own,
+        // where Home Assistant substitutes the device class (Timestamp, Stored
+        // volume) or, failing that, the device name, which is how a zone came to
+        // be labelled with its own title.
+        const label = t(this._hass, labelKey);
         // The backend decides whether the timeout bites; the card only draws it.
         // Read from whichever entity carries the zone attributes — the same
         // carrier the exposure cell uses — so this works no matter which of the

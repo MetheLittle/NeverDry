@@ -81,8 +81,26 @@ class TestRefusal:
         }
         assert _et_method_error(equipped) is None
 
-    def test_the_probe_model_without_a_probe_is_refused(self):
-        assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "vwc_system"}) == "et_method_missing_sensors"
+    def test_the_probe_model_is_not_a_site_choice_at_all(self):
+        """Refused as the wrong kind of choice, not as a site short of a sensor.
+
+        A probe reads the soil of one zone and is declared on that zone, so no
+        site-level binding could ever satisfy it. Answering "sensors are
+        missing" sent the user hunting for a field that has not existed since
+        the probe moved onto the zone.
+        """
+        assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "vwc_system"}) == "et_method_zone_probe"
+
+    def test_the_probe_model_is_refused_even_beside_a_legacy_binding(self):
+        """The answer does not depend on the old site-level key being present.
+
+        An installation migrating from the site-level probe can still carry the
+        key in its entry. It goes on *running* on it (that is what the migration
+        and the repair are for), but naming it here is still the wrong question,
+        and a form with no probe field could not accept the answer anyway.
+        """
+        stored = {**BARE_SITE, CONF_ET_METHOD: "vwc_system", CONF_VWC_SENSOR: "sensor.vwc"}
+        assert _et_method_error(stored) == "et_method_zone_probe"
 
     def test_an_unknown_method_is_named_as_such(self):
         """A distinct error: nothing the user can add would ever satisfy it."""
@@ -95,12 +113,18 @@ class TestAcceptance:
     def test_the_simple_tier_needs_only_a_thermometer(self):
         assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "et_simple"}) is None
 
-    def test_the_probe_model_is_accepted_with_a_probe(self):
-        assert _et_method_error({**BARE_SITE, CONF_ET_METHOD: "vwc_system", CONF_VWC_SENSOR: "sensor.vwc"}) is None
-
     def test_a_cleared_sensor_field_reads_as_absent_not_as_empty(self):
-        """The options form sends nothing for a cleared picker; ``None`` must not satisfy."""
-        cleared = {**BARE_SITE, CONF_ET_METHOD: "vwc_system", CONF_VWC_SENSOR: None}
+        """The options form sends nothing for a cleared picker; ``None`` must not satisfy.
+
+        Carried by a tier the site *can* name: the probe model now answers before
+        any sensor is looked at, so it can no longer stand for this case.
+        """
+        cleared = {
+            **BARE_SITE,
+            CONF_ET_METHOD: "penman_monteith",
+            CONF_HUMIDITY_SENSOR: None,
+            CONF_WIND_SPEED_SENSOR: "sensor.w",
+        }
         assert _et_method_error(cleared) == "et_method_missing_sensors"
 
 
@@ -146,11 +170,21 @@ class TestFormAndRuntimeAgree:
         )
 
     def test_an_accepted_method_is_the_one_that_actually_runs(self):
+        """Restricted to the methods a site may name, and the exclusion is the point.
+
+        A probe model is refused by the form and still built by the builder when
+        the entry carries the legacy site-level binding. That gap is deliberate:
+        such an installation has been running on its probe, and must go on doing
+        so until the migration or the repair moves the binding onto a zone.
+        Closing the gap in the builder would move those gardens onto an ET
+        estimate at the next restart, in silence. The case is held below.
+        """
         from never_dry.water_balance_model import MODEL_CATALOGUE, build_model
 
         checked = 0
+        nameable = [m for m in MODEL_CATALOGUE if m.site_selectable]
         for site in self.SITES.values():
-            for model in MODEL_CATALOGUE:
+            for model in nameable:
                 accepted = _et_method_error({**site, CONF_ET_METHOD: model.method_id}) is None
                 built = build_model(self._environment_for(site), method_id=model.method_id)
                 if accepted:
@@ -162,7 +196,22 @@ class TestFormAndRuntimeAgree:
                         f"the form refused {model.method_id} but the builder ran it anyway"
                     )
                 checked += 1
-        assert checked == len(self.SITES) * len(MODEL_CATALOGUE)
+        assert checked == len(self.SITES) * len(nameable)
+
+    def test_a_legacy_probe_site_keeps_running_what_the_form_refuses(self):
+        """The one intended divergence, stated rather than left to be discovered.
+
+        The form cannot accept the probe model any more: it has no field that
+        binds a probe to the site. The builder still runs it for an entry that
+        already carries the binding, because taking it away is a change to a
+        working garden that nobody asked for.
+        """
+        from never_dry.water_balance_model import VWCSystemModel, build_model
+
+        site = {**BARE_SITE, CONF_VWC_SENSOR: "sensor.vwc"}
+
+        assert _et_method_error({**site, CONF_ET_METHOD: "vwc_system"}) == "et_method_zone_probe"
+        assert isinstance(build_model(self._environment_for(site), method_id="vwc_system"), VWCSystemModel)
 
     def test_automatic_always_produces_something_runnable(self):
         """Whatever the site declares, ``auto`` must land on a model, never on nothing."""
@@ -204,7 +253,6 @@ class TestEveryOfferedMethodCanActuallyRun:
     SENSORS_FOR: ClassVar[dict] = {
         "et_simple": {},
         "hargreaves": {},
-        "vwc_system": {CONF_VWC_SENSOR: "sensor.soil"},
         "penman_monteith": {CONF_HUMIDITY_SENSOR: "sensor.h", CONF_WIND_SPEED_SENSOR: "sensor.w"},
     }
 
