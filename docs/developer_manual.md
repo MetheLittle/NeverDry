@@ -804,7 +804,7 @@ Two long-lived branches (adopted 2026-07-16):
 | Branch | Role | Rules |
 |--------|------|-------|
 | `main` | **Production.** What HACS users install: every release tag (`vX.Y.Z`) is cut from here. | Protected. No direct pushes; changes land only via reviewed PRs from `develop` (or hotfix branches). Must always be releasable. |
-| `develop` | **Integration & testing.** Where feature/fix branches merge first and where field testing on the test HA instance happens. | Feature branches (`feature/*`, `fix/*`, `docs/*`) branch off `develop` and merge back into it. Deploy to the test HA instance from here. |
+| `develop` | **Integration & testing.** Where feature/fix branches merge first and where field testing on the test HA instance happens. | Protected since 2026-09-14, with the same required checks as `main` and the same *branch must be up to date* rule. Feature branches (`feature/*`, `fix/*`, `docs/*`) branch off `develop` and merge back into it. Deploy to the test HA instance from here. |
 
 Flow:
 
@@ -814,7 +814,8 @@ fix/y ──────┼──► develop ──(field-verified, PR)──►
 docs/z ─────┘
 ```
 
-- **Merge into `develop`** as soon as a branch is green (CI + local suite); `develop` is allowed to hold work that is not yet field-verified.
+- **Merge into `develop`** as soon as a branch is green (CI + local suite); `develop` is allowed to hold work that is not yet field-verified. Green is **enforced** rather than expected: six checks are required (`test (3.11)`, `test (3.12)`, `validate`, `Ruff`, `Bandit Static Analysis`, `Forbidden Pattern Guard`) and the branch has to be up to date with `develop` before the merge button lights up.
+- **Why "up to date" is not bureaucracy.** PR checks run on the **branch head**, not on the merge result. A branch that is genuinely green against an older `develop` can still break it on merge, and the failure appears after the fact, on `develop`, where nobody is reviewing. It happened on 2026-09-14: an external contribution passed every check and turned `develop` red the moment it landed, because keys had been added to a shared file while the branch was open. Two notes for when the gate blocks a merge and the gate looks like the problem: the `validate` context covers **two** jobs of the same name (Hassfest and HACS), and HACS validation can fail for reasons outside this repository ("Repository not loaded properly in HACS"), which is a re-run rather than a bug hunt.
 - **PR `develop` → `main`** only when the accumulated changes have been verified on the test installation. Releases stay event-driven (milestones, HACS deadlines) or monthly — never one release per bugfix.
 - **Hotfixes**: branch from `main`, fix, PR back to `main`, then merge `main` back into `develop` to keep the branches converged.
 - **Testers without a dev setup** cannot point HACS at a branch: HACS installs GitHub *releases* from `main` only. To give testers early builds, publish a **pre-release** (e.g. `v0.11.0-beta.1`) — users who enable beta versions in HACS ("Redownload" → show beta) receive it; everyone else stays on the latest stable. Manual installation (copying `custom_components/never_dry/` from a branch checkout) remains possible for developers.
