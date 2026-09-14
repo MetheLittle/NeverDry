@@ -429,7 +429,7 @@ Two connections this opens:
   — is the worst of the two. Whether the deficit should be frozen for a suspended
   zone or allowed to clip as it does today is a water-balance question rather
   than a scheduling one, but the scheduler is where the consequence lands.
-  See **Q6**.
+  See **Q7**.
 
   Snow is a third-order effect rather than a hole: a tipping-bucket gauge does
   not register it until it melts, so the credit side under-reads — but the demand
