@@ -1,7 +1,8 @@
 # The scheduler: what has been asked for
 
-**Status:** collecting. Nothing here is decided, and the list below is
-deliberately **not** reconciled.
+**Status:** collecting. The requests below are deliberately **not** reconciled.
+Three positions have been taken, and they are marked as such in a section of
+their own; nothing else here is decided.
 
 ## Why this document exists
 
@@ -12,6 +13,10 @@ running.
 
 They arrived separately, over months, each framed as a feature. Read together
 they are one gap. That is the only claim this document makes today.
+
+Three further requirements come from the maintainer's own working notes and have
+no issue behind them. They were missing from the first version of this file, and
+they ask for the same object.
 
 The code says the same thing. `scheduler.py` exists and holds a `Scheduler` with
 three methods. One of them, `evaluate_reactive`, is wired: the controller calls
@@ -123,6 +128,54 @@ computed. Adjacent rather than central: it is about what a run is, not when it
 happens, but it lands on the same concurrency and stopping rules as everything
 above.
 
+## Three more, asked for by the maintainer
+
+These have no issue behind them, and they were missing from the first version of
+this document. They belong in the same list, because each needs the same missing
+layer as the six above.
+
+### Irrigability windows, at site level
+
+Intervals within which any run may begin, declared for the installation rather
+than for a zone. The reasons are all site-wide: municipal restrictions,
+electricity or water tariffs, wind, evaporation, and simply not soaking a lawn
+while people are standing on it.
+
+They are a constraint, not a schedule. They say when watering is permitted,
+never when it happens; what happens inside them is still decided by deficit and
+threshold.
+
+This is also the structural answer to
+[#231](https://github.com/never-dry/NeverDry/issues/231): "finish before
+sunrise" is a window whose end is sunrise, decided against the envelope rather
+than as a special case for one request.
+
+### A freeze interlock, observed rather than declared
+
+Below roughly 5 °C the valves must not be operated at all. Three things separate
+it from a time window:
+
+- it protects the hardware and not the plant, so it suppresses commands rather
+  than irrigation: the reachability probe and the valve self-test can cycle a
+  valve into damage exactly as a run can;
+- it governs what NeverDry originates and nothing else. A valve opened from
+  Zigbee2MQTT, from the entity, or by hand at the tap is observed and recorded,
+  never blocked;
+- the 5 °C is a margin chosen for everyone rather than a constant, which is why
+  an override is a real question and not a refinement.
+
+### A zone whose valve has been taken indoors
+
+In the shoulder seasons a user may unscrew a valve and bring it inside. The zone
+is then not actuable while remaining entirely outdoors: rain still falls on it,
+and outdoor demand still describes it.
+
+What is asked for is the houseplant treatment, and only for reporting and
+actuation. The deficit stays real and stays visible, but it reads as advice to
+water by hand rather than as a promise to water. A valve removed on purpose must
+also stop raising the unreachable alarm, which is the difference between an
+accurate state and a winter of false alarms.
+
 ## What each request already has to hold on to
 
 None of the six starts from nothing, and this is the table to read first when
@@ -144,6 +197,71 @@ without anyone designing it. It has to **wait**, **order**, **refuse with a
 reason**, **repeat**, and **stop something already under way**. Five verbs, one
 object, and four of the five already have a vocabulary somewhere in the code.
 
+## What the working note adds to the six
+
+Alongside the requests, the reasoning has been accumulating in a draft note,
+[`scheduler.md`](scheduler.md). It is referenced here because several of its
+observations change how the requests above read, and they are easier to object to
+now than after something is built.
+
+- **Deferring is not skipping.** A skip is re-derivable: ask again in ten minutes
+  with the same world and the answer is the same. A rain delay is not, because
+  the right answer depends on how many times the zone has already been deferred.
+  So a delay cannot be a fifth skip reason, and an unbounded deferral is
+  indistinguishable from a skip. Its failure mode is silent: a garden that never
+  waters because the forecast said 90% five mornings running, while the log reads
+  reassuringly every time.
+- **The counter resets when the zone stops needing water, however that
+  happened.** Not by asking afterwards whether it actually rained, which would
+  create a second source of truth about water the deficit has already accounted
+  for.
+- **Two brakes, not one.** A count of deferrals is blind to physics, so a deficit
+  approaching its per-zone ceiling lapses the delay regardless of budget left.
+- **Probability is not quantity.** A 90% chance of 0.2 mm refills nothing, so the
+  predicate has three terms: enough rain, likely enough, soon enough. The horizon
+  should equal the delay, because a high probability at 48 hours is a different
+  decision smuggled in under the same number.
+- **For parallel operation the policy says "may I" and the hydraulics say "can
+  I".** Admission has to be evaluated when a zone asks, because capacity is
+  consumed by whoever is already running. This is where the well gate of
+  [#74](https://github.com/never-dry/NeverDry/issues/74) and the master pump of
+  [#95](https://github.com/never-dry/NeverDry/issues/95) meet.
+- **Cycle and soak has two different sizes.** A zone needing 3x10 minutes with
+  20-minute soaks occupies 70 minutes of wall clock while drawing water for 30.
+  Scheduling against the wrong one either overruns the window or wastes two
+  thirds of the supply. The corollary is better news: during a soak the pipe is
+  free, so serial operation can interleave zones in the gaps instead of standing
+  idle.
+- **Ordering needs no queue.** Recompute at each tick, driest first. Watering the
+  driest zone lowers its deficit, so it stops winning: the ordering is
+  self-balancing and there is nothing to store.
+
+## Positions already taken, and open to objection
+
+Three of the tensions above were settled in the working note in August, before
+this document existed. They are stated as positions rather than as decisions,
+because the people they affect had not seen them.
+
+- **A fixed hour outside every window: the site wins, and the zone is warned
+  rather than refused.** The run is shifted to the first admissible time, not
+  suppressed, and the warning names the effective time instead of merely
+  reporting that the hour is not allowed.
+- **A run may finish outside the window it started in, by stated policy**, and
+  the default truncates at the window edge. For a cycle-and-soak run the cut
+  falls on a segment boundary and never mid-segment: whole segments dropped still
+  leave a valid pattern. Truncation is the default because it is the only option
+  that cannot surprise someone who set a window for a reason, such as a tariff.
+- **The deferral budget belongs to the rain delay policy**, beside the
+  probability threshold and the delay hours, while the counter belongs to the
+  zone. The limit is a site rule; the count is a fact about one zone, and it has
+  to survive a restart or every restart silently refills the budget.
+
+Four questions are genuinely open, and three of them are better answered by the
+people running the gardens than by anyone reading the code: which forecast term
+to support first, what the forecast should be bound to, what shape a freeze
+override takes, and whether a suspended zone's deficit should be frozen. They are
+in section 14 of the working note.
+
 ## What this document does not do
 
 It does not propose a design, name an object, or say which of the requests above
@@ -152,6 +270,10 @@ Serialising zones makes "finish before sunrise" harder, because a queue has to
 start earlier for the same finish. A well gate and a master pump are both
 preconditions on a run but at different scopes. An interruption for rain and a
 skip for rain read alike and are not the same mechanism.
+
+The positions above are the exception, and they are marked as one: they were
+taken before the people they affect had seen them, which is why they are put up
+for objection rather than presented as closed.
 
 Those are questions for the people who asked, and they are put to them in
 **[discussion #239](https://github.com/never-dry/NeverDry/discussions/239)**,
