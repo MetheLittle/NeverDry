@@ -43,6 +43,16 @@ not the argument.
   the weather for a week, and Home Assistant keeps history for entities only. Only
   the ones the running method actually computes appear.
 
+- **Spanish, both halves.** The configuration forms, errors, notifications and
+  entity names, and the zone card's own dictionary, so no screen is left half in
+  English. The card's Spanish came from @Mr-Neutr0n
+  ([#226](https://github.com/never-dry/NeverDry/pull/226)) and was completed here
+  for the labels that landed while it was open; the catalogue was written here
+  too. Neither half has been read back by a Spanish speaker yet, and the
+  [translations table](docs/translations.md) says so in its own column rather
+  than leaving anyone to assume.
+  ([#215](https://github.com/never-dry/NeverDry/issues/215))
+
 ### Changed
 - **The zone card speaks the language of whoever is looking at it.** About half
   its labels used to be taken from the entity names, which Home Assistant

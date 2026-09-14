@@ -24,7 +24,7 @@ does not let anyone write it.
 | English | source | source | n/a, every string originates here |
 | Italian | complete | complete | **against the running product**, 2026-09-13 |
 | German | complete | complete | file only, by @MetheLittle; not yet run |
-| Spanish | machine-assisted, **not read back** | in review (#226) | no |
+| Spanish | complete | complete | no; both halves were written here, not by a speaker |
 
 **Read back** is the column that matters, and it is deliberately not a yes or a
 no. There are two different verifications behind that word and they do not catch

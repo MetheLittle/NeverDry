@@ -1,0 +1,686 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "NeverDry: sensores y modelo",
+        "description": "Elige tus sensores meteorológicos y configura los parámetros del modelo ET.",
+        "data": {
+          "temperature_sensor": "Sensor de temperatura",
+          "rain_sensor": "Sensor de lluvia",
+          "rain_sensor_type": "Tipo de sensor de lluvia",
+          "alpha": "Coeficiente ET (α), solo método simple",
+          "t_base": "Temperatura base, solo método simple",
+          "d_max": "Límite máximo del déficit",
+          "humidity_sensor": "Sensor de humedad relativa",
+          "wind_speed_sensor": "Sensor de velocidad del viento",
+          "net_radiation_sensor": "Sensor de radiación solar",
+          "et_method": "Método de evapotranspiración"
+        },
+        "data_description": {
+          "temperature_sensor": "Sensor de temperatura exterior en °C",
+          "rain_sensor": "Pluviómetro o sensor de precipitación de la estación meteorológica",
+          "rain_sensor_type": "Cómo informa tu sensor de lluvia de la precipitación. Por evento: mm por evento (pluviómetro de cazoletas, recomendado). Total diario: mm acumulados desde medianoche (estación meteorológica)",
+          "alpha": "Lo usa **solo** el método de balance Simple (lineal): convierte un exceso de temperatura en milímetros de evapotranspiración, así que lleva dentro todo lo que ese método no mide. Hargreaves-Samani y Penman-Monteith lo calculan a partir de la física y no hacen ningún caso de esta casilla: si está activo uno de ellos, cambiarla no tiene ningún efecto. Ajústalo en una zona a pleno sol y en terreno abierto: en una zona en sombra estarías cociendo la sombra de esa zona dentro de una constante válida para toda la instalación, y todas las demás zonas la heredarían. Las diferencias entre zonas pertenecen a la exposición de cada una, no a este campo. Empieza en 0.22 y ajusta después de observar tu jardín una semana",
+          "t_base": "La usa **solo** el método de balance Simple (lineal): la temperatura por debajo de la cual supone evapotranspiración nula, que es lo que impide que una recta prediga pérdida de agua en un día frío. Hargreaves-Samani lleva en su lugar una constante fija propia y no hace caso de esta casilla; Penman-Monteith no necesita ninguna. Así que si está activo uno de los dos, cambiarla no tiene ningún efecto",
+          "d_max": "Límite superior del índice de déficit",
+          "humidity_sensor": "Opcional. Junto con el viento y la radiación desbloquea Penman-Monteith.",
+          "wind_speed_sensor": "Opcional. Junto con la humedad y la radiación desbloquea Penman-Monteith.",
+          "net_radiation_sensor": "Opcional. La lectura de un piranómetro en W/m2. La radiación neta que usa la FAO-56 se calcula a partir de ella, así que no se te pide.",
+          "et_method": "Déjalo en Automático salvo que quieras fijar un método. Un método cuyos sensores no has declarado se rechaza, y el error dice cuál falta. El método que está realmente en uso lo muestra el sensor *Método de balance hídrico* en el dispositivo NeverDry."
+        }
+      },
+      "zone": {
+        "title": "Añadir zona de riego",
+        "description": "Configura la zona n.º {zone_count}. Podrás añadir más zonas después.",
+        "data": {
+          "name": "Nombre de la zona"
+        },
+        "data_description": {
+          "name": "Nombre que se mostrará para esta zona (p. ej. Huerto, Césped)"
+        },
+        "sections": {
+          "ground_and_location": {
+            "name": "Suelo y ubicación",
+            "description": "Qué se riega aquí: lo grande que es la zona, qué crece en ella y lo expuesta que está.",
+            "data": {
+              "area_m2": "Superficie regada",
+              "plant_family": "Familia de plantas",
+              "kc": "Coeficiente de cultivo Kc personalizado (prevalece sobre la familia de plantas)",
+              "exposure": "Exposición de la zona",
+              "microclimate_factor": "Factor de microclima personalizado (solo Avanzado)",
+              "vwc_sensor": "Sensor de humedad del suelo (esta zona)",
+              "root_depth_m": "Profundidad de las raíces",
+              "field_capacity": "Capacidad de campo",
+              "soil_type": "Tipo de suelo"
+            },
+            "data_description": {
+              "area_m2": "Superficie de esta zona de riego en metros cuadrados",
+              "plant_family": "Fija la curva estacional del Kc para lo que crece aquí. Elige Personalizado para indicar un Kc fijo abajo.",
+              "kc": "Se usa solo cuando la familia de plantas está en Personalizado. Con cualquier otra familia vale la curva estacional y este campo se ignora.",
+              "exposure": "Cuánto sol y viento recibe esta zona comparada con un sitio abierto. Multiplica el Kc, así la zona conserva su curva estacional en lugar de quedarse fija en un solo valor. Elige Personalizado para indicar tu propio factor abajo.",
+              "microclimate_factor": "Se usa solo cuando la exposición está en Personalizado. Intervalo de 0.1 a 1.5; por encima de 1.0 para zonas que se secan más rápido que el terreno abierto.",
+              "vwc_sensor": "Opcional. Un sensor enterrado en esta zona, a un tercio de la profundidad de las raíces y a medio camino entre dos goteros. Por sí solo se muestra junto a las cifras de la zona y no cambia nada más. Dale la profundidad de las raíces de abajo y esta zona mide su déficit en lugar de estimarlo.",
+              "root_depth_m": "Profundidad de la zona de raíces de la que habla el sensor de arriba, y el único número de aquí que ninguna tabla contiene: un césped, un seto y una maceta se diferencian en un factor de cuatro sobre la misma tierra. Rellénalo y esta zona mide su déficit en lugar de estimarlo. Déjalo vacío y el sensor sigue siendo una lectura que se muestra junto a la estimación.",
+              "field_capacity": "Solo se lee cuando el tipo de suelo de arriba es Personalizado. El agua que este suelo retiene cuando ha terminado de drenar, como fracción: alrededor de 0.15 en arena, 0.25 en suelo franco, 0.35 en arcilla.",
+              "soil_type": "Opcional. De qué está hecha la tierra de esta zona. Aporta la capacidad de campo contra la que se mide la lectura del sensor, así no tienes que conocer el número. Si lo dejas en Automático se supone un suelo medio, que vale para la mayoría de los jardines y se te dice al guardar."
+            }
+          },
+          "valve_and_pipe": {
+            "name": "Válvula e instalación",
+            "description": "Qué la riega: la válvula, cómo se mide la entrega y la instalación de riego.",
+            "data": {
+              "valve": "Interruptor de la válvula (opcional)",
+              "delivery_mode": "Modo de entrega del agua",
+              "flow_rate_lpm": "Caudal de diseño",
+              "flow_meter_sensor": "Sensor de entrega: contador o caudal (solo con válvula con caudalímetro)",
+              "volume_entity": "Entidad que recibe el volumen (solo con dosificación por volumen)",
+              "system_type": "Tipo de instalación de riego",
+              "efficiency": "Eficiencia personalizada (prevalece sobre el valor del tipo de instalación)",
+              "delivery_timeout": "Tiempo máximo de seguridad"
+            },
+            "data_description": {
+              "valve": "La entidad interruptor que controla la válvula de riego de esta zona. Déjalo vacío para el modo de solo seguimiento (sin válvula)",
+              "delivery_mode": "Cómo entrega el agua tu válvula. Caudal estimado: válvula simple on/off, la duración se calcula a partir del caudal. Caudalímetro: válvula con sensor de caudal, se cierra al alcanzar el volumen objetivo. Volumen preestablecido: válvula inteligente que acepta un volumen objetivo y se cierra por sí sola.",
+              "flow_rate_lpm": "La suma del caudal nominal de todo lo que riega esta zona (aspersores, goteros, microaspersores) en litros por hora (gal/h en unidades imperiales). Tómala de la ficha de los emisores o de tu proyecto de riego: no hace falta medirla. Es lo que la zona se construyó para entregar, y es obligatoria: sin ella no hay forma de convertir un volumen en una duración de riego. Lo que la zona entrega de verdad se mide aparte, a partir de los riegos reales, y la diferencia entre las dos merece atención.",
+              "flow_meter_sensor": "Sirven los dos, y NeverDry los distingue por la unidad de medida. Un contador acumulativo (L, gal, m³) se lee antes y después del riego y la diferencia es el volumen entregado: es el más preciso de los dos, porque no depende de cada cuánto informa la válvula. Un caudal instantáneo (L/min, L/h, m³/h, gal/min, gal/h) se integra en cambio a lo largo del riego, así que la frecuencia con la que la válvula informa de su caudal decide lo bueno que es el número. Obligatorio cuando el modo de entrega es el de caudalímetro.",
+              "volume_entity": "Entidad numérica de la válvula inteligente que acepta un volumen objetivo en litros. Obligatoria cuando el modo de entrega deja la dosificación a la válvula.",
+              "system_type": "Fija la eficiencia de la zona (goteo 0.92, microaspersores 0.80, pop-up 0.68, manual 0.55). Elige Personalizado para indicar la tuya abajo.",
+              "efficiency": "Se usa solo cuando el tipo de instalación está en Personalizado. Con cualquier otro tipo este campo se ignora y el formulario te lo dice.",
+              "delivery_timeout": "Tiempo máximo de espera de una entrega medida o dosificada por la válvula antes de forzar su cierre (límite de seguridad)."
+            }
+          },
+          "scheduling": {
+            "name": "Programación",
+            "description": "Cuándo riega: a una hora, al superar un umbral de déficit, o solo cuando se le pide.",
+            "data": {
+              "irrigation_mode": "Modo de riego",
+              "irrigation_time": "Hora de riego",
+              "threshold": "Umbral de riego"
+            },
+            "data_description": {
+              "irrigation_time": "Hora del día a la que NeverDry comprueba el déficit y riega si supera el umbral. Déjalo vacío para desactivar la programación automática",
+              "threshold": "Nivel de déficit que activa el riego automático de esta zona"
+            }
+          }
+        }
+      },
+      "confirm_zone": {
+        "title": "Valores poco habituales en esta zona",
+        "description": "La zona \"{zone_name}\" tiene valores fuera del intervalo habitual:\n\n{warnings}\n\nA menudo significa una confusión de unidades (por ejemplo, caudal indicado en L/min en lugar de L/h). Marca la casilla para guardar de todos modos, o envía sin marcarla para volver atrás y corregir los valores.",
+        "data": {
+          "confirm": "Los valores son correctos, guarda la zona"
+        }
+      },
+      "add_another": {
+        "title": "¿Añadir otra zona?",
+        "description": "Zonas configuradas ({zone_count}): {zone_names}.",
+        "data": {
+          "add_another": "Añadir otra zona de riego"
+        }
+      }
+    },
+    "error": {
+      "zone_name_too_long": "El nombre de la zona es demasiado largo (máximo 64 caracteres)",
+      "too_many_zones": "Se ha alcanzado el número máximo de zonas (50)",
+      "flow_rate_required": "Hace falta el caudal de diseño: el modo de entrega que has elegido calcula con él la duración del riego.",
+      "flow_meter_required": "Hace falta el sensor de entrega, un contador acumulativo o un caudal: el modo de entrega que has elegido cierra la válvula al volumen medido.",
+      "volume_entity_required": "Hace falta la entidad que recibe el volumen: el modo de entrega que has elegido deja la dosificación a la válvula misma.",
+      "zone_already_exists": "Ya existe una zona con este nombre",
+      "efficiency_required": "Indica una eficiencia: el tipo de instalación está en Personalizado, que toma su valor de ese campo",
+      "kc_required": "Indica un Kc: la familia de plantas está en Personalizado, que toma su valor de ese campo",
+      "microclimate_factor_required": "Indica un factor de microclima: la exposición está en Personalizado, que toma su valor de ese campo",
+      "et_method_missing_sensors": "Ese método necesita sensores que esta instalación no ha declarado. Indica los sensores que pide, o deja el método en Automático.",
+      "et_method_unknown": "Método de evapotranspiración desconocido.",
+      "et_method_zone_probe": "Un sensor de humedad del suelo pertenece a una zona, no a toda la instalación. Configúralo en las opciones de esa zona; el método elegido aquí es el que usan las zonas que no tienen un sensor propio.",
+      "field_capacity_required": "Indica una capacidad de campo: el tipo de suelo está en Personalizado, que toma su valor de ese campo"
+    },
+    "abort": {
+      "already_configured": "NeverDry ya está configurado"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "NeverDry: opciones",
+        "description": "Elige qué configurar.",
+        "menu_options": {
+          "model_params": "Editar los parámetros del modelo (α, T_base, D_max)",
+          "add_zone": "Añadir una nueva zona de riego",
+          "edit_zone": "Editar una zona de riego",
+          "check_zones": "Revisar las zonas configuradas (valores poco habituales)",
+          "remove_zone": "Eliminar una zona de riego"
+        }
+      },
+      "model_params": {
+        "title": "Sensores del sistema y modelo ET",
+        "description": "Cambia los sensores de entrada o ajusta el modelo de evapotranspiración. Los cambios surten efecto de inmediato.",
+        "data": {
+          "temperature_sensor": "Sensor de temperatura",
+          "rain_sensor": "Sensor de lluvia",
+          "rain_sensor_type": "Tipo de sensor de lluvia",
+          "alpha": "Coeficiente ET (α), solo método simple",
+          "t_base": "Temperatura base, solo método simple",
+          "d_max": "Límite máximo del déficit",
+          "humidity_sensor": "Sensor de humedad relativa",
+          "wind_speed_sensor": "Sensor de velocidad del viento",
+          "net_radiation_sensor": "Sensor de radiación solar",
+          "et_method": "Método de evapotranspiración"
+        },
+        "data_description": {
+          "humidity_sensor": "Opcional. Junto con el viento y la radiación desbloquea Penman-Monteith.",
+          "wind_speed_sensor": "Opcional. Junto con la humedad y la radiación desbloquea Penman-Monteith.",
+          "net_radiation_sensor": "Opcional. La lectura de un piranómetro en W/m2. La radiación neta que usa la FAO-56 se calcula a partir de ella, así que no se te pide.",
+          "et_method": "Déjalo en Automático salvo que quieras fijar un método. Un método cuyos sensores no has declarado se rechaza, y el error dice cuál falta. El método que está realmente en uso lo muestra el sensor *Método de balance hídrico* en el dispositivo NeverDry."
+        }
+      },
+      "add_zone": {
+        "title": "Añadir zona de riego",
+        "data": {
+          "name": "Nombre de la zona"
+        },
+        "sections": {
+          "ground_and_location": {
+            "name": "Suelo y ubicación",
+            "description": "Qué se riega aquí: lo grande que es la zona, qué crece en ella y lo expuesta que está.",
+            "data": {
+              "area_m2": "Superficie regada",
+              "plant_family": "Familia de plantas",
+              "kc": "Coeficiente de cultivo Kc personalizado",
+              "exposure": "Exposición de la zona",
+              "microclimate_factor": "Factor de microclima personalizado (solo Avanzado)",
+              "vwc_sensor": "Sensor de humedad del suelo (esta zona)",
+              "root_depth_m": "Profundidad de las raíces",
+              "field_capacity": "Capacidad de campo",
+              "soil_type": "Tipo de suelo"
+            },
+            "data_description": {
+              "plant_family": "Fija la curva estacional del Kc para lo que crece aquí. Elige Personalizado para indicar un Kc fijo abajo.",
+              "kc": "Se usa solo cuando la familia de plantas está en Personalizado. Con cualquier otra familia vale la curva estacional y este campo se ignora.",
+              "exposure": "Cuánto sol y viento recibe esta zona comparada con un sitio abierto. Multiplica el Kc, así la zona conserva su curva estacional en lugar de quedarse fija en un solo valor. Elige Personalizado para indicar tu propio factor abajo.",
+              "microclimate_factor": "Se usa solo cuando la exposición está en Personalizado. Intervalo de 0.1 a 1.5; por encima de 1.0 para zonas que se secan más rápido que el terreno abierto.",
+              "vwc_sensor": "Opcional. Un sensor enterrado en esta zona, a un tercio de la profundidad de las raíces y a medio camino entre dos goteros. Por sí solo se muestra junto a las cifras de la zona y no cambia nada más. Dale la profundidad de las raíces de abajo y esta zona mide su déficit en lugar de estimarlo.",
+              "root_depth_m": "Profundidad de la zona de raíces de la que habla el sensor de arriba, y el único número de aquí que ninguna tabla contiene: un césped, un seto y una maceta se diferencian en un factor de cuatro sobre la misma tierra. Rellénalo y esta zona mide su déficit en lugar de estimarlo. Déjalo vacío y el sensor sigue siendo una lectura que se muestra junto a la estimación.",
+              "field_capacity": "Solo se lee cuando el tipo de suelo de arriba es Personalizado. El agua que este suelo retiene cuando ha terminado de drenar, como fracción: alrededor de 0.15 en arena, 0.25 en suelo franco, 0.35 en arcilla.",
+              "soil_type": "Opcional. De qué está hecha la tierra de esta zona. Aporta la capacidad de campo contra la que se mide la lectura del sensor, así no tienes que conocer el número. Si lo dejas en Automático se supone un suelo medio, que vale para la mayoría de los jardines y se te dice al guardar."
+            }
+          },
+          "valve_and_pipe": {
+            "name": "Válvula e instalación",
+            "description": "Qué la riega: la válvula, cómo se mide la entrega y la instalación de riego.",
+            "data": {
+              "valve": "Interruptor de la válvula (opcional)",
+              "delivery_mode": "Modo de entrega del agua",
+              "flow_rate_lpm": "Caudal de diseño",
+              "flow_meter_sensor": "Sensor de entrega: contador o caudal (solo con válvula con caudalímetro)",
+              "volume_entity": "Entidad que recibe el volumen (solo con dosificación por volumen)",
+              "system_type": "Tipo de instalación de riego",
+              "efficiency": "Eficiencia personalizada",
+              "delivery_timeout": "Tiempo máximo de seguridad"
+            },
+            "data_description": {
+              "system_type": "Fija la eficiencia de la zona (goteo 0.92, microaspersores 0.80, pop-up 0.68, manual 0.55). Elige Personalizado para indicar la tuya abajo.",
+              "efficiency": "Se usa solo cuando el tipo de instalación está en Personalizado. Con cualquier otro tipo este campo se ignora y el formulario te lo dice."
+            }
+          },
+          "scheduling": {
+            "name": "Programación",
+            "description": "Cuándo riega: a una hora, al superar un umbral de déficit, o solo cuando se le pide.",
+            "data": {
+              "irrigation_mode": "Modo de riego",
+              "irrigation_time": "Hora de riego",
+              "threshold": "Umbral de riego"
+            }
+          }
+        }
+      },
+      "confirm_zone": {
+        "title": "Valores poco habituales en esta zona",
+        "description": "La zona \"{zone_name}\" tiene valores fuera del intervalo habitual:\n\n{warnings}\n\nA menudo significa una confusión de unidades (por ejemplo, caudal indicado en L/min en lugar de L/h). Marca la casilla para guardar de todos modos, o envía sin marcarla para volver atrás y corregir los valores.",
+        "data": {
+          "confirm": "Los valores son correctos, guarda la zona"
+        }
+      },
+      "edit_zone": {
+        "title": "Editar zona de riego",
+        "data": {
+          "zone_to_edit": "Zona que se va a editar"
+        }
+      },
+      "edit_zone_detail": {
+        "title": "Editar zona: {zone_name}",
+        "data": {
+          "name": "Nombre de la zona"
+        },
+        "sections": {
+          "ground_and_location": {
+            "name": "Suelo y ubicación",
+            "description": "Qué se riega aquí: lo grande que es la zona, qué crece en ella y lo expuesta que está.",
+            "data": {
+              "area_m2": "Superficie regada",
+              "plant_family": "Familia de plantas",
+              "kc": "Coeficiente de cultivo Kc personalizado",
+              "exposure": "Exposición de la zona",
+              "microclimate_factor": "Factor de microclima personalizado (solo Avanzado)",
+              "vwc_sensor": "Sensor de humedad del suelo (esta zona)",
+              "root_depth_m": "Profundidad de las raíces",
+              "field_capacity": "Capacidad de campo",
+              "soil_type": "Tipo de suelo"
+            },
+            "data_description": {
+              "plant_family": "Fija la curva estacional del Kc para lo que crece aquí. Elige Personalizado para indicar un Kc fijo abajo.",
+              "kc": "Se usa solo cuando la familia de plantas está en Personalizado. Con cualquier otra familia vale la curva estacional y este campo se ignora.",
+              "exposure": "Cuánto sol y viento recibe esta zona comparada con un sitio abierto. Multiplica el Kc, así la zona conserva su curva estacional en lugar de quedarse fija en un solo valor. Elige Personalizado para indicar tu propio factor abajo.",
+              "microclimate_factor": "Se usa solo cuando la exposición está en Personalizado. Intervalo de 0.1 a 1.5; por encima de 1.0 para zonas que se secan más rápido que el terreno abierto.",
+              "vwc_sensor": "Opcional. Un sensor enterrado en esta zona, a un tercio de la profundidad de las raíces y a medio camino entre dos goteros. Por sí solo se muestra junto a las cifras de la zona y no cambia nada más. Dale la profundidad de las raíces de abajo y esta zona mide su déficit en lugar de estimarlo.",
+              "root_depth_m": "Profundidad de la zona de raíces de la que habla el sensor de arriba, y el único número de aquí que ninguna tabla contiene: un césped, un seto y una maceta se diferencian en un factor de cuatro sobre la misma tierra. Rellénalo y esta zona mide su déficit en lugar de estimarlo. Déjalo vacío y el sensor sigue siendo una lectura que se muestra junto a la estimación.",
+              "field_capacity": "Solo se lee cuando el tipo de suelo de arriba es Personalizado. El agua que este suelo retiene cuando ha terminado de drenar, como fracción: alrededor de 0.15 en arena, 0.25 en suelo franco, 0.35 en arcilla.",
+              "soil_type": "Opcional. De qué está hecha la tierra de esta zona. Aporta la capacidad de campo contra la que se mide la lectura del sensor, así no tienes que conocer el número. Si lo dejas en Automático se supone un suelo medio, que vale para la mayoría de los jardines y se te dice al guardar."
+            }
+          },
+          "valve_and_pipe": {
+            "name": "Válvula e instalación",
+            "description": "Qué la riega: la válvula, cómo se mide la entrega y la instalación de riego.",
+            "data": {
+              "valve": "Interruptor de la válvula",
+              "delivery_mode": "Modo de entrega del agua",
+              "flow_rate_lpm": "Caudal de diseño",
+              "flow_meter_sensor": "Sensor de entrega: contador o caudal (solo con válvula con caudalímetro)",
+              "volume_entity": "Entidad que recibe el volumen (solo con dosificación por volumen)",
+              "system_type": "Tipo de instalación de riego",
+              "efficiency": "Eficiencia personalizada",
+              "delivery_timeout": "Tiempo máximo de seguridad"
+            },
+            "data_description": {
+              "system_type": "Fija la eficiencia de la zona (goteo 0.92, microaspersores 0.80, pop-up 0.68, manual 0.55). Elige Personalizado para indicar la tuya abajo.",
+              "efficiency": "Se usa solo cuando el tipo de instalación está en Personalizado. Con cualquier otro tipo este campo se ignora y el formulario te lo dice."
+            }
+          },
+          "scheduling": {
+            "name": "Programación",
+            "description": "Cuándo riega: a una hora, al superar un umbral de déficit, o solo cuando se le pide.",
+            "data": {
+              "irrigation_mode": "Modo de riego",
+              "irrigation_time": "Hora de riego",
+              "threshold": "Umbral de riego"
+            }
+          }
+        }
+      },
+      "check_zones": {
+        "title": "Revisar las zonas configuradas",
+        "description": "Revisadas {zone_count} zonas: {findings_count} valores poco habituales encontrados:\n\n{report}\n\nUsa \"Editar una zona de riego\" para corregirlos. Los valores poco habituales pueden ser legítimos (jardineras, colectores de aspersores): es solo una comprobación de plausibilidad, no se ha modificado nada."
+      },
+      "remove_zone": {
+        "title": "Eliminar zona de riego",
+        "data": {
+          "zone_to_remove": "Zona que se va a eliminar"
+        }
+      }
+    },
+    "error": {
+      "efficiency_required": "Indica una eficiencia: el tipo de instalación está en Personalizado, que toma su valor de ese campo",
+      "kc_required": "Indica un Kc: la familia de plantas está en Personalizado, que toma su valor de ese campo",
+      "microclimate_factor_required": "Indica un factor de microclima: la exposición está en Personalizado, que toma su valor de ese campo",
+      "et_method_missing_sensors": "Ese método necesita sensores que esta instalación no ha declarado. Indica los sensores que pide, o deja el método en Automático.",
+      "et_method_unknown": "Método de evapotranspiración desconocido.",
+      "et_method_zone_probe": "Un sensor de humedad del suelo pertenece a una zona, no a toda la instalación. Configúralo en las opciones de esa zona; el método elegido aquí es el que usan las zonas que no tienen un sensor propio.",
+      "flow_rate_required": "Hace falta el caudal de diseño: el modo de entrega que has elegido calcula con él la duración del riego.",
+      "flow_meter_required": "Hace falta el sensor de entrega, un contador acumulativo o un caudal: el modo de entrega que has elegido cierra la válvula al volumen medido.",
+      "volume_entity_required": "Hace falta la entidad que recibe el volumen: el modo de entrega que has elegido deja la dosificación a la válvula misma.",
+      "zone_already_exists": "Ya existe una zona con este nombre",
+      "too_many_zones": "Se ha alcanzado el número máximo de zonas (50)",
+      "zone_name_too_long": "El nombre de la zona es demasiado largo (máximo 64 caracteres)",
+      "field_capacity_required": "Indica una capacidad de campo: el tipo de suelo está en Personalizado, que toma su valor de ese campo"
+    },
+    "abort": {
+      "no_zones": "No hay zonas configuradas"
+    }
+  },
+  "selector": {
+    "rain_sensor_type": {
+      "options": {
+        "event": "Por evento (mm por evento, pluviómetro de cazoletas)",
+        "daily_total": "Total diario (mm acumulados desde medianoche)"
+      }
+    },
+    "irrigation_mode": {
+      "options": {
+        "manual": "Solo manual (botón o llamada de servicio)",
+        "reactive": "Reactivo (riega cuando el déficit supera el umbral)",
+        "scheduled": "Programado (comprobación diaria a la hora fijada)"
+      }
+    },
+    "system_type": {
+      "options": {
+        "drip": "Riego por goteo / cinta (η=0.92)",
+        "micro_sprinkler": "Microaspersores (η=0.80)",
+        "sprinkler": "Aspersores emergentes, pop-up (η=0.68)",
+        "manual": "Manual / regadera (η=0.55) 🙂",
+        "custom": "Personalizado (indica la eficiencia abajo)"
+      }
+    },
+    "plant_family": {
+      "options": {
+        "lawn": "Césped / Pradera",
+        "vegetables": "Huerto / Hortalizas (de temporada)",
+        "fruit_trees": "Frutales (de hoja caduca)",
+        "ornamental_shrubs": "Arbustos ornamentales",
+        "herbs": "Aromáticas (mediterráneas)",
+        "citrus": "Cítricos / Frutales de hoja perenne",
+        "roses": "Rosales",
+        "succulents": "Crasas / Cactus",
+        "native_ground_cover": "Tapizantes autóctonas",
+        "mixed_garden": "Jardín mixto (predeterminado)",
+        "custom": "Personalizado (indica el Kc abajo)"
+      }
+    },
+    "delivery_mode": {
+      "options": {
+        "estimated_flow": "Simple On/Off, tiempo calculado a partir del caudal (predeterminado)",
+        "flow_meter": "Válvula con caudalímetro",
+        "volume_preset": "Válvula inteligente con dosificación por volumen"
+      }
+    },
+    "exposure": {
+      "options": {
+        "deep_shade": "Sombra densa / todo el día (×0.60)",
+        "morning_sun": "Sol por la mañana, sombra por la tarde (×0.75)",
+        "afternoon_sun": "Sombra por la mañana, sol por la tarde (×0.85)",
+        "full_sun": "Pleno sol, zona abierta (×1.00, predeterminado)",
+        "windy": "Ventoso / expuesto (×1.15)",
+        "reflected_heat": "Calor reflejado: pavimento, muro orientado al sur (×1.20)",
+        "custom": "Personalizado (indica el factor abajo)"
+      }
+    },
+    "et_method": {
+      "options": {
+        "auto": "Automático: el mejor método que permiten mis sensores",
+        "et_simple": "Simple (solo temperatura)",
+        "hargreaves": "Hargreaves-Samani (temperatura máx/mín diaria)",
+        "penman_monteith": "Penman-Monteith (FAO-56, meteorología completa)"
+      }
+    },
+    "soil_type": {
+      "options": {
+        "auto": "Automático (un suelo medio)",
+        "sandy": "Arenoso o ligero, drena rápido",
+        "loam": "Franco o medio",
+        "clay": "Arcilloso o pesado, retiene el agua",
+        "custom": "Personalizado (indica la capacidad de campo)"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "water_balance_method": {
+        "name": "Método de balance hídrico",
+        "state": {
+          "et_simple": "Simple (solo temperatura)",
+          "vwc_system": "Sensor de humedad del suelo",
+          "hargreaves": "Hargreaves-Samani (amplitud térmica diaria)",
+          "penman_monteith": "Penman-Monteith (FAO-56)"
+        }
+      },
+      "model_input_derived_diurnal_range_c": {
+        "name": "Amplitud térmica diaria"
+      },
+      "model_input_derived_temp_max_c": {
+        "name": "Temperatura máxima diaria"
+      },
+      "model_input_derived_temp_min_c": {
+        "name": "Temperatura mínima diaria"
+      },
+      "model_input_derived_solar_mj": {
+        "name": "Radiación solar diaria"
+      },
+      "model_input_derived_net_radiation_mj": {
+        "name": "Radiación neta"
+      },
+      "model_input_derived_wind_2m_m_s": {
+        "name": "Velocidad del viento a 2 m"
+      },
+      "last_source": {
+        "name": "Último origen",
+        "state": {
+          "scheduled": "Programado",
+          "reactive": "Umbral de déficit",
+          "manual": "Manual",
+          "service": "Llamada de servicio",
+          "button": "Botón",
+          "automatic": "Automático",
+          "mark_irrigated": "Marcada como regada",
+          "service_reset": "Puesta a cero"
+        }
+      },
+      "et_hourly_estimate": {
+        "name": "Estimación ET horaria"
+      },
+      "dryness_index": {
+        "name": "Índice de sequedad"
+      },
+      "volume": {
+        "name": "Volumen"
+      },
+      "deficit": {
+        "name": "Déficit"
+      },
+      "duration": {
+        "name": "Duración"
+      },
+      "last_duration": {
+        "name": "Duración anterior"
+      },
+      "last_irrigated": {
+        "name": "Último riego"
+      },
+      "last_volume": {
+        "name": "Volumen anterior"
+      },
+      "session_water": {
+        "name": "Agua de esta sesión"
+      },
+      "rain_yearly": {
+        "name": "Lluvia anual"
+      },
+      "irrigated_yearly": {
+        "name": "Riego anual"
+      },
+      "flow_rate": {
+        "name": "Caudal de diseño"
+      },
+      "measured_flow": {
+        "name": "Caudal medido"
+      },
+      "meter_resolution": {
+        "name": "Resolución del contador"
+      },
+      "irrigation_mode": {
+        "name": "Modo de riego"
+      },
+      "irrigation_time": {
+        "name": "Hora de riego"
+      },
+      "threshold": {
+        "name": "Umbral"
+      },
+      "area": {
+        "name": "Superficie"
+      },
+      "efficiency": {
+        "name": "Eficiencia"
+      },
+      "kc": {
+        "name": "Kc"
+      },
+      "linked_valve": {
+        "name": "Válvula"
+      },
+      "linked_battery": {
+        "name": "Batería"
+      },
+      "linked_water_meter": {
+        "name": "Contador de agua"
+      }
+    },
+    "button": {
+      "irrigate": {
+        "name": "Regar"
+      },
+      "stop": {
+        "name": "Parar"
+      },
+      "mark_irrigated": {
+        "name": "Marcar como regada"
+      },
+      "reset_valve": {
+        "name": "Restablecer válvula"
+      },
+      "valve_test": {
+        "name": "Prueba de válvula (1 min)"
+      },
+      "reset_yearly_rain": {
+        "name": "Poner a cero la lluvia anual"
+      },
+      "reset_yearly_water": {
+        "name": "Poner a cero el agua anual"
+      }
+    }
+  },
+  "services": {
+    "reset": {
+      "name": "Poner a cero el déficit",
+      "description": "Pone a cero el déficit de agua del suelo (normalmente se llama cuando termina el riego)."
+    },
+    "reset_yearly_rain": {
+      "name": "Poner a cero la lluvia anual",
+      "description": "Pone a cero el total de lluvia del año en curso (para toda la instalación). El total es un único valor que comparten los sensores \"Lluvia anual\" de todas las zonas y normalmente se pone a cero por sí solo el 1 de enero. Sirve para borrar un valor equivocado, por ejemplo después de cambiar el tipo de sensor de lluvia, sin esperar al año nuevo ni reinstalar. Las estadísticas históricas no se tocan."
+    },
+    "reset_yearly_water": {
+      "name": "Poner a cero el agua anual",
+      "description": "Pone a cero, en todas las zonas, el total de agua regada del año en curso. Cada zona tiene su propio contador anual y normalmente se pone a cero el 1 de enero; esto los borra todos de una vez. El total entregado de siempre por zona y las estadísticas históricas no se tocan."
+    },
+    "irrigate_zone": {
+      "name": "Regar una zona",
+      "description": "Inicia el riego de una sola zona. Cómo se mide el agua depende del modo de entrega de la zona: por tiempo, por volumen leído en el contador, o pasando un volumen objetivo a una válvula inteligente que se dosifica sola.",
+      "fields": {
+        "zone_name": {
+          "name": "Nombre de la zona",
+          "description": "El nombre de la zona que se va a regar, tal como está configurada."
+        }
+      }
+    },
+    "irrigate_all": {
+      "name": "Regar todas las zonas",
+      "description": "Riega en secuencia todas las zonas configuradas. Cada zona usa su propio modo de entrega. Una pausa entre zonas deja que se estabilice la presión. El déficit se pone a cero cuando todas las zonas han terminado."
+    },
+    "stop": {
+      "name": "Parada de emergencia",
+      "description": "Cierra de inmediato todas las válvulas de riego. Sirve para interrumpir un ciclo de riego en curso."
+    },
+    "stop_zone": {
+      "name": "Parar una zona",
+      "description": "Para el riego de una sola zona y deja las demás funcionando.",
+      "fields": {
+        "zone_name": {
+          "name": "Nombre de la zona",
+          "description": "La zona cuyo riego se debe parar."
+        }
+      }
+    },
+    "mark_irrigated": {
+      "name": "Marcar la zona como regada",
+      "description": "Registra que una zona se ha regado a mano, para que el modelo contabilice el agua y deje de pedirla. Úsalo después de regar con la manguera.",
+      "fields": {
+        "zone_name": {
+          "name": "Nombre de la zona",
+          "description": "La zona que se marcará como regada. Déjalo vacío para todas las zonas."
+        }
+      }
+    },
+    "set_deficit": {
+      "name": "Fijar el déficit",
+      "description": "Fija el déficit de agua de una zona en un valor elegido. Sirve para corregir el modelo después de algo que no ha podido ver, como un riego a mano abundante o una temporada con el sensor de lluvia fuera de servicio.",
+      "fields": {
+        "deficit_mm": {
+          "name": "Déficit (mm)",
+          "description": "Valor de déficit que se quiere fijar, en mm. Debe ser >= 0."
+        },
+        "zone_name": {
+          "name": "Nombre de la zona",
+          "description": "La zona que se va a actualizar. Déjalo vacío para actualizarlas todas."
+        }
+      }
+    },
+    "reset_valve": {
+      "name": "Restablecer la válvula (salir de mantenimiento)",
+      "description": "Saca una zona del mantenimiento y le permite volver a regar. Una zona entra en mantenimiento después de varios fallos seguidos de la válvula, y se queda ahí hasta que alguien haya revisado la válvula.",
+      "fields": {
+        "zone_name": {
+          "name": "Nombre de la zona",
+          "description": "La zona cuya válvula se debe desbloquear."
+        }
+      }
+    },
+    "test_valve": {
+      "name": "Prueba de válvula (supervisada)",
+      "description": "Abre la válvula de una zona durante un tiempo fijado y mide lo que entrega de verdad, para poder comparar el caudal medido con el que se diseñó la zona. Vigila la zona mientras funciona.",
+      "fields": {
+        "zone_name": {
+          "name": "Zona",
+          "description": "La zona que se va a probar."
+        },
+        "duration_min": {
+          "name": "Duración",
+          "description": "Minutos que la válvula permanece abierta. Un minuto da una medida poco fiable: un contador que salta de litro en litro apenas se mueve en ese tiempo, y un caudal calculado sobre uno o dos saltos describe la resolución del contador, no la zona. Las pruebas más largas cuestan agua, pero son la única forma de medir una zona lenta."
+        }
+      }
+    }
+  },
+  "common": {
+    "notification_command_failed_title": "El comando a la válvula ha fallado",
+    "notification_command_failed_body": "Zona {zone}: {operation} no se ha completado ({error_detail}).",
+    "notification_unreachable_passive_title": "La válvula no responde",
+    "notification_unreachable_passive_body": "La válvula de la zona {zone} no responde desde hace {duration}.",
+    "notification_unreachable_at_irrigation_title": "La válvula no responde a la hora del riego",
+    "notification_unreachable_at_irrigation_body": "No se ha podido iniciar el riego de la zona {zone}: la válvula no responde ({reason}). Comprueba la batería de la válvula y la red Zigbee antes de volver a intentarlo.",
+    "notification_flow_meter_dead_title": "El contador no transmite",
+    "notification_flow_meter_dead_body": "El contador de la zona {zone} no transmite ({detail}). El riego ha seguido con el caudal de diseño en lugar de saltarse, así que el volumen es estimado y no medido. Revisa la entidad del contador: un contador mudo es mucho más probable que una tubería seca.",
+    "notification_delivery_uncredited_title": "No se ha podido contabilizar el agua entregada",
+    "notification_delivery_uncredited_body": "La zona {zone} ha entregado agua que no se ha podido medir ({detail}) y no tiene un caudal de diseño con el que estimarla, así que su déficit no ha cambiado y la zona se volverá a regar en el ciclo siguiente. Indica el caudal de diseño de la zona, o repara el contador.",
+    "notification_stuck_open_title": "Válvula bloqueada abierta: cierra el agua de red",
+    "notification_stuck_open_body": "El interruptor de la válvula de la zona {zone} indica apagado pero el agua sigue corriendo ({flow}). La integración ya ha intentado recuperarla y ha hecho una parada de emergencia en todas las demás zonas. **Cierra ahora a mano la llave general** y revisa la válvula afectada antes de volver a regar.",
+    "notification_leak_detected_title": "Fuga detectada",
+    "notification_leak_detected_body": "Se ha detectado caudal con todas las válvulas cerradas. Última lectura: {flow}.",
+    "notification_zone_disabled_title": "Zona desactivada",
+    "notification_zone_disabled_body": "Zona {zone} desactivada automáticamente después de {failures} fallos seguidos.",
+    "notification_battery_low_title": "Batería baja",
+    "notification_battery_low_body": "La batería de {sensor_name} está al {percent}%.",
+    "notification_irrigation_ineffective_title": "El riego parece ineficaz",
+    "notification_irrigation_ineffective_body": "Zona {zone}: la humedad del suelo no ha subido después del último riego.",
+    "notification_model_drift_title": "Detectada deriva del modelo",
+    "notification_model_drift_body": "Zona {zone}: la correlación entre humedad y modelo ha bajado a {correlation}.",
+    "notification_water_me_now_title": "Se recomienda regar a mano",
+    "notification_water_me_now_body": "Zona {zone}: déficit {deficit} por encima del umbral; riega a mano.",
+    "notification_watchdog_triggered_title": "Válvula cerrada por el vigilante de seguridad",
+    "notification_watchdog_triggered_body": "La válvula de la zona {zone} ha estado abierta más de {duration_min} min sin recibir una orden de cierre. NeverDry la ha cerrado por su cuenta por seguridad. Comprueba que la automatización o la lógica de entrega funcionan correctamente."
+  },
+  "issues": {
+    "soil_probe_needs_a_zone": {
+      "title": "NeverDry: ¿en qué zona está el sensor de suelo?",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "¿En qué zona está el sensor?",
+            "description": "El sensor de humedad del suelo `{probe}` está declarado para toda la instalación, así que ahora mismo todas las zonas lo están leyendo. Un sensor mide un trozo de suelo, con una plantación encima y su propio historial de riego: su lectura no se puede trasladar a una zona que se riega por su cuenta.\n\nDile a NeverDry en qué zona está enterrado. Mientras tanto no ha cambiado nada: tus zonas se comportan exactamente igual que antes, y seguirán así hasta que respondas.",
+            "data": {
+              "zone": "¿En qué zona está el sensor?"
+            },
+            "data_description": {
+              "zone": "La zona elegida medirá su déficit con el sensor. Las demás vuelven a estimarlo, que es lo que un sensor enterrado en el suelo de otra zona nunca habría podido decirles."
+            }
+          }
+        }
+      }
+    }
+  }
+}
