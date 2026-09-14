@@ -64,6 +64,14 @@ rather than invented.
 - **Stopping**: a run ends when its delivery criterion is met or its safety
   timeout expires. Nothing outside the run can end it early except the emergency
   stop, which stops everything.
+- **Rain delay**: written into the model, and inert. `RainDelayPolicy` carries a
+  probability threshold and a delay, `Environment` declares a rain-probability
+  binding, and **nothing in production reads either**: the policy has no consumer
+  anywhere, and the sensor is never offered in the configuration form. So the
+  integration presents a rain delay as part of a site's policy, with no path from
+  the sky to the decision. This changes what
+  [#138](https://github.com/never-dry/NeverDry/issues/138) is asking for: not a
+  new feature, but the wiring of one that is already promised.
 
 ## The requests, uncoordinated
 
@@ -235,6 +243,12 @@ now than after something is built.
 - **Ordering needs no queue.** Recompute at each tick, driest first. Watering the
   driest zone lowers its deficit, so it stops winning: the ordering is
   self-balancing and there is nothing to store.
+- **Whatever is built, the scheduler keeps no state about the world.** Timers,
+  counters and the current time enter as arguments. That property is what lets
+  every rule above be tested without a controller, a Home Assistant instance or a
+  clock, and it is the first thing lost while adding clocks and counters. The one
+  place memory is genuinely required is the deferral count, and that is memory
+  about a *zone*, held on the zone.
 
 ## Positions already taken, and open to objection
 
@@ -257,10 +271,30 @@ because the people they affect had not seen them.
   to survive a restart or every restart silently refills the budget.
 
 Four questions are genuinely open, and three of them are better answered by the
-people running the gardens than by anyone reading the code: which forecast term
-to support first, what the forecast should be bound to, what shape a freeze
-override takes, and whether a suspended zone's deficit should be frozen. They are
-in section 14 of the working note.
+people running the gardens than by anyone reading the code. They are section 14
+of the working note, and they are named here because a question nobody can see is
+a question nobody can answer:
+
+- **Which forecast term ships first.** Probability only, which is today's model
+  and the smallest change, but defers on drizzle; quantity only, arguably the
+  better signal since a forecast amount already asserts that it will rain; or
+  both at once, degrading to whatever a given weather integration supplies.
+  Supporting a single term strands one group of users or the other.
+- **What the forecast is bound to.** A `sensor.*` entity only, or a `weather.*`
+  entity plus a horizon. The second covers more real installations and receives
+  probability and quantity from the same call, but it is a service call rather
+  than a state read, which is a different integration pattern. This one largely
+  settles the question above, so it comes first.
+- **What shape a freeze override takes.** A configurable threshold expresses
+  tolerance by *degree*, "fine down to minus eight"; a declared fact about the
+  installation expresses immunity by *kind*, self-draining lines or subsurface
+  drip. They are not the same statement and neither can say the other. Whichever
+  is chosen, the wording decides whether it is answered honestly: a control that
+  reads "disable freeze protection" invites exactly the people who should not
+  touch it.
+- **Whether a suspended zone's deficit should be frozen.** It only bites for
+  zones that get no rain credit at all, a patio or a greenhouse, which is
+  narrower than "what happens over winter".
 
 ## What this document does not do
 
