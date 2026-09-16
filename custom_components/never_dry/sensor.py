@@ -14,7 +14,7 @@ import contextlib
 import logging
 import math
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import monotonic
@@ -116,7 +116,7 @@ from .const import (
     MICROCLIMATE_FACTOR_MAX,
     MICROCLIMATE_FACTOR_MIN,
     PLANT_FAMILIES,
-    PROBE_CADENCE_WINDOW,
+    PROBE_CADENCE_MEMORY_S,
     PROBE_STALE_BACKSTOP_S,
     RAIN_TYPE_EVENT,
     SAFETY_LAYER_SPREAD,
@@ -126,7 +126,7 @@ from .const import (
     VALVE_STARTUP_GRACE_S,
 )
 from .controller import IrrigationController
-from .environment import DEFAULT_LATITUDE, Environment, RainSensorType, silence_floor
+from .environment import DEFAULT_LATITUDE, Environment, QuietWatermark, RainSensorType
 from .services import async_setup_services
 from .session_flow import MIN_PUBLICATION_SAMPLES
 from .unit_convert import LITERS_TO_GALLONS, LPM_TO_GPH, LPM_TO_LPH
@@ -1955,8 +1955,18 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         # battery that fails in June would report damp soil until September and
         # the zone would never be watered again.
         self._probe_last_seen: datetime | None = None
-        self._probe_intervals: deque[float] = deque(maxlen=PROBE_CADENCE_WINDOW)
+        self._probe_quiet = QuietWatermark(window_s=PROBE_CADENCE_MEMORY_S)
         self._probe_silent_logged = False
+        # When the *device* last spoke, which is a different question from when
+        # the reading last changed, and it is the one that decides whether the
+        # probe is alive. Home Assistant writes a sensor's state only when its
+        # value changes, so a probe sitting on stable ground produces no writes
+        # at all: on 2026-09-16 a live probe published its temperature nineteen
+        # times overnight while its moisture entity, unchanged at 99, published
+        # once. Asked of the moisture entity alone, that reads as eight hours of
+        # silence from a device that had not stopped talking for a minute.
+        self._probe_device_entities: tuple[str, ...] | None = None
+        self._probe_device_seen: datetime | None = None
 
         # Efficiency: the system type decides, per the preset/override
         # contract in const. Only the custom type (default_efficiency: None)
@@ -2122,24 +2132,124 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
 
         The bar is the probe's **own** observed cadence, never a constant: one
         sensor publishes every thirty seconds and another twice a day, and a
-        number picked here would call one of them dead. Below the sample count a
-        quantile needs, there is no bar and the verdict is simply not available
-        -- absence of evidence is not evidence of silence, and refusing a
-        perfectly good reading would send the zone onto the estimate for no
-        reason.
+        number picked here would call one of them dead. Until it has come back
+        from one stretch of quiet there is no bar and the verdict is simply not
+        available -- absence of evidence is not evidence of silence, and
+        refusing a perfectly good reading would send the zone onto the estimate
+        for no reason.
+
+        The silence measured is the **device's**, not the reading's, and that
+        distinction is the whole correctness of this check. Home Assistant
+        writes a sensor's state only when its value changes, so a probe on
+        ground that is not moving publishes nothing, and a reading that stands
+        still is the commonest thing a working soil probe does. Judged on the
+        moisture entity alone, a live probe is declared dead for the crime of
+        reporting the same number twice.
+
+        Which is what happened: on 2026-09-16 a probe published its temperature
+        nineteen times across the night, every 55 minutes, while its moisture
+        entity published once. The zone spent the night on the estimate beside
+        a device that had never stopped talking.
+
+        So the union of the device's entities answers it, exactly as the valve
+        reachability watch already does: any of them reporting proves the device
+        is on the mesh, and no member is inspected for what it says. An
+        unchanged reading from a device that is demonstrably alive is not
+        missing evidence -- it is the device stating that the soil has not
+        moved, which is the most useful thing it can say.
+
+        Which stretch of quiet sets the bar matters too, and a quantile over
+        recent gaps is the wrong estimator for a device that reports on change.
+        See :class:`~.environment.QuietWatermark` for the field case.
 
         The backstop is the one exception, and it is a backstop rather than a
-        verdict: a probe dead since installation never produces the intervals
-        its own bar would be derived from, so without it the very case this
-        exists to catch would be the one case it could not see.
+        verdict: a probe dead since installation never produces the quiet
+        stretches its own bar would be derived from, so without it the very case
+        this exists to catch would be the one case it could not see.
+
+        Residual, stated rather than hidden: a device whose radio keeps working
+        while its sensing element freezes passes this check. Detecting that
+        needs a reading that contradicts itself, not a silence, and it is the
+        open second-channel question (GH #234, a temperature frozen to the
+        decimal for hours).
         """
         if self._probe_last_seen is None:
             return False
-        age_s = (datetime.now(UTC) - self._probe_last_seen).total_seconds()
+        self._observe_probe_device()
+        now = datetime.now(UTC)
+        # The device where it can be resolved, the reading where it cannot: a
+        # registry that will not answer must not turn every probe into a dead
+        # one, so the fallback is the behaviour this check has always had.
+        spoke_at = self._probe_device_seen or self._probe_last_seen
+        age_s = (now - spoke_at).total_seconds()
         if age_s > PROBE_STALE_BACKSTOP_S:
             return False
-        floor_s = silence_floor(list(self._probe_intervals))
+        floor_s = self._probe_quiet.value(now.timestamp())
         return floor_s is None or age_s <= floor_s
+
+    def _observe_probe_device(self) -> None:
+        """Note when the probe's device last spoke, and time the quiet between.
+
+        Sampled on the way through rather than from a subscription of its own.
+        The check runs on every ET tick and on every decision, which is often
+        enough to see the device advance; and a missed advance merges two quiet
+        stretches into one, which overstates the bar rather than understating
+        it. That is the safe direction, and it is the same trade the valve
+        reachability watch makes.
+        """
+        seen = self._probe_device_spoke_at()
+        if seen is None:
+            return
+        previous = self._probe_device_seen
+        if previous is not None and seen > previous:
+            # A stretch of quiet that has just ended: the device went this long
+            # without a word and came back, so this much quiet is normal for it.
+            self._probe_quiet.record(seen.timestamp(), (seen - previous).total_seconds())
+        if previous is None or seen > previous:
+            self._probe_device_seen = seen
+
+    def _probe_device_spoke_at(self) -> datetime | None:
+        """The most recent word from any entity of the probe's device."""
+        latest: datetime | None = None
+        for entity_id in self._probe_device_entity_ids():
+            state = self._hass.states.get(entity_id)
+            if state is None:
+                continue
+            stamp = getattr(state, "last_reported", None) or getattr(state, "last_updated", None)
+            # Guarded rather than trusted: a stand-in state object hands back
+            # something that is not a datetime, and the comparison below would
+            # raise inside a property every reader goes through.
+            if isinstance(stamp, datetime) and stamp.tzinfo is not None and (latest is None or stamp > latest):
+                latest = stamp
+        return latest
+
+    def _probe_device_entity_ids(self) -> tuple[str, ...]:
+        """Every entity of the probe's device, resolved once and kept.
+
+        A device's entity set does not change between ticks in a way that
+        matters here, and the walk is the only part of this check that is not
+        a dictionary lookup.
+        """
+        if self._probe_device_entities is None:
+            self._probe_device_entities = self._resolve_probe_device_entities()
+        return self._probe_device_entities
+
+    def _resolve_probe_device_entities(self) -> tuple[str, ...]:
+        """Registry walk: probe entity -> its device -> every entity of it."""
+        if not self._own_probe:
+            return ()
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            registry = er.async_get(self._hass)
+            entry = registry.async_get(self._own_probe)
+            if entry is None or entry.device_id is None:
+                return (self._own_probe,)
+            siblings = er.async_entries_for_device(registry, entry.device_id, include_disabled_entities=False)
+            return tuple(e.entity_id for e in siblings) or (self._own_probe,)
+        except Exception:  # a registry hiccup must not turn a live probe into a dead one
+            _LOGGER.debug("Could not resolve the device of probe '%s'", self._own_probe, exc_info=True)
+            return (self._own_probe,)
 
     @property
     def _deficit_at_irrigation_start(self) -> float | None:
@@ -2281,6 +2391,8 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
                 # probe this is the last restart that can inherit the defect.
                 restored = last.attributes.get("estimate_mm", last.attributes.get("deficit_mm", 0.0))
                 self._zone_deficit = float(restored)
+            if self._own_probe and self._probe_last_seen is None:
+                self._restore_probe_standing(last.attributes)
             with contextlib.suppress(ValueError, TypeError):
                 ts = last.attributes.get("last_irrigated")
                 if ts:
@@ -2325,6 +2437,53 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             # no dependency on the reference deficit or sibling state.
             # See docs/design_water_balance_reference_model.md (D4).
             self._zone_deficit = 0.0
+
+    def _restore_probe_standing(self, attributes: Mapping) -> None:
+        """Carry the probe's last reading across a restart, timestamp included.
+
+        The live read at setup is the first choice and is usually enough, but on
+        a full Home Assistant restart the probe's own integration may not have
+        set up yet, so there is no state to read and nothing to record. The zone
+        then sits on the estimate until the probe happens to speak again -- a
+        whole reporting cycle, forty minutes on the devices this was found on.
+        In the field on 2026-09-16 that showed as a deficit alternating between
+        2.6 mm and 0.15 mm across every restart, two numbers on two different
+        scales with no physical event between them, and the controller deciding
+        on whichever one it caught.
+
+        The subscription cannot cover this on its own: it fires when the probe
+        next changes state, which is precisely the event being waited for.
+
+        The timestamp is restored with the reading and never invented. A
+        measurement from last week has to stay stale through the restart, which
+        is what a rehydrated ``_probe_last_seen`` gives and what a ``now()``
+        would quietly destroy. The millimetres are recomputed rather than
+        restored, because the ground this zone was configured with may be the
+        very thing that changed in the edit that caused the reload.
+
+        The bar is deliberately not restored. It is evidence about the device,
+        and after a restart the first gap observed spans the downtime, which is
+        evidence about Home Assistant instead. Starting with no bar means the
+        reading is believed until the backstop, which is the conservative
+        direction: the expensive mistake here is refusing a good measurement.
+        """
+        seen = attributes.get("probe_last_seen")
+        pct = attributes.get("probe_moisture_pct")
+        if seen is None or pct is None or self._probe_model is None:
+            return
+        with contextlib.suppress(ValueError, TypeError):
+            stamp = datetime.fromisoformat(str(seen))
+            if stamp.tzinfo is None:
+                return
+            vwc = probe_percent_to_fraction(float(pct))
+            if vwc is None:
+                return
+            self._probe_last_seen = stamp
+            self._probe_vwc = vwc
+            measured = self._probe_model.step(VWCReading(vwc=vwc))
+            self._probe_implied_mm = measured.value_mm
+            if self._probe_drives:
+                self._zone.measured_deficit = measured
 
     def _get_latitude(self) -> float:
         """The site's latitude, which decides the hemisphere of the Kc curve.
@@ -2430,10 +2589,12 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         # callback got round to it.
         stamp = getattr(state, "last_updated", None)
         seen = stamp if isinstance(stamp, datetime) and stamp.tzinfo else datetime.now(UTC)
-        if self._probe_last_seen is not None:
-            gap_s = (seen - self._probe_last_seen).total_seconds()
-            if gap_s > 0:
-                self._probe_intervals.append(gap_s)
+        # The gap between two readings is deliberately *not* fed to the bar. It
+        # measures how long the soil took to move by a whole point, which is a
+        # property of the weather, and the bar is about the device. Feeding it
+        # both is what set the bar at 33 minutes on a probe that reports every
+        # 55 (2026-09-16). The bar is fed from the device's own silences, in
+        # ``_observe_probe_device``.
         self._probe_last_seen = seen
         self._probe_silent_logged = False
 
@@ -2980,6 +3141,14 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             # GH #234 came out of.
             attrs["probe_moisture_pct"] = round(self._probe_vwc * 100, 1)
             attrs["probe_implied_deficit_mm"] = round(self._probe_implied_mm, 2)
+            # When the reading was taken. Published because it is what carries
+            # the measurement across a restart with its age intact: a reading
+            # from a minute ago and one from last week are the same number and
+            # must not be believed the same way. Restoring the figure without
+            # its timestamp would make every stale probe look fresh at boot,
+            # which is the opposite of the bug this pair exists to fix.
+            if self._probe_last_seen is not None:
+                attrs["probe_last_seen"] = self._probe_last_seen.isoformat()
         if self._probe_drives:
             # What the reading was multiplied by, published beside what it
             # produced. The number carries the authority of a measurement and
@@ -3001,6 +3170,22 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             # constant this replaced with a dropdown in front of it.
             attrs["probe_soil_type"] = self._soil_type
             attrs["probe_fresh"] = self._probe_is_fresh()
+            # The bar the line above was judged against, beside the verdict.
+            # Without it a zone on the estimate is a fact with no explanation,
+            # and the explanation is the whole of the diagnosis: this probe was
+            # called stopped at 34 minutes because the bar had been learned at
+            # 33. ``None`` until a stretch of quiet has ended, which reads
+            # correctly as "no bar yet" rather than as "no quiet allowed".
+            now = datetime.now(UTC)
+            bar_s = self._probe_quiet.value(now.timestamp())
+            attrs["probe_quiet_bar_s"] = round(bar_s) if bar_s is not None else None
+            # And the number the bar was compared against: how long the device
+            # has been quiet, which is not how old the reading is. Published
+            # side by side because reading them apart is what made a live probe
+            # look dead for eight hours.
+            attrs["probe_device_silence_s"] = (
+                round((now - self._probe_device_seen).total_seconds()) if self._probe_device_seen else None
+            )
         attrs["total_water_delivered_l"] = round(self._total_water_delivered, 1)
         attrs["yearly_water_delivered_l"] = round(self._yearly_water_delivered, 1)
         attrs["yearly_water_year"] = self._yearly_water_year
