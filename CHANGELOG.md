@@ -122,6 +122,58 @@ not the argument.
   meter had stopped answering.
 
 ### Fixed
+- **A working probe was declared dead for reporting the same number twice**
+  ([#252](https://github.com/never-dry/NeverDry/issues/252)). Home Assistant
+  writes a sensor's state only when its value changes, so a soil probe sitting on
+  ground that is not moving publishes nothing at all, and ground that is not
+  moving is the commonest thing soil does. The freshness check watched the
+  moisture entity alone, which meant it was asking whether the *soil* had moved
+  and reading the answer as whether the *device* was alive. Measured on one
+  device across a single night: nineteen writes on its temperature entity, one
+  every 55 minutes, against one write on its moisture entity. The zone spent that
+  night on the weather estimate beside a probe with a metronomic heartbeat, and
+  the deficit on the card alternated between two numbers on two different scales
+  with nothing physical happening in between.
+
+  Freshness now asks the probe's **device**, taking the union of its entities the
+  way the valve reachability watch already does: any of them reporting proves the
+  device is there, and none is inspected for what it says. What that inverts is
+  the point of it. An unchanged reading from a device that is demonstrably alive
+  is not missing evidence, it is the device saying that the soil has not moved,
+  which is the most useful thing it can tell you.
+
+  The bar that silence is measured against was wrong in its own right, and is
+  now derived from the longest quiet the device has come back from over the past
+  week rather than from a quantile of recent value changes. The gap between two
+  readings measures how long the soil took to move by a whole point, which is
+  weather; it was serving as the yardstick for a device's heartbeat. On the night
+  above that put the bar at 33 minutes for a probe that reports every 55, and the
+  reading was refused by nineteen seconds.
+
+  Two new attributes sit beside `probe_fresh`: `probe_quiet_bar_s`, the bar the
+  verdict was given against, and `probe_device_silence_s`, how long the device
+  has actually been quiet. Reading the age of the reading apart from the silence
+  of the device is what made a live probe look dead for a night.
+
+  One case is knowingly left open: a device whose radio keeps working while its
+  sensing element freezes now passes this check. Catching that needs a reading
+  that contradicts itself rather than a silence, and it is the same
+  second-channel question the uncalibrated scale belongs to.
+- **A restart put a probe-driven zone back on the weather estimate**
+  ([#251](https://github.com/never-dry/NeverDry/issues/251)). Reloading the
+  integration was fine, because the probe was up and had a reading to be found.
+  A full Home Assistant restart was not: NeverDry starts before the probe's own
+  integration, finds nothing to read, and treats "never heard from" exactly like
+  "has gone quiet". The zone then waited for the probe to speak of its own
+  accord, which on the devices this was found on is up to forty minutes. Three
+  restarts on one morning produced the swing; eleven reloads in the same hour did
+  not.
+
+  The measurement now survives a restart together with its age. The timestamp is
+  carried across rather than invented, so a reading from last week stays stale
+  instead of being quietly refreshed into a good one, and the millimetres are
+  recomputed rather than restored, since the edit that caused a reload may have
+  been the zone's soil.
 - **A zone with a probe could sit at zero deficit and never water again**
   ([#234](https://github.com/never-dry/NeverDry/issues/234)). Two installations
   reported it within a day: one probe reading 21 %, four others between 94 and
