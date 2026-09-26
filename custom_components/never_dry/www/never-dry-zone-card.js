@@ -108,6 +108,19 @@ const I18N = {
     stop: "Stop",
     markIrrigated: "Mark irrigated",
     resetValve: "Reset valve",
+    layout: "Layout",
+    layoutFull: "Full",
+    layoutCompact: "Compact",
+    layoutCustom: "Custom",
+    sections: "Sections to show",
+    secStatus: "Status",
+    secBar: "Deficit bar",
+    secNext: "Next watering",
+    secLast: "Last watering",
+    secTotals: "Totals",
+    secParams: "Parameters",
+    secActions: "Buttons",
+    warningsAlways: "Warnings are always shown.",
   },
   it: {
     selectZone: "Seleziona una zona nella scheda.",
@@ -192,6 +205,19 @@ const I18N = {
     stop: "Stop",
     markIrrigated: "Segna come irrigata",
     resetValve: "Ripristina valvola",
+    layout: "Aspetto",
+    layoutFull: "Completa",
+    layoutCompact: "Compatta",
+    layoutCustom: "Personalizzata",
+    sections: "Sezioni da mostrare",
+    secStatus: "Stato",
+    secBar: "Barra del deficit",
+    secNext: "Prossima irrigazione",
+    secLast: "Ultima irrigazione",
+    secTotals: "Totali",
+    secParams: "Parametri",
+    secActions: "Pulsanti",
+    warningsAlways: "Gli avvisi si vedono sempre.",
   },
   de: {
     selectZone: "Eine Zone im Karten-Editor auswählen.",
@@ -276,6 +302,19 @@ const I18N = {
     stop: "Stopp",
     markIrrigated: "Als bewässert markieren",
     resetValve: "Ventil zurücksetzen",
+    layout: "Darstellung",
+    layoutFull: "Vollständig",
+    layoutCompact: "Kompakt",
+    layoutCustom: "Benutzerdefiniert",
+    sections: "Angezeigte Abschnitte",
+    secStatus: "Status",
+    secBar: "Defizitbalken",
+    secNext: "Nächste Bewässerung",
+    secLast: "Letzte Bewässerung",
+    secTotals: "Summen",
+    secParams: "Parameter",
+    secActions: "Schaltflächen",
+    warningsAlways: "Warnungen werden immer angezeigt.",
   },
   es: {
     selectZone: "Selecciona una zona en el editor de la tarjeta.",
@@ -360,6 +399,19 @@ const I18N = {
     meterByVolume: "por volumen",
     meterGuardOff: "no puede verificar la apertura",
     meterMeasuring: "midiendo",
+    layout: "Aspecto",
+    layoutFull: "Completa",
+    layoutCompact: "Compacta",
+    layoutCustom: "Personalizada",
+    sections: "Secciones que se muestran",
+    secStatus: "Estado",
+    secBar: "Barra de déficit",
+    secNext: "Próximo riego",
+    secLast: "Último riego",
+    secTotals: "Totales",
+    secParams: "Parámetros",
+    secActions: "Botones",
+    warningsAlways: "Los avisos se muestran siempre.",
   },
 };
 
@@ -498,12 +550,51 @@ const UID_PREFIX = {
 // A NeverDry zone is a device created by the integration with this model.
 const ZONE_MODEL = "Irrigation Zone";
 
+// Which parts of the card a configuration may switch off, and the selector that
+// finds each one. Warnings are deliberately absent: a compact card that goes
+// quiet about a valve stuck open would be worse than a long one, so that box is
+// never hidden by configuration - only by having nothing to say.
+const CARD_SECTIONS = {
+  status: ".nd-status",
+  bar: ".nd-bar-wrap",
+  next: '.nd-section[data-key="next"]',
+  last: '.nd-section[data-key="last"]',
+  totals: '.nd-section[data-key="totals"]',
+  params: '.nd-section[data-key="params"]',
+  actions: ".nd-actions",
+};
+
+// Compact keeps the two things an overview dashboard is for: is it watering,
+// and how dry is it. Everything else is detail, and detail is what the full
+// card is for.
+const COMPACT_SECTIONS = ["status", "bar"];
+
+function visibleSections(config) {
+  const mode = (config && config.mode) || "full";
+  if (mode === "compact") return COMPACT_SECTIONS;
+  if (mode === "custom") {
+    const chosen = (config && config.sections) || [];
+    return Object.keys(CARD_SECTIONS).filter((k) => chosen.includes(k));
+  }
+  return Object.keys(CARD_SECTIONS);
+}
+
 class NeverDryZoneCard extends HTMLElement {
   setConfig(config) {
     if (!config) throw new Error("Invalid configuration");
     this._config = config;
     this._built = false;
     if (this._hass) this._render();
+  }
+
+  _applySections() {
+    // Hides, never shows: a section the card's own logic has emptied stays
+    // empty. This only takes away what the configuration did not ask for.
+    const shown = visibleSections(this._config);
+    for (const [key, selector] of Object.entries(CARD_SECTIONS)) {
+      const el = this.querySelector(selector);
+      if (el) el.classList.toggle("nd-off", !shown.includes(key));
+    }
   }
 
   set hass(hass) {
@@ -632,6 +723,9 @@ class NeverDryZoneCard extends HTMLElement {
 
     if (!this._built) this._buildStructure();
     this._update(ents);
+    // After the update, because _update is what decides whether a section has
+    // anything in it; this only takes away what the configuration excluded.
+    this._applySections();
   }
 
   _renderEmpty(msg) {
@@ -1319,6 +1413,9 @@ const CARD_CSS = `
   .nd-btn ha-icon { --mdc-icon-size:18px; }
   .nd-btn:hover:not(:disabled) { filter:brightness(.95); }
   .nd-btn:disabled { opacity:.4; cursor:not-allowed; }
+  /* Switched off by configuration, as opposed to empty: !important because the
+     sections set their own display when they have content. */
+  .nd-off { display: none !important; }
   .nd-btn.primary { background: var(--primary-color); color: var(--text-primary-color,#fff); }
   .nd-btn.warn { background: var(--error-color, #db4437); color:#fff; }
 `;
@@ -1339,6 +1436,8 @@ class NeverDryZoneCardEditor extends HTMLElement {
   _render() {
     const devices = zoneDevices(this._hass);
     const current = this._config.device_id || "";
+    const mode = this._config.mode || "full";
+    const shown = visibleSections(this._config);
     const options = devices
       .map(
         (d) =>
@@ -1359,18 +1458,76 @@ class NeverDryZoneCardEditor extends HTMLElement {
             ? `<span style="font-size:.8rem;color:var(--error-color)">${t(this._hass, "noZones")}</span>`
             : ""
         }
+
+        <label style="font-size:.85rem;color:var(--secondary-text-color);margin-top:8px">${t(this._hass, "layout")}</label>
+        <select id="nd-mode"
+          style="padding:8px;border-radius:6px;border:1px solid var(--divider-color);
+                 background:var(--card-background-color);color:var(--primary-text-color);font-size:.95rem">
+          ${["full", "compact", "custom"]
+            .map(
+              (m) =>
+                `<option value="${m}" ${m === mode ? "selected" : ""}>${escapeHtml(
+                  t(this._hass, m === "full" ? "layoutFull" : m === "compact" ? "layoutCompact" : "layoutCustom")
+                )}</option>`
+            )
+            .join("")}
+        </select>
+
+        ${
+          mode === "custom"
+            ? `<label style="font-size:.85rem;color:var(--secondary-text-color);margin-top:8px">${t(
+                this._hass,
+                "sections"
+              )}</label>
+               <div style="display:flex;flex-direction:column;gap:2px">
+                 ${Object.keys(CARD_SECTIONS)
+                   .map(
+                     (k) =>
+                       `<label style="display:flex;align-items:center;gap:8px;font-size:.9rem">
+                          <input type="checkbox" data-section="${k}" ${shown.includes(k) ? "checked" : ""}>
+                          ${escapeHtml(t(this._hass, "sec" + k.charAt(0).toUpperCase() + k.slice(1)))}
+                        </label>`
+                   )
+                   .join("")}
+               </div>`
+            : ""
+        }
+        <span style="font-size:.78rem;color:var(--secondary-text-color)">${escapeHtml(
+          t(this._hass, "warningsAlways")
+        )}</span>
       </div>`;
     this.querySelector("#nd-zone").addEventListener("change", (e) => {
-      this._config = { ...this._config, device_id: e.target.value };
-      this.dispatchEvent(
-        new CustomEvent("config-changed", {
-          detail: { config: this._config },
-          bubbles: true,
-          composed: true,
-        })
-      );
+      this._emit({ device_id: e.target.value });
     });
+    this.querySelector("#nd-mode").addEventListener("change", (e) => {
+      const mode = e.target.value;
+      // Moving to Custom starts from what Compact shows rather than from
+      // nothing: an empty card on the way to a configured one reads as broken.
+      const patch = { mode };
+      if (mode === "custom" && !this._config.sections) patch.sections = [...COMPACT_SECTIONS];
+      this._emit(patch);
+    });
+    for (const box of this.querySelectorAll("input[data-section]")) {
+      box.addEventListener("change", () => {
+        const chosen = [...this.querySelectorAll("input[data-section]")]
+          .filter((b) => b.checked)
+          .map((b) => b.dataset.section);
+        this._emit({ sections: chosen });
+      });
+    }
     this._built = true;
+  }
+
+  _emit(patch) {
+    this._config = { ...this._config, ...patch };
+    this._render();
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: this._config },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 }
 
