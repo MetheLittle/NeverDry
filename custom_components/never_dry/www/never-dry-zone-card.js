@@ -569,15 +569,29 @@ const UID_PREFIX = {
 //
 // Module-level rather than per card: the registry is one thing, both cards want
 // the same answer, and two copies of this logic is how they drift apart.
+// Three states, and the difference between two of them is the whole point of
+// _uidMap being null to begin with: null means nobody has answered yet, {} means
+// the registry answered and holds nothing of ours. Only the second is something
+// to tell a user about.
 let _uidMap = null;
 let _uidLoading = false;
+// Everyone still waiting for that one answer. Without this list the second card
+// on a dashboard asks while the first request is in flight, is told "already
+// loading", and is never called back - so it keeps whatever it drew with an
+// empty map (GH #279, seen on a Spanish install where the id fallback cannot
+// rescue it).
+let _uidWaiters = [];
 
 function uidOf(entityId) {
   return _uidMap ? _uidMap[entityId] : undefined;
 }
 
 function ensureUidRegistry(hass, onLoaded) {
-  if (_uidMap || _uidLoading || !hass) return;
+  if (_uidMap || !hass) return;
+  // Queue before the in-flight guard, never after: a caller that arrives late
+  // still needs waking, and dropping it is exactly the defect this fixes.
+  if (onLoaded) _uidWaiters.push(onLoaded);
+  if (_uidLoading) return;
   _uidLoading = true;
   hass
     .callWS({ type: "config/entity_registry/list" })
@@ -593,7 +607,11 @@ function ensureUidRegistry(hass, onLoaded) {
     })
     .finally(() => {
       _uidLoading = false;
-      if (onLoaded) onLoaded();
+      // Drain first, then call: a callback that re-enters must not find itself
+      // still queued.
+      const waiting = _uidWaiters;
+      _uidWaiters = [];
+      for (const cb of waiting) cb();
     });
 }
 
@@ -1693,7 +1711,15 @@ class NeverDryModelCard extends HTMLElement {
     const root = this.querySelector(".ndm");
     const st = this._methodEntity();
     if (!st) {
-      root.innerHTML = `<div class="ndm-empty">${escapeHtml(t(hass, "noEntities"))}</div>`;
+      // Not knowing is not the same as there being nothing, and the card used to
+      // say the second when it meant the first: on a fresh Spanish install it
+      // announced "no NeverDry entities" on a system holding every one of them,
+      // because the registry had not landed and translated ids leave the suffix
+      // fallback nothing to match (GH #279). Absence of proof is not proof of
+      // absence - the same verdict this project already reached about flow
+      // verification. Stay silent until the registry has actually answered.
+      root.innerHTML =
+        _uidMap === null ? "" : `<div class="ndm-empty">${escapeHtml(t(hass, "noEntities"))}</div>`;
       return;
     }
 
