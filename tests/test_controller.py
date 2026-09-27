@@ -384,7 +384,7 @@ class TestMonitoringMode:
         # No zone of its own: one notice about the installation, which has
         # nothing to water with, rather than one per dry zone.
         assert zone is None
-        assert "25.0 mm" in context["zones"]
+        assert "25 mm" in context["zones"], "whole millimetres, so no decimal separator to get wrong"
         assert "Garden" in context["zones"]
 
     @pytest.mark.asyncio
@@ -1193,7 +1193,7 @@ class TestDeficitAnomaly:
         await ctrl._check_deficit_anomaly()
 
         assert ctrl._notifier.kinds() == [NotificationKind.DEFICIT_ANOMALY]
-        assert ctrl._notifier.sent[0][2]["deficit"] == "35.0"
+        assert ctrl._notifier.sent[0][2]["deficit"] == "35", "whole millimetres, like the limit beside it"
         assert ctrl._notifier.is_active("Garden", NotificationKind.DEFICIT_ANOMALY)
 
     @pytest.mark.asyncio
