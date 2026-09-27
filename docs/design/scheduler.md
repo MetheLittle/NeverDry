@@ -434,6 +434,153 @@ poll-limited device cannot be asked more often just because a queue would like
 to move sooner. 2,000 calls a day is roughly one every 43 seconds across a
 device's whole day, shared with everything else the integration does.
 
+### 8.4 What the zone decides, and what the scheduler decides
+
+The questions above kept circling one confusion, so it is worth settling
+separately from any of them: **a zone declares what it wants; the scheduler
+decides when that can happen.** Every setting belongs to one side or the other,
+and a setting on the wrong side is how Q9 got difficult.
+
+#### 8.4.1 The zone declares two things
+
+**What triggers its watering.** Not a list of modes but **two independent
+questions**, which is what keeps the set complete instead of being whichever
+combinations somebody thought of:
+
+- **When is the zone considered?** At a declared hour, or at every evaluation.
+- **How much deficit qualifies?** Any at all, or only once it has reached the
+  zone's threshold.
+
+Two binary axes, four modes, and each cell is a garden somebody has:
+
+|  | **any deficit** | **only at the threshold** |
+|---|---|---|
+| **at an hour** | waters at its hour and brings the deficit back to zero, however small it was | waters at its hour, but only if the soil has actually dried to the threshold |
+| **on the deficit** | waters as soon as there is any deficit: small doses, often | waters when the deficit reaches the threshold |
+
+Read the cells rather than the labels, because the two that look odd are the
+two that matter most.
+
+**At an hour, any deficit** is the top-up: a fixed evening habit, the garden
+kept level, no surprises. It waters a barely-dry garden, which is the point and
+also its cost.
+
+**On the deficit, any deficit** is small and frequent, and it is not a
+degenerate case. It is how pots, seedbeds and sandy ground are watered, where
+waiting for a threshold means letting them dry out in between - the threshold
+exists for soil with a reservoir to draw on, and these have very little.
+
+**At an hour, only at the threshold** is the one missing today, and the one
+asked for without being named: *"water at six, but not if it does not need
+it"*. Without it the choice is between a schedule that waters a wet garden and
+a reactive mode that may water at an unwelcome hour.
+
+**On the deficit, only at the threshold** is what the product does now.
+
+Note what the hour is **not**, per §10.1: even in the top row it is a request,
+not a promise. Eleven zones cannot all start at 05:00, so a declared hour is
+read as *not before this*.
+
+**How it waters, once admitted.** One shot, or cycle and soak. The zone declares
+the two durations or neither:
+
+- both empty: one continuous run;
+- both given: run, wait, run again, for as long as the dose needs;
+- **one given and not the other is refused.** A soak with no cycle is not a
+  degraded configuration, it is an unanswerable one, and the form should say so
+  rather than pick a default - the same discipline as the two ends of a Custom
+  soil (`soil-moisture-model.md` §5).
+
+#### 8.4.2 The scheduler decides five things, for everyone
+
+None of these is per zone, and pushing any of them onto a zone is what produces
+contradictions between zones:
+
+1. **Order and concurrency.** Serial by default (§8.1), parallel where declared,
+   and a queue so that a zone which becomes due while another is running waits
+   rather than being dropped (§10).
+2. **The irrigability envelope.** When watering is permitted at all (§9.1).
+3. **Rain that has not fallen yet.** A single installation-wide rule: if enough
+   rain is forecast soon enough, defer. Not per zone - a forecast is about the
+   sky, and the sky is not a property of a zone. Note the separation
+   `rain-input` already establishes: **forecast millimetres defer a run, they
+   never enter the deficit.** Only observed rain does that.
+4. **Frost and the winter interlock.** An outdoor zone is not watered when the
+   installation is in winter mode or the observed conditions say freezing
+   (§9.2). Indoor zones are unaffected, which is the one place the zone's own
+   declaration enters - and it is a statement of fact about the zone, not a
+   preference.
+5. **The smallest dose worth delivering.** Without one, the two *any deficit*
+   modes of §8.4.1 degenerate: a deficit of 0.3 mm opens a valve for a few
+   seconds, the ground does not notice, a meter with a one-litre resolution
+   cannot see it, and the actuator has spent a cycle on nothing.
+
+   **A site setting, in millimetres** - inches where the installation is
+   imperial, like every other length in the product. Millimetres rather than
+   litres because the same number then means the same thing on a 5 m2 zone and
+   on a 200 m2 one, and because it sits in the unit the deficit and the
+   threshold are already in, so the three can be compared without converting
+   anything.
+
+   Below it the zone is not watered **and keeps its deficit**, which goes on
+   growing until the dose is worth delivering. The run is postponed, never
+   cancelled: nothing is lost, and a small zone simply waters less often than a
+   large one, which is what it should do anyway.
+
+   Note what it is not: a second threshold. The zone's threshold says *when the
+   soil needs water*; this says *when opening a valve accomplishes anything*.
+   One is about the garden, the other about the plumbing, which is why they
+   live on different objects - and why this one is not per zone.
+
+   There is a floor in the code already and it protects nothing: the controller
+   skips a zone whose volume is `<= 0`. It has to become a number somebody can
+   set.
+
+#### 8.4.3 The path of one decision
+
+Read top to bottom: every diamond is a place a zone can be stopped, and the
+label on the arrow says **who** stopped it. A zone that reaches the bottom opens
+its valve.
+
+```mermaid
+flowchart TD
+    A[Zone evaluated] --> B{Is it time?}
+    B -->|hour declared<br/>and not reached| X[Not now: zone]
+    B -->|hour reached, or<br/>no hour declared| C{Does the deficit<br/>qualify?}
+    C -->|threshold required<br/>and not reached| X
+    C -->|any deficit, or<br/>threshold reached| F{Inside an<br/>irrigability window?}
+    F -->|no| Y[Deferred: scheduler]
+    F -->|yes| G{Winter mode<br/>and outdoor?}
+    G -->|yes| Z[Refused: scheduler]
+    G -->|no| H{Rain forecast<br/>soon enough?}
+    H -->|yes| Y
+    H -->|no| I{Another zone<br/>running?}
+    I -->|yes, serial| Y
+    I -->|yes, parallel<br/>and room left| J
+    I -->|no| J[Admitted]
+    J --> K{Cycle and soak<br/>declared?}
+    K -->|no| L[One run]
+    K -->|yes| M[Run, soak, repeat<br/>until the dose is met]
+```
+
+Three things the shape makes visible that prose did not.
+
+**The zone's two questions are asked first and answered alone.** Nothing about
+windows, weather or other zones can make a zone water that does not want to,
+and the two questions are asked in order - time, then deficit - so the four
+modes are two diamonds rather than four branches. That is also what keeps a
+scheduled top-up from quietly becoming a reactive one.
+
+**Everything that defers is the scheduler's**, and there is exactly one path
+that ends in a refusal rather than a deferral: the winter interlock. The
+difference matters - a deferred zone is still waiting and will be reconsidered,
+a refused one will not be until the condition changes.
+
+**Cycle and soak happens after admission, not before.** It shapes the run; it
+has no part in deciding whether the run happens. Which is also why a queue must
+treat a soaking zone as still occupying its slot unless interleaving is turned
+on (§11).
+
 ## 9. The irrigability envelope
 
 This is the reframing the rest of the note depends on. The scheduler stops
