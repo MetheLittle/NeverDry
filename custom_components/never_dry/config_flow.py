@@ -54,6 +54,7 @@ from .const import (
     CONF_ZONE_VALVE,
     CONF_ZONE_VOLUME_ENTITY,
     CONF_ZONE_VWC_SENSOR,
+    CONF_ZONE_WILTING_POINT,
     CONF_ZONES,
     CONFIG_VERSION,
     DEFAULT_ALPHA,
@@ -519,6 +520,9 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
                         ): selector.NumberSelector(
                             selector.NumberSelectorConfig(min=0.05, max=0.6, step=0.01, mode="box")
                         ),
+                        vol.Optional(CONF_ZONE_WILTING_POINT, **_sug(CONF_ZONE_WILTING_POINT)): selector.NumberSelector(
+                            selector.NumberSelectorConfig(min=0.01, max=0.4, step=0.01, mode="box")
+                        ),
                         vol.Optional(
                             CONF_ZONE_EXPOSURE, default=DEFAULT_EXPOSURE, **_sug(CONF_ZONE_EXPOSURE)
                         ): selector.SelectSelector(
@@ -799,6 +803,17 @@ PRESET_OVERRIDE_PAIRS = (
         "field_capacity_required",
         "Field capacity",
     ),
+    # The other end of the same reservoir. Asked for rather than estimated:
+    # somebody who picks Custom has measured their soil, and a number we made up
+    # would be indistinguishable from one they measured while being worse.
+    (
+        CONF_ZONE_SOIL_TYPE,
+        SOIL_TYPES,
+        "wilting_point",
+        CONF_ZONE_WILTING_POINT,
+        "wilting_point_required",
+        "Wilting point",
+    ),
 )
 
 
@@ -840,6 +855,7 @@ _SECTION_OF_FIELD = {
     CONF_ZONE_EFFICIENCY: SECTION_VALVE,
     CONF_ZONE_KC: SECTION_GROUND,
     CONF_ZONE_FIELD_CAPACITY: SECTION_GROUND,
+    CONF_ZONE_WILTING_POINT: SECTION_GROUND,
     CONF_ZONE_MICROCLIMATE_FACTOR: SECTION_GROUND,
     CONF_ZONE_FLOW_RATE: SECTION_VALVE,
     CONF_ZONE_FLOW_METER_SENSOR: SECTION_VALVE,
@@ -932,11 +948,38 @@ def _zone_errors(user_input: dict) -> dict[str, str]:
     key rendered at the top of the form.
     """
     errors = _delivery_mode_errors(user_input)
-    for key, code in _override_errors(user_input).items():
-        if key == "base":
-            errors.setdefault("base", code)
-        else:
-            errors[key] = code
+    for source in (_override_errors(user_input), _soil_interval_errors(user_input)):
+        for key, code in source.items():
+            if key == "base":
+                errors.setdefault("base", code)
+            else:
+                errors.setdefault(key, code)
+    return errors
+
+
+def _soil_interval_errors(user_input: dict) -> dict[str, str]:
+    """Two numbers that describe the same soil have to describe a real one.
+
+    The pair is a reservoir: full at the field capacity, empty at the wilting
+    point, and what a probe reads is where the ground sits between them. Put the
+    floor at or above the ceiling and the reservoir is zero or negative, which
+    does not fail loudly - it produces a zone that either never waters or asks
+    for a nonsensical volume, from two values the form accepted without a word.
+
+    Only checked when both are the user's to give. A soil picked from the list
+    brings a pair that cannot contradict itself.
+    """
+    errors: dict[str, str] = {}
+    if not _preset_is_custom(SOIL_TYPES, user_input.get(CONF_ZONE_SOIL_TYPE), "field_capacity"):
+        return errors
+    ceiling = user_input.get(CONF_ZONE_FIELD_CAPACITY)
+    floor = user_input.get(CONF_ZONE_WILTING_POINT)
+    if ceiling is None or floor is None:
+        # Missing rather than contradictory: _override_errors says so already,
+        # and saying it twice would put two messages on one field.
+        return errors
+    if floor >= ceiling:
+        _add_field_error(errors, CONF_ZONE_WILTING_POINT, "wilting_point_above_capacity")
     return errors
 
 

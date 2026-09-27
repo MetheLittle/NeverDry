@@ -26,6 +26,7 @@ from never_dry.const import (
     CONF_ZONE_ROOT_DEPTH,
     CONF_ZONE_SOIL_TYPE,
     CONF_ZONE_VWC_SENSOR,
+    CONF_ZONE_WILTING_POINT,
     CONF_ZONES,
     CONFIG_VERSION,
     PROBE_CADENCE_MEMORY_S,
@@ -44,8 +45,9 @@ def _zone(hass, dryness, **cfg):
 
 #: A zone whose probe has been told what to read its readings with. The soil is
 #: named rather than left automatic so that the arithmetic in these tests stays
-#: legible, and it is a *named* soil rather than Custom because the probe needs
-#: both ends of the soil's interval and Custom supplies only one (GH #234).
+#: legible. Custom would now work too: it asks for both ends of the interval
+#: rather than the top one alone, which is what used to cost a Custom-soil zone
+#: its probe.
 #:
 #: Clay holds 0.36 and gives up nothing below 0.22, so 0.30 m of roots is a
 #: reservoir of (0.36 - 0.22) * 0.30 * 1000 = **42.0 mm**. A reading of 18 %
@@ -1365,3 +1367,56 @@ class TestAliveAndMovingAreDifferentQuestions:
         assert "probe_last_seen" in attrs
         assert "probe_value_moved_at" in attrs
         assert attrs["probe_last_seen"] != attrs["probe_value_moved_at"]
+
+
+class TestCustomSoilKeepsItsProbe:
+    """The owner who measured their own soil used to be the one who lost the probe.
+
+    Every named soil carries two numbers read off the same texture row: the
+    field capacity and the wilting point. A probe reading says where the ground
+    sits *between* them, so both are needed to turn it into millimetres. Custom
+    asked for the top one only, so ``_probe_drives`` was false and the zone ran
+    on the weather estimate - the most careful user getting the least capable
+    behaviour, and a form that explained the refusal instead of removing it.
+
+    Custom now asks for both. Not estimated from the one it has: somebody who
+    picks Custom has measured their soil, and a number we invented would be
+    indistinguishable from a measured one while being worse.
+    """
+
+    def test_a_custom_soil_with_both_ends_drives_the_zone(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(
+            hass_mock,
+            hub,
+            **{
+                CONF_ZONE_VWC_SENSOR: "sensor.orto_soil",
+                CONF_ZONE_ROOT_DEPTH: 0.30,
+                CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
+                CONF_ZONE_FIELD_CAPACITY: 0.36,
+                CONF_ZONE_WILTING_POINT: 0.22,
+            },
+        )
+
+        assert zone._probe_drives is True, "both ends given: the probe has everything it needs"
+        # The same numbers as the clay fixture, so the reservoir must match it.
+        zone._on_own_probe(_reading("18.0"))
+        assert zone._zone_deficit == pytest.approx(AT_18_PCT)
+
+    def test_a_custom_soil_missing_the_floor_still_cannot(self, hass_mock):
+        """The form refuses this combination, so it should only arrive from a
+        configuration written before the field existed. It must degrade to the
+        estimate rather than invent the missing end."""
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(
+            hass_mock,
+            hub,
+            **{
+                CONF_ZONE_VWC_SENSOR: "sensor.orto_soil",
+                CONF_ZONE_ROOT_DEPTH: 0.30,
+                CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
+                CONF_ZONE_FIELD_CAPACITY: 0.36,
+            },
+        )
+
+        assert zone._probe_drives is False

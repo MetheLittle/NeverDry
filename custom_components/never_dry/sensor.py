@@ -85,6 +85,7 @@ from .const import (
     CONF_ZONE_VALVE,
     CONF_ZONE_VOLUME_ENTITY,
     CONF_ZONE_VWC_SENSOR,
+    CONF_ZONE_WILTING_POINT,
     CONF_ZONES,
     DEFAULT_ALPHA,
     DEFAULT_ANEMOMETER_HEIGHT_M,
@@ -1921,12 +1922,15 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         soil = SOIL_TYPES.get(self._soil_type, SOIL_TYPES[DEFAULT_SOIL_TYPE])
         preset = soil["field_capacity"]
         self._own_field_capacity = zone_config.get(CONF_ZONE_FIELD_CAPACITY) if preset is None else preset
-        # The other end of the interval, and the reason a probe needs a soil
-        # *row* rather than a single number: the reading says where the ground
-        # sits between dry and wet, so both ends have to come from the same soil.
-        # ``Custom`` supplies a field capacity and no wilting point, which is why
-        # a probe cannot drive a Custom-soil zone (the form says so).
-        self._own_wilting_point = soil["wilting_point"]
+        # The other end of the interval, and the reason a probe needs a soil *row*
+        # rather than a single number: the reading says where the ground sits
+        # between dry and wet, so both ends have to come from the same soil.
+        # Custom carries neither, and asks for both in the form - which is what
+        # lets a probe drive a Custom-soil zone at all. It used to supply the top
+        # end only, so the one owner who had measured their own soil was the one
+        # who lost the probe.
+        preset_floor = soil["wilting_point"]
+        self._own_wilting_point = zone_config.get(CONF_ZONE_WILTING_POINT) if preset_floor is None else preset_floor
         self._probe_drives = bool(self._own_probe) and None not in (
             self._own_root_depth,
             self._own_field_capacity,

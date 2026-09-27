@@ -51,7 +51,8 @@
               "vwc_sensor": "Sensor de humedad del suelo (esta zona)",
               "root_depth_m": "Profundidad de las raíces",
               "field_capacity": "Capacidad de campo",
-              "soil_type": "Tipo de suelo"
+              "soil_type": "Tipo de suelo",
+              "wilting_point": "Punto de marchitez"
             },
             "data_description": {
               "area_m2": "Superficie de esta zona de riego en metros cuadrados",
@@ -61,8 +62,9 @@
               "microclimate_factor": "Se usa solo cuando la exposición está en Personalizada. Intervalo de 0,1 a 1,5; por encima de 1,0 para zonas que se secan más rápido que el terreno abierto.",
               "vwc_sensor": "Opcional. Una sonda enterrada en esta zona, a un tercio de la profundidad de las raíces y a medio camino entre dos goteros. Por sí sola se muestra junto a las cifras de la zona y nada más cambia. Dale la profundidad de raíces de abajo y esta zona regará según lo que dice su suelo.\n\n**El sensor debe informar en escala 0-100**, 0 para suelo seco y 100 para húmedo, que es lo que publican las sondas de jardín. Un sensor en otra escala no es compatible y sus lecturas se ignoran.\n\n**Esa escala se usa sin calibrar, fijada en 0-100 tomada al pie de la letra:** el 0 se trata como el suelo más seco en el que una planta puede vivir y el 100 como uno lleno. Las sondas reales se calibran en fábrica contra aire seco y agua libre, y ninguno de esos es un estado en el que el suelo se encuentre nunca, así que un suelo lleno no marca realmente 100. Los milímetros que resultan están por tanto equivocados en un factor que nadie ha medido, normalmente por exceso: se riega algo más de lo necesario, en lugar de dejar una zona seca. Si te interesa, el razonamiento y lo que lo resolvería están aquí: {soil_doc}",
               "root_depth_m": "Profundidad de la zona de raíces de la que habla la sonda de arriba, y el único número de aquí que ninguna tabla contiene: un césped, un seto y una maceta se diferencian en cuatro veces sobre el mismo terreno. Rellénalo y esta zona regará por su sonda en lugar de por la estimación meteorológica. Déjalo vacío y la sonda seguirá siendo una lectura mostrada junto a la estimación. La lectura 0-100 se interpreta como cuánta del agua que este suelo puede retener de verdad sigue presente, así que la profundidad y el suelo de abajo son los que la convierten en milímetros.",
-              "field_capacity": "Solo se lee cuando el tipo de suelo de arriba es Personalizado. El contenido de agua que este suelo retiene después de drenar, como fracción: aproximadamente 0,15 para arena, 0,25 para suelo franco, 0,35 para arcilla. Se usa para la estimación meteorológica; una zona con suelo Personalizado no puede ser regada por su sonda.",
-              "soil_type": "Opcional. De qué está hecho el terreno de esta zona. Aporta cuánta agua retiene el suelo y cuánta de ella puede alcanzar una planta, de modo que no necesitas conocer ninguno de los dos números. Dejado en Automático se asume un suelo medio, que sirve para la mayoría de los jardines y se indica expresamente al guardar. Personalizado aporta solo uno de los dos valores, por lo que una sonda no puede regar una zona con suelo Personalizado: para eso elige uno de los suelos con nombre."
+              "field_capacity": "El agua que este suelo retiene una vez que ha terminado de drenar, como fracción: alrededor de 0,15 para arena, 0,25 para franco, 0,35 para arcilla. Solo se rellena cuando el tipo de suelo es Personalizado, junto con el punto de marchitez de abajo.",
+              "soil_type": "Opcional. De qué está hecho el suelo de esta zona. La elección aporta los dos números que indican cuánta agua puede poner este suelo a disposición de una planta: cuánta retiene cuando está lleno y cuánta queda retenida cuando la planta ya no puede extraerla. En Automático se asume un suelo medio, y se te avisa al guardar. Con Personalizado introduces tú los dos números, en las dos casillas de abajo.",
+              "wilting_point": "El agua que queda en el suelo cuando la planta ya no puede extraerla: alrededor de 0,06 para arena, 0,12 para franco, 0,22 para arcilla. Debe ser menor que la capacidad de campo, porque lo que hay entre ambas es el depósito sobre el que lee la sonda. Solo se rellena cuando el tipo de suelo es Personalizado."
             }
           },
           "valve_and_pipe": {
@@ -132,7 +134,9 @@
       "et_method_missing_sensors": "Ese método necesita sensores que esta instalación no ha declarado. Indica los sensores que pide, o deja el método en Automático.",
       "et_method_unknown": "Método de evapotranspiración desconocido.",
       "et_method_zone_probe": "Un sensor de humedad del suelo pertenece a una zona, no a toda la instalación. Configúralo en las opciones de esa zona; el método elegido aquí es el que usan las zonas que no tienen un sensor propio.",
-      "field_capacity_required": "Indica una capacidad de campo: el tipo de suelo está en Personalizado, que toma su valor de ese campo"
+      "field_capacity_required": "Indica una capacidad de campo: el tipo de suelo está en Personalizado, que toma su valor de ese campo",
+      "wilting_point_required": "Introduce un punto de marchitez: el tipo de suelo es Personalizado, así que los dos extremos los indicas tú",
+      "wilting_point_above_capacity": "El punto de marchitez debe ser menor que la capacidad de campo: el agua que las plantas pueden usar es la que queda entre ambos"
     },
     "abort": {
       "already_configured": "NeverDry ya está configurado"
@@ -191,7 +195,8 @@
               "vwc_sensor": "Sensor de humedad del suelo (esta zona)",
               "root_depth_m": "Profundidad de las raíces",
               "field_capacity": "Capacidad de campo",
-              "soil_type": "Tipo de suelo"
+              "soil_type": "Tipo de suelo",
+              "wilting_point": "Punto de marchitez"
             },
             "data_description": {
               "plant_family": "Fija la curva estacional del Kc para lo que crece aquí. Elige Personalizado para indicar un Kc fijo abajo.",
@@ -200,8 +205,9 @@
               "microclimate_factor": "Se usa solo cuando la exposición está en Personalizada. Intervalo de 0,1 a 1,5; por encima de 1,0 para zonas que se secan más rápido que el terreno abierto.",
               "vwc_sensor": "Opcional. Una sonda enterrada en esta zona, a un tercio de la profundidad de las raíces y a medio camino entre dos goteros. Por sí sola se muestra junto a las cifras de la zona y nada más cambia. Dale la profundidad de raíces de abajo y esta zona regará según lo que dice su suelo.\n\n**El sensor debe informar en escala 0-100**, 0 para suelo seco y 100 para húmedo, que es lo que publican las sondas de jardín. Un sensor en otra escala no es compatible y sus lecturas se ignoran.\n\n**Esa escala se usa sin calibrar, fijada en 0-100 tomada al pie de la letra:** el 0 se trata como el suelo más seco en el que una planta puede vivir y el 100 como uno lleno. Las sondas reales se calibran en fábrica contra aire seco y agua libre, y ninguno de esos es un estado en el que el suelo se encuentre nunca, así que un suelo lleno no marca realmente 100. Los milímetros que resultan están por tanto equivocados en un factor que nadie ha medido, normalmente por exceso: se riega algo más de lo necesario, en lugar de dejar una zona seca. Si te interesa, el razonamiento y lo que lo resolvería están aquí: {soil_doc}",
               "root_depth_m": "Profundidad de la zona de raíces de la que habla la sonda de arriba, y el único número de aquí que ninguna tabla contiene: un césped, un seto y una maceta se diferencian en cuatro veces sobre el mismo terreno. Rellénalo y esta zona regará por su sonda en lugar de por la estimación meteorológica. Déjalo vacío y la sonda seguirá siendo una lectura mostrada junto a la estimación. La lectura 0-100 se interpreta como cuánta del agua que este suelo puede retener de verdad sigue presente, así que la profundidad y el suelo de abajo son los que la convierten en milímetros.",
-              "field_capacity": "Solo se lee cuando el tipo de suelo de arriba es Personalizado. El contenido de agua que este suelo retiene después de drenar, como fracción: aproximadamente 0,15 para arena, 0,25 para suelo franco, 0,35 para arcilla. Se usa para la estimación meteorológica; una zona con suelo Personalizado no puede ser regada por su sonda.",
-              "soil_type": "Opcional. De qué está hecho el terreno de esta zona. Aporta cuánta agua retiene el suelo y cuánta de ella puede alcanzar una planta, de modo que no necesitas conocer ninguno de los dos números. Dejado en Automático se asume un suelo medio, que sirve para la mayoría de los jardines y se indica expresamente al guardar. Personalizado aporta solo uno de los dos valores, por lo que una sonda no puede regar una zona con suelo Personalizado: para eso elige uno de los suelos con nombre."
+              "field_capacity": "El agua que este suelo retiene una vez que ha terminado de drenar, como fracción: alrededor de 0,15 para arena, 0,25 para franco, 0,35 para arcilla. Solo se rellena cuando el tipo de suelo es Personalizado, junto con el punto de marchitez de abajo.",
+              "soil_type": "Opcional. De qué está hecho el suelo de esta zona. La elección aporta los dos números que indican cuánta agua puede poner este suelo a disposición de una planta: cuánta retiene cuando está lleno y cuánta queda retenida cuando la planta ya no puede extraerla. En Automático se asume un suelo medio, y se te avisa al guardar. Con Personalizado introduces tú los dos números, en las dos casillas de abajo.",
+              "wilting_point": "El agua que queda en el suelo cuando la planta ya no puede extraerla: alrededor de 0,06 para arena, 0,12 para franco, 0,22 para arcilla. Debe ser menor que la capacidad de campo, porque lo que hay entre ambas es el depósito sobre el que lee la sonda. Solo se rellena cuando el tipo de suelo es Personalizado."
             }
           },
           "valve_and_pipe": {
@@ -264,7 +270,8 @@
               "vwc_sensor": "Sensor de humedad del suelo (esta zona)",
               "root_depth_m": "Profundidad de las raíces",
               "field_capacity": "Capacidad de campo",
-              "soil_type": "Tipo de suelo"
+              "soil_type": "Tipo de suelo",
+              "wilting_point": "Punto de marchitez"
             },
             "data_description": {
               "plant_family": "Fija la curva estacional del Kc para lo que crece aquí. Elige Personalizado para indicar un Kc fijo abajo.",
@@ -273,8 +280,9 @@
               "microclimate_factor": "Se usa solo cuando la exposición está en Personalizada. Intervalo de 0,1 a 1,5; por encima de 1,0 para zonas que se secan más rápido que el terreno abierto.",
               "vwc_sensor": "Opcional. Una sonda enterrada en esta zona, a un tercio de la profundidad de las raíces y a medio camino entre dos goteros. Por sí sola se muestra junto a las cifras de la zona y nada más cambia. Dale la profundidad de raíces de abajo y esta zona regará según lo que dice su suelo.\n\n**El sensor debe informar en escala 0-100**, 0 para suelo seco y 100 para húmedo, que es lo que publican las sondas de jardín. Un sensor en otra escala no es compatible y sus lecturas se ignoran.\n\n**Esa escala se usa sin calibrar, fijada en 0-100 tomada al pie de la letra:** el 0 se trata como el suelo más seco en el que una planta puede vivir y el 100 como uno lleno. Las sondas reales se calibran en fábrica contra aire seco y agua libre, y ninguno de esos es un estado en el que el suelo se encuentre nunca, así que un suelo lleno no marca realmente 100. Los milímetros que resultan están por tanto equivocados en un factor que nadie ha medido, normalmente por exceso: se riega algo más de lo necesario, en lugar de dejar una zona seca. Si te interesa, el razonamiento y lo que lo resolvería están aquí: {soil_doc}",
               "root_depth_m": "Profundidad de la zona de raíces de la que habla la sonda de arriba, y el único número de aquí que ninguna tabla contiene: un césped, un seto y una maceta se diferencian en cuatro veces sobre el mismo terreno. Rellénalo y esta zona regará por su sonda en lugar de por la estimación meteorológica. Déjalo vacío y la sonda seguirá siendo una lectura mostrada junto a la estimación. La lectura 0-100 se interpreta como cuánta del agua que este suelo puede retener de verdad sigue presente, así que la profundidad y el suelo de abajo son los que la convierten en milímetros.",
-              "field_capacity": "Solo se lee cuando el tipo de suelo de arriba es Personalizado. El contenido de agua que este suelo retiene después de drenar, como fracción: aproximadamente 0,15 para arena, 0,25 para suelo franco, 0,35 para arcilla. Se usa para la estimación meteorológica; una zona con suelo Personalizado no puede ser regada por su sonda.",
-              "soil_type": "Opcional. De qué está hecho el terreno de esta zona. Aporta cuánta agua retiene el suelo y cuánta de ella puede alcanzar una planta, de modo que no necesitas conocer ninguno de los dos números. Dejado en Automático se asume un suelo medio, que sirve para la mayoría de los jardines y se indica expresamente al guardar. Personalizado aporta solo uno de los dos valores, por lo que una sonda no puede regar una zona con suelo Personalizado: para eso elige uno de los suelos con nombre."
+              "field_capacity": "El agua que este suelo retiene una vez que ha terminado de drenar, como fracción: alrededor de 0,15 para arena, 0,25 para franco, 0,35 para arcilla. Solo se rellena cuando el tipo de suelo es Personalizado, junto con el punto de marchitez de abajo.",
+              "soil_type": "Opcional. De qué está hecho el suelo de esta zona. La elección aporta los dos números que indican cuánta agua puede poner este suelo a disposición de una planta: cuánta retiene cuando está lleno y cuánta queda retenida cuando la planta ya no puede extraerla. En Automático se asume un suelo medio, y se te avisa al guardar. Con Personalizado introduces tú los dos números, en las dos casillas de abajo.",
+              "wilting_point": "El agua que queda en el suelo cuando la planta ya no puede extraerla: alrededor de 0,06 para arena, 0,12 para franco, 0,22 para arcilla. Debe ser menor que la capacidad de campo, porque lo que hay entre ambas es el depósito sobre el que lee la sonda. Solo se rellena cuando el tipo de suelo es Personalizado."
             }
           },
           "valve_and_pipe": {
@@ -330,7 +338,9 @@
       "zone_already_exists": "Ya existe una zona con este nombre",
       "too_many_zones": "Se ha alcanzado el número máximo de zonas (50)",
       "zone_name_too_long": "El nombre de la zona es demasiado largo (máximo 64 caracteres)",
-      "field_capacity_required": "Indica una capacidad de campo: el tipo de suelo está en Personalizado, que toma su valor de ese campo"
+      "field_capacity_required": "Indica una capacidad de campo: el tipo de suelo está en Personalizado, que toma su valor de ese campo",
+      "wilting_point_required": "Introduce un punto de marchitez: el tipo de suelo es Personalizado, así que los dos extremos los indicas tú",
+      "wilting_point_above_capacity": "El punto de marchitez debe ser menor que la capacidad de campo: el agua que las plantas pueden usar es la que queda entre ambos"
     },
     "abort": {
       "no_zones": "No hay zonas configuradas"
