@@ -12,6 +12,16 @@ entry below links the design note that explains it properly — this is the summ
 not the argument.
 
 ### Added
+- **A compact card, and sections you can switch off**
+  ([#269](https://github.com/never-dry/NeverDry/issues/269)). The zone card is
+  built for reading one zone closely, which makes it the wrong shape for an
+  overview dashboard with eight of them. A Layout setting now offers Full,
+  Compact - status and the deficit bar, which is what an overview is for - and
+  Custom, which reveals a checkbox per section and starts from what Compact
+  shows rather than from an empty card. Warnings are not in that list and
+  cannot be switched off: a compact card that goes quiet about a valve stuck
+  open would be worse than a long one.
+
 - **A zone can water by what its soil measures.** Give a zone's probe the depth
   its roots reach and that zone stops estimating its deficit and starts reading
   it. The weather model keeps running underneath the whole time, so a probe that
@@ -64,6 +74,13 @@ not the argument.
   ([#223](https://github.com/never-dry/NeverDry/issues/223))
 
 ### Changed
+- **The minimum Home Assistant version is 2025.8.0, and it is checked**. It used
+  to be stated twice and verified never: `hacs.json` said 2024.6.0, the manual
+  said 2024.1.0, and the test suite stubs Home Assistant, so no release was ever
+  run against. A separate job now installs the declared version and builds every
+  configuration form against its real schemas. Home Assistant's own analytics put
+  92.8% of reporting installations at or above 2025.8.0.
+
 - **Spanish, read back by somebody who speaks it**
   ([#215](https://github.com/never-dry/NeverDry/issues/215)). Sixty-seven
   strings rewritten by @laurash96 from her own reading of the catalogue: accents
@@ -154,6 +171,27 @@ not the argument.
   meter had stopped answering.
 
 ### Fixed
+- **Editing one zone emptied another zone's deficit**
+  ([#234](https://github.com/never-dry/NeverDry/issues/234)). A zone fell from
+  9.6 mm to 0.7 mm between two ticks two minutes apart, with no rain, no
+  irrigation and no new reading. Its probe had been silent for fifteen hours
+  and had been correctly set aside the evening before; editing an unrelated
+  zone reloads the whole integration, and the reload believed it again. Only
+  half the judgement survived: when the probe last spoke is restored, the bar
+  it is compared against was not, and a missing bar reads as *fresh* at any
+  age. Both halves are kept now, or neither.
+- **Choosing Custom soil took away the probe**
+  ([#234](https://github.com/never-dry/NeverDry/issues/234)). Every soil in the
+  list carries two numbers read off one texture row: what the ground holds when
+  full, and what stays locked in when a plant can no longer pull any out. A
+  probe reading says where the ground sits *between* them, so both are needed.
+  Custom asked for the first only - so the one gardener who had measured their
+  own soil was the one who lost the most capable feature in the product, and
+  the form explained the restriction instead of removing it. Custom now asks
+  for both, refuses a pair that cannot describe a real soil, and waters by its
+  probe like any other zone. The Italian text for those fields is rewritten,
+  accents included.
+
 - **The same probe, declared dead down the other path**
   ([#234](https://github.com/never-dry/NeverDry/issues/234)). The fix below
   taught the freshness check to watch the probe's whole device. Where that
