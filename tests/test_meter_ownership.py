@@ -36,6 +36,21 @@ OPAQUE_DEVICES = {
 }
 
 
+#: The English warning catalogue, read the way the flow resolves it at runtime.
+#: Asserting against the real strings rather than against literals is the point:
+#: a message that changes in the catalogue and not here is a test that has
+#: stopped describing the product.
+def _warning_catalogue() -> dict[str, str]:
+    import json
+    from pathlib import Path
+
+    strings = Path(__file__).resolve().parent.parent / "custom_components" / "never_dry" / "strings.json"
+    return json.loads(strings.read_text(encoding="utf-8"))["common"]
+
+
+WARNINGS = _warning_catalogue()
+
+
 @pytest.fixture
 def _flow_env(monkeypatch):
     """Fill the gaps in the conftest HA stubs for driving flow steps.
@@ -93,13 +108,13 @@ class TestAMeterBelongingToAnotherZoneIsFlagged:
     def test_the_field_case_is_caught(self):
         """T13: Melograno pointed at Melino's counter."""
         zone = _zone("Giardino Melograno", MELOGRANO_VALVE, MELINO_METER)
-        warnings = cf.meter_ownership_warnings(zone, OTHER_ZONES, DEVICES.get)
+        warnings = cf.meter_ownership_warnings(zone, OTHER_ZONES, DEVICES.get, WARNINGS)
         assert warnings, "a meter owned by another zone's valve must be reported"
         assert "Melino" in warnings[0], "the warning must name the zone it belongs to"
 
     def test_the_zones_own_meter_is_silent(self):
         zone = _zone("Giardino Melograno", MELOGRANO_VALVE, MELOGRANO_METER)
-        assert cf.meter_ownership_warnings(zone, OTHER_ZONES, DEVICES.get) == []
+        assert cf.meter_ownership_warnings(zone, OTHER_ZONES, DEVICES.get, WARNINGS) == []
 
     def test_an_inline_meter_on_its_own_device_is_allowed(self):
         """Not every separate device is a mistake: a pipe meter is a real setup.
@@ -107,26 +122,26 @@ class TestAMeterBelongingToAnotherZoneIsFlagged:
         Warning on this would train the user to ignore the warning that matters.
         """
         zone = _zone("Giardino Melograno", MELOGRANO_VALVE, INLINE_METER)
-        assert cf.meter_ownership_warnings(zone, OTHER_ZONES, DEVICES.get) == []
+        assert cf.meter_ownership_warnings(zone, OTHER_ZONES, DEVICES.get, WARNINGS) == []
 
     def test_an_unresolvable_entity_is_not_an_accusation(self):
         """A registry that cannot answer is not evidence of a wrong meter."""
         zone = _zone("Giardino Melograno", MELOGRANO_VALVE, "sensor.unknown_to_the_registry")
-        assert cf.meter_ownership_warnings(zone, OTHER_ZONES, lambda _e: None) == []
+        assert cf.meter_ownership_warnings(zone, OTHER_ZONES, lambda _e: None, WARNINGS) == []
 
 
 class TestAMeteredModeNeedsAMeter:
     def test_flow_meter_without_a_meter_is_reported(self):
         """T14: the mode measures volume, so the measuring device is not optional."""
         zone = _zone("Giardino Melograno", MELOGRANO_VALVE, meter=None)
-        warnings = cf.meter_ownership_warnings(zone, [], DEVICES.get)
+        warnings = cf.meter_ownership_warnings(zone, [], DEVICES.get, WARNINGS)
         assert warnings
         assert "flow meter" in warnings[0].lower()
 
     def test_estimated_flow_without_a_meter_is_perfectly_normal(self):
         """The mode whose contract is 'I measure nothing' must stay silent."""
         zone = _zone("Giardino Melograno", MELOGRANO_VALVE, meter=None, mode=DELIVERY_MODE_ESTIMATED_FLOW)
-        assert cf.meter_ownership_warnings(zone, [], DEVICES.get) == []
+        assert cf.meter_ownership_warnings(zone, [], DEVICES.get, WARNINGS) == []
 
 
 class TestTheCheckDoesNotDependOnNaming:
@@ -146,14 +161,14 @@ class TestTheCheckDoesNotDependOnNaming:
     def test_another_zones_meter_is_caught_without_any_name_clue(self):
         zone = _zone("Roses", "switch.0x00124b0022ab", "sensor.0x00124b0099ff_volume")
         others = [_zone("Lawn", "switch.0x00124b0099ff", "sensor.0x00124b0099ff_volume")]
-        warnings = cf.meter_ownership_warnings(zone, others, OPAQUE_DEVICES.get)
+        warnings = cf.meter_ownership_warnings(zone, others, OPAQUE_DEVICES.get, WARNINGS)
         assert warnings
         assert "Lawn" in warnings[0]
 
     def test_its_own_meter_is_silent_without_any_name_clue(self):
         zone = _zone("Roses", "switch.0x00124b0022ab", "sensor.0x00124b0022ab_volume")
         others = [_zone("Lawn", "switch.0x00124b0099ff", "sensor.0x00124b0099ff_volume")]
-        assert cf.meter_ownership_warnings(zone, others, OPAQUE_DEVICES.get) == []
+        assert cf.meter_ownership_warnings(zone, others, OPAQUE_DEVICES.get, WARNINGS) == []
 
 
 class TestTheWarningReachesTheUserAndCanBeOverridden:

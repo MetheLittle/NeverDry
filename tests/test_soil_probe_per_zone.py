@@ -39,6 +39,21 @@ from never_dry.sensor import DrynessIndexSensor, IrrigationZoneSensor
 HUB = {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r"}
 
 
+#: The English warning catalogue, read the way the flow resolves it at runtime.
+#: Asserting against the real strings rather than against literals is the point:
+#: a message that changes in the catalogue and not here is a test that has
+#: stopped describing the product.
+def _warning_catalogue() -> dict[str, str]:
+    import json
+    from pathlib import Path
+
+    strings = Path(__file__).resolve().parent.parent / "custom_components" / "never_dry" / "strings.json"
+    return json.loads(strings.read_text(encoding="utf-8"))["common"]
+
+
+WARNINGS = _warning_catalogue()
+
+
 def _zone(hass, dryness, **cfg):
     return IrrigationZoneSensor(hass, {CONF_ZONE_NAME: "Orto", CONF_ZONE_AREA: 20.0, **cfg}, dryness)
 
@@ -797,7 +812,7 @@ class TestWhatTheFormSaysAboutTheProbesRole:
     def test_a_probe_without_a_root_depth_is_told_it_will_not_drive(self):
         from never_dry.config_flow import _probe_role_warnings
 
-        warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil"})
+        warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil"}, WARNINGS)
 
         assert len(warnings) == 1
         assert "will not set" in warnings[0]
@@ -806,7 +821,7 @@ class TestWhatTheFormSaysAboutTheProbesRole:
     def test_a_named_soil_and_a_depth_say_nothing_because_the_choice_was_made(self):
         from never_dry.config_flow import _probe_role_warnings
 
-        assert _probe_role_warnings(dict(DRIVEN)) == []
+        assert _probe_role_warnings(dict(DRIVEN), WARNINGS) == []
 
     def test_an_assumed_soil_is_named_rather_than_passed_over(self):
         """The price of the automatic entry, and the condition that makes it fair.
@@ -816,7 +831,7 @@ class TestWhatTheFormSaysAboutTheProbesRole:
         """
         from never_dry.config_flow import _probe_role_warnings
 
-        warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil", CONF_ZONE_ROOT_DEPTH: 0.3})
+        warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil", CONF_ZONE_ROOT_DEPTH: 0.3}, WARNINGS)
 
         assert len(warnings) == 1
         assert "medium soil" in warnings[0]
@@ -842,7 +857,8 @@ class TestWhatTheFormSaysAboutTheProbesRole:
                 CONF_ZONE_ROOT_DEPTH: 0.3,
                 CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
                 CONF_ZONE_FIELD_CAPACITY: 0.30,
-            }
+            },
+            WARNINGS,
         )
 
         assert len(warnings) == 1
@@ -861,7 +877,8 @@ class TestWhatTheFormSaysAboutTheProbesRole:
                     CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
                     CONF_ZONE_FIELD_CAPACITY: 0.30,
                     CONF_ZONE_WILTING_POINT: 0.15,
-                }
+                },
+                WARNINGS,
             )
             == []
         )
@@ -870,14 +887,14 @@ class TestWhatTheFormSaysAboutTheProbesRole:
         """The same shape as the ignored-override warnings: a value nobody reads."""
         from never_dry.config_flow import _probe_role_warnings
 
-        warnings = _probe_role_warnings({CONF_ZONE_ROOT_DEPTH: 0.3, CONF_ZONE_FIELD_CAPACITY: 0.25})
+        warnings = _probe_role_warnings({CONF_ZONE_ROOT_DEPTH: 0.3, CONF_ZONE_FIELD_CAPACITY: 0.25}, WARNINGS)
 
         assert "will not be used" in warnings[0]
 
     def test_a_zone_with_neither_is_not_lectured(self):
         from never_dry.config_flow import _probe_role_warnings
 
-        assert _probe_role_warnings({CONF_ZONE_NAME: "Orto"}) == []
+        assert _probe_role_warnings({CONF_ZONE_NAME: "Orto"}, WARNINGS) == []
 
 
 def test_root_depth_is_a_length_and_crosses_the_unit_boundary():
@@ -1114,7 +1131,9 @@ class TestTheGroundIsChosenNotTyped:
     def test_a_named_soil_makes_the_box_dead_weight_and_says_so(self):
         from never_dry.config_flow import _ignored_override_warnings
 
-        warnings = _ignored_override_warnings({CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CLAY, CONF_ZONE_FIELD_CAPACITY: 0.30})
+        warnings = _ignored_override_warnings(
+            {CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CLAY, CONF_ZONE_FIELD_CAPACITY: 0.30}, WARNINGS
+        )
 
         assert any("Field capacity" in w for w in warnings)
 

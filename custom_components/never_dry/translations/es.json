@@ -680,7 +680,18 @@
     "notification_watchdog_triggered_body": "La válvula de la zona {zone} ha estado abierta más de {duration_min} min sin recibir una orden de cierre. NeverDry la ha cerrado por su cuenta por seguridad. Comprueba que la automatización o la lógica de suministro funcionan correctamente.",
     "notification_water_me_now_zone_line": "- {zone}: déficit {deficit} mm, {liters} L ({minutes} min)",
     "notification_deficit_anomaly_title": "Déficit muy por encima del umbral",
-    "notification_deficit_anomaly_body": "Zona {zone}: el déficit de {deficit} mm supera los {limit} mm, {multiplier} veces el umbral. Puede que el riego no esté llegando a esta zona. Revisa la válvula, la programación y el registro de Home Assistant."
+    "notification_deficit_anomaly_body": "Zona {zone}: el déficit de {deficit} mm supera los {limit} mm, {multiplier} veces el umbral. Puede que el riego no esté llegando a esta zona. Revisa la válvula, la programación y el registro de Home Assistant.",
+    "warn_area_small": "La superficie regada {area} es menor que {minimum}. Comprueba que sea la superficie realmente regada y no todo el jardín.",
+    "warn_guard_flow_missing": "Falta el caudal de diseño. Se usa para la duración prevista y para dimensionar el tiempo de seguridad, y será obligatorio en una versión futura (objetivo v1.0).",
+    "warn_flow_low": "El caudal de diseño {flow} es menor que {minimum}. Una zona tan lenta tarda horas en dar un riego normal.",
+    "warn_flow_high": "El caudal de diseño {flow} supera {maximum}. Comprueba la unidad: este es el caudal de una zona, no de toda la instalación.",
+    "warn_probe_no_depth": "Sonda de suelo: falta la profundidad de las raíces, así que la sonda se mostrará pero no fijará el déficit de esta zona - lo sigue haciendo el modelo de la instalación. Indica la profundidad que alcanzan las raíces y la zona regará según lo que mida el suelo.",
+    "warn_depth_no_probe": "Sonda de suelo: la profundidad de las raíces no se usará, porque esta zona no tiene sonda que leer. Elige una o vacía el campo.",
+    "warn_probe_custom_soil_incomplete": "Sonda de suelo: el suelo de esta zona es Personalizado y falta uno de los dos extremos, así que la sonda se mostrará pero no fijará el déficit. Introduce la capacidad de campo y el punto de marchitez, o elige un suelo de la lista.",
+    "warn_probe_assumed_soil": "Sonda de suelo: esta zona medirá su déficit asumiendo un suelo medio, porque no se eligió tipo de suelo. Un suelo arenoso retiene alrededor de la mitad de esa agua y la arcilla alrededor de la mitad más, así que indica el tuyo si lo conoces.",
+    "warn_override_ignored": "{label}: {chosen}, así que tu valor personalizado {value} no se usará. Elige Personalizado para aplicarlo, o vacía el campo.",
+    "warn_meter_mode_without_meter": "El modo de entrega está en válvula con caudalímetro, pero no hay ningún caudalímetro seleccionado: el modo dosifica por volumen medido, así que la entidad que mide no es opcional.",
+    "warn_meter_of_another_zone": "El caudalímetro seleccionado pertenece a la válvula de la zona {zone}: informa del agua de esa zona, no de esta. Mientras esa zona está parada este caudalímetro no se mueve, y un caudalímetro parado aquí significa ningún caudal verificado y un riego que no se puede medir."
   },
   "issues": {
     "soil_probe_needs_a_zone": {

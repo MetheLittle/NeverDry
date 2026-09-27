@@ -25,6 +25,21 @@ from never_dry.const import (
 )
 
 
+#: The English warning catalogue, read the way the flow resolves it at runtime.
+#: Asserting against the real strings rather than against literals is the point:
+#: a message that changes in the catalogue and not here is a test that has
+#: stopped describing the product.
+def _warning_catalogue() -> dict[str, str]:
+    import json
+    from pathlib import Path
+
+    strings = Path(__file__).resolve().parent.parent / "custom_components" / "never_dry" / "strings.json"
+    return json.loads(strings.read_text(encoding="utf-8"))["common"]
+
+
+WARNINGS = _warning_catalogue()
+
+
 def _entry(zones):
     entry = MagicMock()
     entry.entry_id = "abc"
@@ -70,23 +85,23 @@ class TestUnusualZoneValues:
 
     def test_plausible_zone_is_clean(self):
         zone = {CONF_ZONE_AREA: 20.0, CONF_ZONE_FLOW_RATE: 3.33}
-        assert cf._unusual_zone_values(zone, imperial=False) == []
+        assert cf._unusual_zone_values(zone, imperial=False, texts=WARNINGS) == []
 
     def test_small_area_flagged(self):
-        warnings = cf._unusual_zone_values({CONF_ZONE_AREA: 2.0}, imperial=False)
+        warnings = cf._unusual_zone_values({CONF_ZONE_AREA: 2.0}, imperial=False, texts=WARNINGS)
         assert len(warnings) == 1
         assert "m²" in warnings[0]
 
     def test_low_flow_flagged(self):
         zone = {CONF_ZONE_AREA: 20.0, CONF_ZONE_FLOW_RATE: 5.0 / 60.0}  # 5 L/h
-        warnings = cf._unusual_zone_values(zone, imperial=False)
+        warnings = cf._unusual_zone_values(zone, imperial=False, texts=WARNINGS)
         assert len(warnings) == 1
         assert "L/h" in warnings[0]
 
     def test_high_flow_flagged(self):
         # The classic unit mix-up: 200 L/h typed where L/min is stored.
         zone = {CONF_ZONE_AREA: 20.0, CONF_ZONE_FLOW_RATE: 200.0}
-        warnings = cf._unusual_zone_values(zone, imperial=False)
+        warnings = cf._unusual_zone_values(zone, imperial=False, texts=WARNINGS)
         assert len(warnings) == 1
         assert "12000" in warnings[0]  # 200 L/min shown as 12000 L/h
 
@@ -95,16 +110,16 @@ class TestUnusualZoneValues:
             CONF_ZONE_AREA: UNUSUAL_AREA_MIN_M2,
             CONF_ZONE_FLOW_RATE: UNUSUAL_FLOW_MAX_LPM,
         }
-        assert cf._unusual_zone_values(zone, imperial=False) == []
+        assert cf._unusual_zone_values(zone, imperial=False, texts=WARNINGS) == []
         zone[CONF_ZONE_FLOW_RATE] = UNUSUAL_FLOW_MIN_LPM
-        assert cf._unusual_zone_values(zone, imperial=False) == []
+        assert cf._unusual_zone_values(zone, imperial=False, texts=WARNINGS) == []
 
     def test_missing_values_ignored(self):
-        assert cf._unusual_zone_values({}, imperial=False) == []
+        assert cf._unusual_zone_values({}, imperial=False, texts=WARNINGS) == []
 
     def test_imperial_messages_use_imperial_units(self):
         zone = {CONF_ZONE_AREA: 2.0, CONF_ZONE_FLOW_RATE: 200.0}
-        warnings = cf._unusual_zone_values(zone, imperial=True)
+        warnings = cf._unusual_zone_values(zone, imperial=True, texts=WARNINGS)
         assert len(warnings) == 2
         assert "ft²" in warnings[0]
         assert "gal/h" in warnings[1]
@@ -115,16 +130,16 @@ class TestGuardFlowDeprecationWarning:
 
     def test_flow_meter_without_guard_flow_flagged(self):
         zone = {CONF_ZONE_AREA: 20.0, CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER}
-        warnings = cf._unusual_zone_values(zone, imperial=False)
+        warnings = cf._unusual_zone_values(zone, imperial=False, texts=WARNINGS)
         assert len(warnings) == 1
-        assert "guard flow rate" in warnings[0]
+        assert warnings[0] == WARNINGS["warn_guard_flow_missing"], "the catalogue sentence, not a literal"
         assert "required" in warnings[0]
 
     def test_volume_preset_without_guard_flow_flagged(self):
         zone = {CONF_ZONE_AREA: 20.0, CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_VOLUME_PRESET}
-        warnings = cf._unusual_zone_values(zone, imperial=False)
+        warnings = cf._unusual_zone_values(zone, imperial=False, texts=WARNINGS)
         assert len(warnings) == 1
-        assert "guard flow rate" in warnings[0]
+        assert warnings[0] == WARNINGS["warn_guard_flow_missing"], "the catalogue sentence, not a literal"
 
     def test_flow_meter_with_guard_flow_clean(self):
         zone = {
@@ -132,12 +147,12 @@ class TestGuardFlowDeprecationWarning:
             CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
             CONF_ZONE_FLOW_RATE: 3.33,
         }
-        assert cf._unusual_zone_values(zone, imperial=False) == []
+        assert cf._unusual_zone_values(zone, imperial=False, texts=WARNINGS) == []
 
     def test_estimated_flow_without_flow_rate_not_flagged(self):
         """estimated_flow missing flow_rate is a blocking form error, not a warning."""
         zone = {CONF_ZONE_AREA: 20.0, CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_ESTIMATED_FLOW}
-        assert cf._unusual_zone_values(zone, imperial=False) == []
+        assert cf._unusual_zone_values(zone, imperial=False, texts=WARNINGS) == []
 
     def test_zero_flow_rate_flagged(self):
         zone = {
@@ -145,9 +160,9 @@ class TestGuardFlowDeprecationWarning:
             CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
             CONF_ZONE_FLOW_RATE: 0.0,
         }
-        warnings = cf._unusual_zone_values(zone, imperial=False)
+        warnings = cf._unusual_zone_values(zone, imperial=False, texts=WARNINGS)
         assert len(warnings) == 1
-        assert "guard flow rate" in warnings[0]
+        assert warnings[0] == WARNINGS["warn_guard_flow_missing"], "the catalogue sentence, not a literal"
 
 
 class TestInitialFlowSoftConfirm:

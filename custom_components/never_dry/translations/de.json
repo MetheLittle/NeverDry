@@ -680,7 +680,18 @@
     "notification_watchdog_triggered_body": "Das Ventil der Zone {zone} ist länger als {duration_min} Min. geöffnet, ohne einen Schließbefehl erhalten zu haben. NeverDry hat es aus Sicherheitsgründen zwangsweise geschlossen. Prüfe, ob die Automatisierung oder die Wasserabgabe korrekt funktioniert.",
     "notification_water_me_now_zone_line": "- {zone}: Defizit {deficit} mm, {liters} L ({minutes} min)",
     "notification_deficit_anomaly_title": "Defizit weit über dem Schwellenwert",
-    "notification_deficit_anomaly_body": "Zone {zone}: das Defizit von {deficit} mm liegt über {limit} mm, dem {multiplier}-fachen des Schwellenwerts. Die Bewässerung erreicht diese Zone möglicherweise nicht. Prüfen Sie Ventil, Zeitplan und das Home-Assistant-Protokoll."
+    "notification_deficit_anomaly_body": "Zone {zone}: das Defizit von {deficit} mm liegt über {limit} mm, dem {multiplier}-fachen des Schwellenwerts. Die Bewässerung erreicht diese Zone möglicherweise nicht. Prüfen Sie Ventil, Zeitplan und das Home-Assistant-Protokoll.",
+    "warn_area_small": "Die bewässerte Fläche {area} liegt unter {minimum}. Prüfen Sie, ob es die tatsächlich bewässerte Fläche ist und nicht der ganze Garten.",
+    "warn_guard_flow_missing": "Keine Auslegungs-Durchflussrate. Sie wird für die erwartete Dauer und für den Sicherheits-Timeout gebraucht und wird in einer künftigen Version verpflichtend (Ziel v1.0).",
+    "warn_flow_low": "Die Auslegungs-Durchflussrate {flow} liegt unter {minimum}. Eine so langsame Zone braucht Stunden für eine normale Gabe.",
+    "warn_flow_high": "Die Auslegungs-Durchflussrate {flow} liegt über {maximum}. Prüfen Sie die Einheit: das ist die Rate einer Zone, nicht der ganzen Anlage.",
+    "warn_probe_no_depth": "Bodensensor: keine Wurzeltiefe angegeben, der Sensor wird also angezeigt, bestimmt aber nicht das Defizit dieser Zone - das tut weiterhin das Modell der Anlage. Geben Sie die Tiefe an, die die Wurzeln erreichen, und die Zone bewässert nach dem, was der Boden misst.",
+    "warn_depth_no_probe": "Bodensensor: die Wurzeltiefe wird nicht verwendet, weil diese Zone keinen Sensor hat. Wählen Sie einen aus oder leeren Sie das Feld.",
+    "warn_probe_custom_soil_incomplete": "Bodensensor: die Bodenart dieser Zone ist Benutzerdefiniert und eine der beiden Grenzen fehlt, der Sensor wird also angezeigt, bestimmt aber nicht das Defizit. Geben Sie sowohl die Feldkapazität als auch den Welkepunkt an, oder wählen Sie eine Bodenart aus der Liste.",
+    "warn_probe_assumed_soil": "Bodensensor: diese Zone bestimmt ihr Defizit unter Annahme eines mittleren Bodens, da keine Bodenart gewählt wurde. Sandiger Boden hält etwa die Hälfte dieses Wassers, Ton etwa die Hälfte mehr - wählen Sie Ihre Bodenart, wenn Sie sie kennen.",
+    "warn_override_ignored": "{label}: {chosen}, Ihr eigener Wert {value} wird also nicht verwendet. Wählen Sie Benutzerdefiniert, um ihn anzuwenden, oder leeren Sie das Feld.",
+    "warn_meter_mode_without_meter": "Als Abgabemodus ist Ventil mit Durchflusszähler eingestellt, es ist aber kein Zähler gewählt: der Modus dosiert nach gemessenem Volumen, die messende Entität ist also nicht optional.",
+    "warn_meter_of_another_zone": "Der gewählte Durchflusszähler gehört zum Ventil der Zone {zone}: er meldet das Wasser jener Zone, nicht dieser. Solange jene Zone ruht, steht dieser Zähler still, und ein stillstehender Zähler bedeutet hier keinen bestätigten Durchfluss und eine Bewässerung, die nicht gemessen werden kann."
   },
   "issues": {
     "soil_probe_needs_a_zone": {
