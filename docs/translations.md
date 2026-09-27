@@ -24,7 +24,7 @@ does not let anyone write it.
 | English | source | source | n/a, every string originates here |
 | Italian | complete | complete | **against the running product**, 2026-09-13 |
 | German | complete | complete | **against the running product**, 2026-09-17, by @MetheLittle |
-| Spanish | complete | complete | **file only**, 2026-09-20, by @laurash96 (native speaker, Colombia); not yet against the running product. Five notification strings added 2026-09-26 have not been read by a speaker |
+| Spanish | complete | complete | **file only**, 2026-09-20, by @laurash96 (native speaker, Colombia); not yet against the running product. Five notification strings added 2026-09-26 were read back the same day |
 
 **Read back** is the column that matters, and it is deliberately not a yes or a
 no. There are two different verifications behind that word and they do not catch

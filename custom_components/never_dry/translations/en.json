@@ -674,7 +674,7 @@
     "notification_irrigation_ineffective_body": "Zone {zone}: soil moisture did not rise after the last irrigation.",
     "notification_model_drift_title": "Model drift detected",
     "notification_model_drift_body": "Zone {zone}: moisture/model correlation has dropped to {correlation}.",
-    "notification_water_me_now_title": "Watering needed, and nothing to water with",
+    "notification_water_me_now_title": "Watering needed: no valve configured",
     "notification_water_me_now_body": "Your garden needs watering:\n\n{zones}\n\nNo irrigation valve is configured. Water by hand, or add a valve in the integration settings.",
     "notification_watchdog_triggered_title": "Valve force-closed by safety watchdog",
     "notification_watchdog_triggered_body": "Zone {zone} valve was open for more than {duration_min} min with no close command received. NeverDry forced it closed as a safety measure. Check that the automation or delivery logic is working correctly.",

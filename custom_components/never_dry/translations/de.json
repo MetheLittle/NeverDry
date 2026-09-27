@@ -674,7 +674,7 @@
     "notification_irrigation_ineffective_body": "Zone {zone}: Die Bodenfeuchte ist nach der letzten Bewässerung nicht gestiegen.",
     "notification_model_drift_title": "Modellabweichung erkannt",
     "notification_model_drift_body": "Zone {zone}: Die Korrelation zwischen Feuchtigkeit und Modell ist auf {correlation} gefallen.",
-    "notification_water_me_now_title": "Bewässerung nötig, aber kein Ventil vorhanden",
+    "notification_water_me_now_title": "Bewässerung nötig: kein Ventil konfiguriert",
     "notification_water_me_now_body": "Ihr Garten braucht Wasser:\n\n{zones}\n\nEs ist kein Bewässerungsventil konfiguriert. Gießen Sie von Hand, oder fügen Sie in den Einstellungen der Integration ein Ventil hinzu.",
     "notification_watchdog_triggered_title": "Ventil vom Sicherheits-Watchdog zwangsweise geschlossen",
     "notification_watchdog_triggered_body": "Das Ventil der Zone {zone} ist länger als {duration_min} Min. geöffnet, ohne einen Schließbefehl erhalten zu haben. NeverDry hat es aus Sicherheitsgründen zwangsweise geschlossen. Prüfe, ob die Automatisierung oder die Wasserabgabe korrekt funktioniert.",
