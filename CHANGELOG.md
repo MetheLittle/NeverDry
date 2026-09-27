@@ -103,6 +103,17 @@ not the argument.
   one real difference, the decimal separator, runs *through* Latin America
   rather than around it, so no regional code could resolve it.
 
+  **A second round, and this one against the product rather than the file**
+  (2026-09-27). The configuration and options forms, the entity names and the
+  zone card were read with the integration running, which is the reading that
+  catches what a file cannot: the safety watchdog was called *el vigilante de
+  seguridad*, a security guard, and the soil probe was a *sensor* in one place
+  and a *sonda* in another. Three names are now one name each. The twenty-two
+  strings added the same day, the form warnings and the wilting point fields,
+  are written and not yet read back, and `docs/translations.md` says so - the
+  column that admits what nobody has checked is what has attracted three
+  read-backs so far.
+
 - **The zone card speaks the language of whoever is looking at it.** About half
   its labels used to be taken from the entity names, which Home Assistant
   resolves once in the *server's* language: a household whose frontend was in
