@@ -8,7 +8,7 @@ complements `../design_domain_object_model.md` (the map of the domain classes),
 
 **Status: Draft.** Open for comment. §14 tracks the questions this note raised:
 **Q1–Q3 have working answers** (2026-08-21) and the sections above are written
-to match them; **Q4-Q8 are open**, and they are what feedback is most wanted on.
+to match them; **Q4-Q9 are open**, and they are what feedback is most wanted on.
 Q8 is the newest and the most consequential for the interface: it asks whether a
 zone should declare a time at all.
 Nothing is binding while the note is `Draft` — a working answer is still a
@@ -275,20 +275,164 @@ operation, because it answers only half the question.
 > **The policy says *may I*. The hydraulics say *can I*.**
 
 `PARALLEL` on its own is a promise the pipe cannot keep: one well, one pump, one
-main. Admitting a zone to run concurrently requires three conditions, evaluated
-**at the moment of admission** rather than once at startup — capacity is
-consumed by whoever is already running:
+main. Admitting a zone to run concurrently requires two conditions, evaluated
+**at the moment of admission** rather than once at startup:
 
 1. the policy permits overlap;
-2. `max_concurrent_zones` is not saturated;
-3. the flow demanded by the active runs **plus the candidate** fits within the
-   supply.
+2. `max_concurrent_zones` is not saturated.
 
-On the third, the precedence already established in `flow-rate-provenance.md`
-applies unchanged: use the **historical measured** rate where one exists, the
-design rate otherwise. And per that note's one-way-witness rule, a missing or
-implausible flow figure should qualify the decision, never silently authorise
-an overlap the supply cannot feed.
+**There was a third, and removing it is the substantive change here.** It read:
+*the flow demanded by the active runs plus the candidate fits within the
+supply*. It is arithmetically sensible and it cannot be implemented, for three
+reasons that compound.
+
+**There is no supply figure to compare against, and there will not be one.**
+Nothing in the installation records what the source can deliver, so the check
+had no right-hand side. The obvious repair - ask the user for it - is refused
+deliberately: in an ordinary garden nobody knows what their main delivers, and
+a field asking for it would be answered with a guess that then looks like a
+measurement. This project has made that decision once already, for the soil,
+where the reasoning is recorded as *asking for both as figures would be asking
+twice for something nobody owns*. The same holds here, and worse, because a
+wrong ceiling would silently forbid overlaps that are perfectly fine.
+
+**The measured rate is not available when the decision is made.** A zone's rate
+is measured over its first runs, so at the moment a scheduler would most like a
+number, there is not one - and the design rate it falls back on is the figure
+`flow-rate-provenance.md` already warns is routinely out by an order of
+magnitude.
+
+**And the measured rate is an effect of scheduling, not an input to it.** This
+is the one that settles it. Run two zones together and the measured rate of
+both falls - that is the whole reason serial is the default (§8.1). A scheduler
+that admits or refuses overlap based on measured flow is deciding on a
+consequence of its own decisions. The loop is not in the wording; it is in the
+quantity.
+
+So the supply is not consulted. **The policy is declared by the person who can
+see their plumbing, and the scheduler obeys it.** Where somebody declares
+`PARALLEL` on a source that cannot feed two zones, the result is worse
+irrigation on both, and the honest place to say so is the documentation and the
+configuration form - never a run-time refusal computed from a number that does
+not mean what it would have to mean.
+
+Measured flow stays what `flow-rate-provenance.md` makes it: evidence about a
+zone, reported to a person. It does not become a gate.
+
+### 8.1 The field says serial is the default, not the option
+
+Two reports within a fortnight, on unrelated hardware, and they converge:
+
+- **Eleven zones on one installation, all set to 05:00, one watered** (GH #270).
+  The others were not deferred; they were dropped.
+- **Two Netro controllers, each running one solenoid at a time** (GH #239,
+  @safepay), asking for the zones of one entry to *queue* rather than be
+  skipped, in both reactive and scheduled modes.
+
+The second report carries the argument this note was missing, and it is not
+about convenience. Zones are sized to use most of the supply available, so
+running two at once is not slower, it is **wrong**:
+
+> "My lawn zone draws 31 L/min, and my vegetable zone only 3 L/min. Opening
+> both at once lowers the pressure, which changes the flow of both zones.
+> NeverDry's run times are calculated as volume / flow rate. When two zones
+> overlap, both flow rates are wrong, and the deficit NeverDry records as
+> replaced doesn't match what was actually delivered."
+
+That closes a gap in §8 above. The three admission conditions treat supply as a
+budget to divide, which is right arithmetically and incomplete physically:
+overlapping runs do not each get their share of a fixed flow, they **change
+each other's flow**, and every figure downstream is then computed from a rate
+that no longer holds. The delivered volume is credited wrong, so the deficit is
+wrong, so the next run is wrong - and nothing in the system can see it, because
+the meter is per zone and the pressure is not.
+
+So parallel operation is the special case, for a site with supply to spare, and
+**serial is the safe default**. The note had it the other way round by
+omission: `ConcurrencyPolicy` is a field with two values and no stated default,
+and §10's *"both modes become subject to the envelope"* reads as though the two
+were equals.
+
+**What it costs to have had this wrong.** Nothing yet in the model - serial is
+what actually happens today, because both dispatch callbacks return when
+something is running. What it cost is the *queue*: serial without a queue is
+not serial scheduling, it is one zone winning and the rest losing, which is
+exactly what both reporters saw.
+
+### 8.2 Where the boundary of "one at a time" sits
+
+Serial by default raises the question the two reports answer differently, and
+neither answer is wrong.
+
+@safepay would model two Netro controllers as **two NeverDry entries**, one per
+controller, and wants each entry to queue its own zones - explicitly *not*
+asking for valve groups. So for that installation the boundary is the config
+entry, and it falls out of the setup without anything new to configure.
+
+A third position was raised in this project: that the choice belongs to **the
+zone** - parallel, serial, or custom - rather than to the installation. It sits
+against what §8 argues (the constraint is the shared hydraulics, which is a
+property of the plumbing and not of any one zone), and "custom" has no
+definition yet. Recorded here rather than resolved, as Q9.
+
+A third was deferred long ago: a **declared group** of zones that share a pipe,
+a pump or a well (GH #74). It is the only one of the three that describes the
+constraint directly, and it does not survive contact with the installations we
+actually have.
+
+| boundary | what it means | who wants it |
+|---|---|---|
+| the config entry | one entry, one queue | @safepay, and it needs no new field |
+| the zone | each zone declares how it may overlap | raised in this project |
+| a declared group | zones sharing a pipe are named together | nobody, on the evidence below |
+
+**Nobody is asking for groups, including the person with the most complicated
+site.** @safepay runs two controllers and says in the same breath: *"I'd model
+these as two separate NeverDry entries, one per controller. So I'm not asking
+for valve groups."* Karl has eleven zones on one installation and needs a
+queue, not a partition. A maintainer with one valve per line and one source
+gets nothing from a group at all.
+
+**The one shape that would need it** is two independent sources inside a single
+entry - two pumps, or a well and the mains - where three zones compete with
+each other and two do not. That is a real configuration and it is a rare one,
+and it has not been reported.
+
+**And it is the only option that asks the user for something they can get
+wrong.** A group is a claim about plumbing the software cannot check, and a
+wrong group is indistinguishable from a right one until the pressure drops
+during a run that was admitted on its strength.
+
+So: the entry is the boundary, and the group is not designed until somebody
+turns up with two sources behind one entry. What would reopen it is that
+report, not a tidier model.
+
+The entry boundary does have a failure of its own, and it is worth naming
+rather than discovering: two entries pointed at valves on the *same* main is a
+configuration nobody is stopped from making, and the system would treat as
+independent two things the plumbing does not.
+
+### 8.3 A queue waits for a closed valve, not for a timer
+
+@safepay's hardware adds a constraint the queue design has to carry, and it
+generalises past Netro. The integration polls, waits about five seconds after
+each command before re-reading, and is capped at 2,000 API calls per device per
+day, so valve state lags by at least one poll.
+
+> "The queue should wait for the previous valve to be confirmed closed before
+> starting the next. Otherwise it may start a zone while the controller still
+> reports the previous one as running."
+
+This is the same discipline as the delivery contract: act on confirmation, not
+on elapsed time. A queue that starts the next zone when the previous run's
+*duration* ends is assuming the valve obeyed, on hardware that has already said
+it reports late. Whatever §10's recomputation ends up looking like, the hand-off
+between zones is a state transition and not a timer.
+
+There is a second-order cost worth naming, because it is easy to design past: a
+poll-limited device cannot be asked more often just because a queue would like
+to move sooner. 2,000 calls a day is roughly one every 43 seconds across a
+device's whole day, shared with everything else the integration does.
 
 ## 9. The irrigability envelope
 
@@ -606,8 +750,8 @@ own deferral map has given that up.
 
 The questions this note raised, with the answers reached so far. **Q1–Q3 are
 settled** (2026-08-21) and the sections above have been written to match; **Q6 is
-settled in scope** but not in the form of its override (2026-08-24); **Q4, Q5, Q7
-and Q8 are open**. Feedback on what remains open is what this note is circulated for.
+settled in scope** but not in the form of its override (2026-08-24); **Q4, Q5,
+Q7, Q8 and Q9 are open**. Feedback on what remains open is what this note is circulated for.
 The numbering is referenced from the sections above.
 
 A settled answer here is still a *proposal* while the note is `Draft` — nothing
@@ -881,6 +1025,46 @@ ask it: the reporter has eleven zones and a reason for the hour he chose.
 Note that A and C both keep the vocabulary at one word, *window*, which is worth
 something on its own: §10.1 exists because two words for two nearly-identical
 things sent a user to configure eleven of the wrong one.
+
+**Q9 - Where does "one valve at a time" live? - Open.** *(Raised 2026-09-26
+by GH #239 and GH #270, plus a position taken inside this project.)*
+
+§8.2 sets out three candidate boundaries: the config entry, the zone, or a
+declared group of zones. They are not competing proposals so much as three
+resolutions of one idea, and the question is which resolution the product
+commits to.
+
+**The entry.** @safepay's answer, and it needs nothing new: two controllers are
+two entries, each queues its own zones. It covers both reported cases and costs
+no configuration. It breaks on a setup nobody is prevented from making - two
+entries whose valves sit on the same main - where the system would treat as
+independent two things the plumbing does not.
+
+**The zone.** Each zone declares how it may overlap: parallel, serial, or
+custom. It sits against §8's argument, which is that the constraint belongs to
+the shared hydraulics rather than to any zone, and it leaves a zone able to
+claim something the pipe cannot honour. "Custom" has no definition yet, and
+until it has one this option cannot be costed.
+
+**A declared group**, deferred from the well-gate thread (GH #74), is the only
+one that names the constraint directly - and §8.2 sets out why it is not the
+answer here. Nobody has asked for it, including @safepay, who has two
+controllers and rules it out in the same comment. The shape that would need it
+is two independent sources behind a single entry, which is real, rare, and
+unreported. It is also the only option that asks the user for a claim about
+plumbing the software cannot check.
+
+**So the question is narrower than it first looked: entry or zone.** And what
+settles it is the failure each one allows, not taste. The entry boundary
+silently over-waters when two entries share a main - a configuration nobody is
+prevented from making. The zone boundary lets one zone claim an overlap the
+pipe cannot honour, and leaves "custom" undefined.
+
+**One reading may dissolve the question entirely.** With serial as the default
+(§8.1) and no supply check at all (§8), a boundary is needed solely to *permit*
+overlap - never to forbid it. Permission is a declaration, and a declaration
+can sit on the entry. If that holds, the entry is enough on its own, and
+anything wider waits for the installation that cannot be expressed that way.
 
 ## 15. Consequences for the domain model
 
