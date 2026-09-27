@@ -359,3 +359,36 @@ class TestMarkIrrigatedRefreshesWhatItChanges:
         zone.reset_deficit("mark_irrigated")
 
         assert calls, "pressing the button must notify the entities that show what it changed"
+
+    def test_the_entity_writes_its_state_when_the_session_closes(self, di_sensor):
+        """Registration and notification were covered; the effect was not.
+
+        The listener ends in ``async_write_ha_state``, and that line is the
+        entire point of the fix - without it the entity is subscribed to an
+        event it does nothing with, which looks identical from outside until
+        somebody presses the button.
+        """
+        from unittest.mock import MagicMock
+
+        from never_dry.sensor import ZoneLastIrrigatedSensor
+
+        hass = _hass_with_meter(0.0, "L")
+        zone = _make_zone(di_sensor, hass, flow_rate=5.0)
+        entity = ZoneLastIrrigatedSensor(zone)
+        entity.hass = hass
+        entity.async_write_ha_state = MagicMock()
+
+        zone.notify_session_listeners()
+
+        entity.async_write_ha_state.assert_called_once()
+
+    def test_an_entity_without_hass_stays_quiet(self, di_sensor):
+        """Before it is added to Home Assistant there is nothing to write to,
+        and calling anyway raises inside a listener every other entity shares."""
+        from never_dry.sensor import ZoneLastIrrigatedSensor
+
+        hass = _hass_with_meter(0.0, "L")
+        zone = _make_zone(di_sensor, hass, flow_rate=5.0)
+        ZoneLastIrrigatedSensor(zone)  # never given a hass
+
+        zone.notify_session_listeners()  # must not raise
