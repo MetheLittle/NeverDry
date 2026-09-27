@@ -652,6 +652,70 @@ has no part in deciding whether the run happens. Which is also why a queue must
 treat a soaking zone as still occupying its slot unless interleaving is turned
 on (§11).
 
+#### 8.4.4 Three things the shape does not yet hold
+
+Written as gaps rather than answers, because each one is asked on an open issue
+and none is settled.
+
+**A deadline is a constraint on the end, and everything here constrains the
+start** (GH #231). @sanderaernouts wants watering *finished* before sunrise: a
+drip hose in a front garden facing the sun, where watering at noon is the
+problem. The irrigability envelope (§9.1) says when a run may *begin*, and Q2
+asks what happens to a run still going when the window closes. Neither is a
+deadline.
+
+Honouring one means working backwards: estimate the duration, subtract it from
+the deadline, start then. Two things make that harder than it sounds, and both
+should be stated before anyone builds it.
+
+*The estimate is the weakest number in the system.* Duration is volume over
+flow rate, and `flow-rate-provenance.md` is an entire note about how unreliable
+that rate is until it has been measured. A deadline computed from it is a
+promise made on a figure known to be wrong, and missing it is exactly the
+failure the user was trying to avoid.
+
+*And with a queue, the calculation is not per zone.* Eleven zones that must all
+finish before sunrise need the backward calculation over the whole queue, not over each
+run. That turns the scheduler from something that answers *may this zone start
+now* into something that plans a sequence - a different object, and a much
+larger one.
+
+A cheaper reading, worth testing against the reporter before building the
+expensive one: a deadline that only *refuses to start* a run it does not
+believe will finish in time, and lets the envelope handle the rest. That keeps
+the scheduler stateless and turns a missed deadline into a run that never
+began, which for a front garden in the sun may be the right answer anyway.
+
+**Rain that arrives mid-run** (GH #213). Deferring for forecast rain is
+settled (§8.4.2); stopping a session because rain is *falling* is not, and it
+is a different question.
+
+One worry can be set aside: there is no double counting. Water delivered and
+rain fallen are two real contributions and both should reduce the deficit -
+the run credits what the valve delivered, the rain credits what the sky
+delivered, and the zone genuinely received both.
+
+What is open is smaller and practical. **How much rain stops a run** - a rate,
+or an amount accumulated since it started? And **is a stopped run resumed**?
+A session cut short leaves the deficit partly unmet, and the difference between
+*suspended* and *abandoned* decides whether the zone queues again in twenty
+minutes or waits for its next ordinary turn. Neither has an answer here.
+
+**A manual run is not scheduled, and must not be filtered as though it were**
+(GH #214). The smallest-dose floor of §8.4.2 exists to stop the *scheduler*
+opening a valve for nothing. Applied to a person who has chosen to water for
+two minutes, it becomes a refusal of an explicit instruction.
+
+The same holds for the rest of the path: a manual run bypasses the envelope,
+the modes, the anticipation band and the queue's ordering - though **not** the
+queue's mutual exclusion, because two valves on one pipe is a physical
+constraint and not a policy, and not the winter interlock, which protects the
+plumbing rather than the schedule.
+
+Worth stating plainly because the direction of drift is predictable: every
+guard written for the automatic path is a guard somebody will eventually apply
+to the manual one, each time for a locally sensible reason.
+
 ## 9. The irrigability envelope
 
 This is the reframing the rest of the note depends on. The scheduler stops
