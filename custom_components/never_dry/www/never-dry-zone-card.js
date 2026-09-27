@@ -898,10 +898,16 @@ class NeverDryZoneCard extends HTMLElement {
       // because the probe was set aside and the ruler changed underneath it
       // (GH #234). Nothing on screen said so.
       const src = deficitSource(ents.deficit);
-      this._el.barSub.textContent =
-        `${dStr} / ${tStr}` +
-        (src ? ` · ${t(hass, src)}` : "") +
-        (deficit >= threshold ? ` · ${t(hass, "due")}` : "");
+      // innerHTML rather than textContent, because the provenance carries
+      // emphasis: on a .75rem secondary-colour line it is the one word worth
+      // catching, and weight alone on grey that small barely registers - hence
+      // the primary text colour too. Escaping is mandatory once markup is in
+      // play: the two figures come from HA's formatter and carry a unit the
+      // user may have written.
+      this._el.barSub.innerHTML =
+        `${escapeHtml(dStr)} / ${escapeHtml(tStr)}` +
+        (src ? ` · <span class="nd-bar-src">${escapeHtml(t(hass, src))}</span>` : "") +
+        (deficit >= threshold ? ` · ${escapeHtml(t(hass, "due"))}` : "");
     } else {
       this._el.barFill.style.width = "0%";
       this._el.barVal.textContent = "—";
@@ -1428,6 +1434,7 @@ const CARD_CSS = `
   .nd-bar-fill { height:100%; width:0%; border-radius:6px;
     transition: width .4s ease, background .4s ease; }
   .nd-bar-sub { font-size:.75rem; color:var(--secondary-text-color); margin-top:4px; }
+  .nd-bar-src { font-weight:600; color:var(--primary-text-color); }
   .nd-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; }
   /* Holds a grid slot so zones with and without a probe line up. */
   .nd-cell-hold { visibility:hidden; }
