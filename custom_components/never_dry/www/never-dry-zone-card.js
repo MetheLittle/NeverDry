@@ -121,6 +121,9 @@ const I18N = {
     secParams: "Parameters",
     secActions: "Buttons",
     warningsAlways: "Warnings are always shown.",
+    srcProbe: "measured by the probe",
+    srcEstimate: "estimated from the weather",
+    srcProbeSetAside: "estimated: the probe has gone quiet",
   },
   it: {
     selectZone: "Seleziona una zona nella scheda.",
@@ -218,6 +221,9 @@ const I18N = {
     secParams: "Parametri",
     secActions: "Pulsanti",
     warningsAlways: "Gli avvisi si vedono sempre.",
+    srcProbe: "misurato dalla sonda",
+    srcEstimate: "stimato dal meteo",
+    srcProbeSetAside: "stimato: la sonda tace",
   },
   de: {
     selectZone: "Eine Zone im Karten-Editor auswählen.",
@@ -315,6 +321,9 @@ const I18N = {
     secParams: "Parameter",
     secActions: "Schaltflächen",
     warningsAlways: "Warnungen werden immer angezeigt.",
+    srcProbe: "vom Sensor gemessen",
+    srcEstimate: "aus dem Wetter geschätzt",
+    srcProbeSetAside: "geschätzt: der Sensor schweigt",
   },
   es: {
     selectZone: "Selecciona una zona en el editor de la tarjeta.",
@@ -412,6 +421,9 @@ const I18N = {
     secParams: "Parámetros",
     secActions: "Botones",
     warningsAlways: "Los avisos se muestran siempre.",
+    srcProbe: "medido por la sonda",
+    srcEstimate: "estimado a partir del tiempo",
+    srcProbeSetAside: "estimado: la sonda no responde",
   },
 };
 
@@ -605,6 +617,17 @@ const CARD_SECTIONS = {
 // and how dry is it. Everything else is detail, and detail is what the full
 // card is for.
 const COMPACT_SECTIONS = ["status", "bar"];
+
+function deficitSource(stateObj) {
+  // Three answers, not two. "Estimated" for a zone that never had a probe and
+  // "estimated" for a zone whose probe has gone quiet look identical in the
+  // figures and mean very different things: only the second is a number that
+  // changed scale while the garden did nothing.
+  const a = stateObj && stateObj.attributes;
+  if (!a || !a.deficit_source) return null;
+  if (a.deficit_source === "zone_probe") return "srcProbe";
+  return a.probe_set_aside ? "srcProbeSetAside" : "srcEstimate";
+}
 
 function visibleSections(config) {
   const mode = (config && config.mode) || "full";
@@ -869,8 +892,16 @@ class NeverDryZoneCard extends HTMLElement {
       this._el.barVal.textContent = `${pct.toFixed(0)}%`;
       const dStr = fmtState(hass, ents.deficit);
       const tStr = fmtState(hass, ents.threshold);
+      // Where the number came from, beside the number. The deficit can be a
+      // measurement or an estimate, and the two are on different scales - a
+      // zone once fell from 9.6 mm to 0.7 mm with no rain and no irrigation,
+      // because the probe was set aside and the ruler changed underneath it
+      // (GH #234). Nothing on screen said so.
+      const src = deficitSource(ents.deficit);
       this._el.barSub.textContent =
-        `${dStr} / ${tStr}` + (deficit >= threshold ? ` — ${t(hass, "due")}` : "");
+        `${dStr} / ${tStr}` +
+        (src ? ` · ${t(hass, src)}` : "") +
+        (deficit >= threshold ? ` · ${t(hass, "due")}` : "");
     } else {
       this._el.barFill.style.width = "0%";
       this._el.barVal.textContent = "—";

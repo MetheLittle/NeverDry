@@ -1571,3 +1571,46 @@ class TestTheBarSurvivesAReloadToo:
         zone._probe_quiet.restore(rubbish)
 
         assert zone._probe_quiet.value(datetime.now(UTC).timestamp()) == before
+
+
+class TestTheZoneSaysWhereItsNumberCameFrom:
+    """Two zones reporting the same source for opposite reasons.
+
+    ``deficit_source`` answers *measured or estimated*, which is not enough: a
+    zone that never had a probe and a zone whose probe has gone quiet both read
+    ``site_model``, and only the second means a figure changed scale while
+    nothing happened in the garden. That is the 9.6 mm to 0.7 mm of GH #234,
+    where the card showed a collapse and the ruler had been swapped.
+
+    ``probe_set_aside`` is the missing half, kept beside the source rather than
+    folded into it: people write automations against that attribute, and a new
+    value would arrive unannounced.
+    """
+
+    def _driven(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._on_own_probe(_reading("18.0"))
+        return zone
+
+    def test_a_driving_probe_says_measured_and_is_not_set_aside(self, hass_mock):
+        zone = self._driven(hass_mock)
+
+        assert zone.deficit_source == "zone_probe"
+        assert zone.probe_set_aside is False
+
+    def test_a_probe_gone_quiet_says_estimated_and_set_aside(self, hass_mock):
+        """The case the card could not tell apart."""
+        zone = self._driven(hass_mock)
+        _has_come_back_from(zone, 300.0, 310.0, 305.0)
+        zone._probe_last_seen = datetime.now(UTC) - timedelta(hours=6)
+
+        assert zone.deficit_source == "site_model"
+        assert zone.probe_set_aside is True, "a probe that should be driving and is not"
+
+    def test_a_zone_with_no_probe_says_estimated_and_nothing_is_set_aside(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub)
+
+        assert zone.deficit_source == "site_model"
+        assert zone.probe_set_aside is False, "nothing was set aside: there is no probe"
