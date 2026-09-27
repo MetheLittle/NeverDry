@@ -2142,6 +2142,23 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._review_probe_standing()
         return "zone_probe" if self._zone.measured_deficit is not None else "site_model"
 
+    @property
+    def probe_set_aside(self) -> bool:
+        """A probe that should be driving this zone, and currently is not.
+
+        Kept apart from :attr:`deficit_source` rather than folded into it as a
+        third value, because that attribute is something people write
+        automations against and a new value would arrive unannounced.
+
+        The distinction it carries is the one the field asked for. Two zones can
+        both report ``site_model`` for opposite reasons: one has no probe and
+        never did, the other has one that has gone quiet - and only the second
+        means a number changed scale without anything happening in the garden.
+        That is the 9.6 mm to 0.7 mm of GH #234, where nothing on screen said
+        the ruler had been swapped.
+        """
+        return bool(self._probe_drives) and self._zone.measured_deficit is None
+
     def _probe_is_fresh(self) -> bool:
         """Whether the probe has spoken recently enough for its reading to stand.
 
@@ -3120,6 +3137,7 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             # the wrong one of the two is GH #234's second defect.
             "estimate_mm": round(self._et_deficit, 2),
             "deficit_source": self.deficit_source,
+            "probe_set_aside": self.probe_set_aside,
             "irrigating": self._irrigating,
             "awaiting_valve": self._awaiting_valve,
         }
@@ -3314,6 +3332,12 @@ class ZoneDeficitSensor(SensorEntity):
             "flow_rate_lpm": self._zone_sensor._flow_rate,
             "irrigating": self._zone_sensor._irrigating,
             "awaiting_valve": self._zone_sensor._awaiting_valve,
+            # Where this number came from, on the entity that shows the number.
+            # It lived only on the parent zone entity, which is not what the
+            # card reads - so the one figure whose meaning can change had no way
+            # to say which meaning was current.
+            "deficit_source": self._zone_sensor.deficit_source,
+            "probe_set_aside": self._zone_sensor.probe_set_aside,
         }
         if self._zone_sensor._last_irrigated:
             attrs["last_session_duration_s"] = self._zone_sensor._last_session_duration_s
