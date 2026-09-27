@@ -12,6 +12,15 @@ entry below links the design note that explains it properly — this is the summ
 not the argument.
 
 ### Added
+- **The card says where the deficit came from.** A zone once fell from 9.6 mm to
+  0.7 mm between two readings, with no rain, no irrigation and nothing having
+  happened in the garden: the number had not collapsed, the ruler had changed,
+  from a probe measurement to a weather estimate. Under the bar the card now
+  says which one it is - measured by the probe, estimated from the weather, or
+  estimated because the probe has gone quiet. The third is the one that was
+  missing: a zone that never had a probe and a zone whose probe has fallen
+  silent used to look identical, and they mean opposite things.
+
 - **A compact card, and sections you can switch off**
   ([#269](https://github.com/never-dry/NeverDry/issues/269)). The zone card is
   built for reading one zone closely, which makes it the wrong shape for an
@@ -171,6 +180,30 @@ not the argument.
   meter had stopped answering.
 
 ### Fixed
+- **Mark irrigated redraws everything it changed**
+  ([#216](https://github.com/never-dry/NeverDry/issues/216)). Pressing it reset
+  the volume at once while the time and the deficit stood still until the next
+  poll - a button that rewrites the zone and leaves the page showing the
+  previous run for up to half a minute reads as a button that did not work. Half
+  of it had been fixed in September as a side effect of unrelated work; the rest
+  was three entities on a base class that subscribed to nothing.
+- **The model card finds its entity in any language**
+  ([#279](https://github.com/never-dry/NeverDry/issues/279)). Entity ids are
+  built from the *translated* name, so on a Spanish install the water balance
+  sensor is `sensor.neverdry_metodo_de_balance_hidrico` and the card, which
+  looked for an English suffix, reported no NeverDry entities on an
+  installation where every one of them was present. It now matches on the
+  registry unique_id, which does not move with the language. Kc and efficiency
+  also stopped showing a decimal point in a card that used commas everywhere
+  else.
+- **The form warnings arrive in your language**
+  ([#286](https://github.com/never-dry/NeverDry/issues/286)). Eleven sentences
+  were written in Python and reached every installation in English - and they
+  are the ones that explain why something you configured will not do what you
+  expect: why a probe will not drive a zone, why an override is ignored, why a
+  flow meter belongs to another zone. They are in the catalogue now, in four
+  languages, and a new guard refuses the next sentence written in Python.
+
 - **Editing one zone emptied another zone's deficit**
   ([#234](https://github.com/never-dry/NeverDry/issues/234)). A zone fell from
   9.6 mm to 0.7 mm between two ticks two minutes apart, with no rain, no
