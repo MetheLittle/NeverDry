@@ -7,11 +7,25 @@ complements `../design_domain_object_model.md` (the map of the domain classes),
 `flow-rate-provenance.md` (which flow rate answers which question).
 
 **Status: Draft.** Open for comment. §14 tracks the questions this note raised:
-**Q1–Q3 have working answers** (2026-08-21) and the sections above are written
+**Q1-Q3 have working answers** (2026-08-21) and the sections above are written
 to match them; **Q4-Q9 are open**, and they are what feedback is most wanted on.
-Q8 is the newest and the most consequential for the interface: it asks whether a
-zone should declare a time at all.
-Nothing is binding while the note is `Draft` — a working answer is still a
+Q8 is the most consequential for the interface: it asks whether a zone should
+declare a time at all.
+
+**Read §8 before changing anything there, because it records a removal.** The
+supply check that once gated admission on measured flow is gone, deliberately:
+the measured rate is an *effect* of how the scheduler ordered the zones, and a
+layer that decides cannot take its own output as an input. Code carries no trace
+of what was taken out of it, so this note is the only place that removal is
+written down, and re-adding the check for a locally sensible reason is the
+easiest regression this design allows.
+
+**Added 2026-09-27**, and not yet reflected in §14: §8.4.5 (an interrupted run,
+rain closing the runs, and why both belong here), §8.4.6 (two fixed
+environments, outdoor and greenhouse, and the shared pump declined) and §8.4.7
+(the automation a user built instead, read as a specification).
+
+Nothing is binding while the note is `Draft`: a working answer is still a
 proposal.
 Lifecycle: `Draft → Proposed (open for comment, "RFC") → Accepted ("ADR")`.
 
@@ -594,6 +608,9 @@ contradictions between zones:
    cannot check, so an undeclared installation behaves exactly as it does today:
    one entry, one queue.
 
+   Where a group's plumbing crosses the two environments of §8.4.6 it is not
+   coordinated, and §8.4.6 says what happens instead.
+
 6. **The smallest dose worth delivering.** Without one, the two *any deficit*
    modes of §8.4.1 degenerate: a deficit of 0.3 mm opens a valve for a few
    seconds, the ground does not notice, a meter with a one-litre resolution
@@ -720,7 +737,12 @@ What is open is smaller and practical. **How much rain stops a run** - a rate,
 or an amount accumulated since it started? And **is a stopped run resumed**?
 A session cut short leaves the deficit partly unmet, and the difference between
 *suspended* and *abandoned* decides whether the zone queues again in twenty
-minutes or waits for its next ordinary turn. Neither has an answer here.
+minutes or waits for its next ordinary turn.
+
+**Both are answered in §8.4.5**, written after this section and against it. The
+resumption half turns out not to be a question about rain at all - it is the
+same question three different interruptions ask - and of the rain half what
+stays open is one number rather than two questions.
 
 **A manual run is not scheduled, and must not be filtered as though it were**
 (GH #214). The smallest-dose floor of §8.4.2 exists to stop the *scheduler*
@@ -811,10 +833,10 @@ deficit is what says which - not a flag on the session.
 
 #### 8.4.6 Two environments, fixed, and the zone already knows which
 
-§8.4.2 calls its five decisions site-level, and with a greenhouse in the
+§8.4.2 calls its six decisions site-level, and with a greenhouse in the
 installation that word covers two different things.
 
-Three of the five are not properties of an *installation* at all. They are
+Three of the six are not properties of an *installation* at all. They are
 properties of a **place**:
 
 - rain does not fall in a greenhouse, neither the forecast that defers a run
@@ -824,10 +846,38 @@ properties of a **place**:
   people are standing on - a greenhouse can be watered at noon, and the reasons
   the windows exist do not reach inside it.
 
-The other two are properties of the **plumbing**, and stay single: the queue and
-its mutual exclusion, because the water comes from one pipe whether or not a
-zone is under glass, and the smallest dose worth delivering, which is about
-opening a valve rather than about weather.
+Two more are properties of the **plumbing**, and stay single: the queue and its
+mutual exclusion, because the water comes from one pipe whether or not a zone is
+under glass, and the smallest dose worth delivering, which is about opening a
+valve rather than about weather.
+
+**The sixth is the declared group, and it is neither.** A group names plumbing
+that zones share, and nothing stops an outdoor zone and a greenhouse zone from
+sharing a pump. Coordinating that across the two environments is the one thing
+this note declines to do, and the reason is worth stating rather than assuming:
+it would mean NeverDry checking whether something else NeverDry controls has
+already taken the pump - a check on a check - and the object that would have to
+hold that state is the duplicated scheduler this section opens by refusing.
+
+**So a group is declared inside an environment, and a pump shared across the two
+is simply used twice.** That is a plain description of what happens, not a defect
+waiting to be designed away.
+
+What is owed is not coordination but a **refusal that says so**. NeverDry expects
+**exclusive control of a declared pump**, and when it is about to start one that
+is already running it stops and says exactly that, rather than starting it a
+second time. The second start is what makes the first sequence's shutdown close
+a pump somebody is still watering through, and an error naming the expectation
+is what lets the installer see a conflict the software cannot otherwise detect.
+
+One condition keeps it from misfiring, and it is the whole difficulty: it applies
+to a pump **this sequence is not already driving**. A master pump that stays on
+across a serial run, and lingers after the last zone, is the ordinary case on
+GH #95 - a guard that could not tell that apart would fire on every zone after
+the first, which is worse than no guard.
+
+It is a workaround and is declared as one. It converts a conflict nobody can see
+into a conflict somebody is told about; it does not make the shared pump work.
 
 **So the scheduler is not duplicated; its inputs are.** Duplicating it would
 duplicate the queue as well, and two queues on one pipe is the failure §8.1 is
