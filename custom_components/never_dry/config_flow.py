@@ -18,6 +18,7 @@ from homeassistant.data_entry_flow import section
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
+from homeassistant.helpers.translation import async_get_translations
 
 from . import zone_device_identifier
 from .const import (
@@ -664,40 +665,85 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
     )
 
 
-def _unusual_zone_values(zone: dict, imperial: bool) -> list[str]:
+async def warning_texts(hass) -> dict[str, str]:
+    """The warning catalogue, in the user's language, as ``key -> template``.
+
+    This module resolves translated text, which `test_translation_decoupling`
+    otherwise forbids, and the exception is the same one already granted to
+    ``valve_notifier.py`` for the same reason. A config flow hands Home
+    Assistant a **finished** string: ``description_placeholders`` substitutes
+    values into a translated description, it does not translate the values. So
+    there is no later layer to hand an identifier to - either the sentence is
+    resolved here, or the user reads English inside a form that is otherwise
+    entirely in their language.
+
+    Which is what happened. Twelve warnings, all of them explaining why
+    something the user configured will not do what they expect, reached every
+    installation in English (GH #286).
+
+    Resolved once per form submission and passed down, rather than looked up
+    per sentence: the lookup is an await, and the functions below are pure.
+    """
+    resources = await async_get_translations(hass, hass.config.language, "common", {DOMAIN})
+    prefix = f"component.{DOMAIN}.common."
+    return {k[len(prefix) :]: v for k, v in resources.items() if k.startswith(prefix)}
+
+
+def _warn(texts: dict[str, str], key: str, **values) -> str:
+    """One warning line, filled in. Falls back to the key rather than crashing.
+
+    A missing key is a bug in the catalogue, not a reason to refuse a form: the
+    user sees an identifier, which is ugly and visible, instead of a form that
+    will not open.
+    """
+    template = texts.get(key)
+    if not template:
+        return key
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError):
+        return template
+
+
+def _unusual_zone_values(zone: dict, imperial: bool, texts: dict[str, str]) -> list[str]:
     """Detect implausible zone values for the soft-confirm guard.
 
-    Takes a zone dict in metric storage units (area m², flow L/min) and
-    returns human-readable warning lines in the user's display units.
-    An empty list means all values look plausible.
+    Takes a zone dict in metric storage units (area m², flow L/min) and returns
+    warning lines already in the user's language and display units. An empty
+    list means all values look plausible.
+
+    The numbers are formatted here and handed to the catalogue as text: the
+    sentence is translated, the quantity is not, and a template that tried to
+    carry both would need a unit system it cannot see.
     """
     warnings: list[str] = []
     area = zone.get(CONF_ZONE_AREA)
     if area is not None and area < UNUSUAL_AREA_MIN_M2:
         if imperial:
-            warnings.append(f"area {area * _M2_TO_FT2:.1f} ft² < {UNUSUAL_AREA_MIN_M2 * _M2_TO_FT2:.0f} ft²")
+            shown = f"{area * _M2_TO_FT2:.1f} ft²"
+            floor = f"{UNUSUAL_AREA_MIN_M2 * _M2_TO_FT2:.0f} ft²"
         else:
-            warnings.append(f"area {area:.1f} m² < {UNUSUAL_AREA_MIN_M2:.0f} m²")
+            shown, floor = f"{area:.1f} m²", f"{UNUSUAL_AREA_MIN_M2:.0f} m²"
+        warnings.append(_warn(texts, "warn_area_small", area=shown, minimum=floor))
     flow = zone.get(CONF_ZONE_FLOW_RATE)
     mode = zone.get(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE)
     if mode in (DELIVERY_MODE_FLOW_METER, DELIVERY_MODE_VOLUME_PRESET) and not flow:
         # Deprecation-style notice, not an error: gives existing installs a
         # smooth transition window before the guard flow becomes mandatory.
-        warnings.append(
-            "guard flow rate not set — used for expected duration and safety-timeout"
-            " scaling; will become required in a future release (target: v1.0)"
-        )
+        warnings.append(_warn(texts, "warn_guard_flow_missing"))
     if flow is not None and flow > 0:
         if imperial:
-            shown, unit = flow * _LPM_TO_GPH, "gal/h"
+            shown_flow, unit = flow * _LPM_TO_GPH, "gal/h"
             low, high = UNUSUAL_FLOW_MIN_LPM * _LPM_TO_GPH, UNUSUAL_FLOW_MAX_LPM * _LPM_TO_GPH
         else:
-            shown, unit = flow * _LPM_TO_LPH, "L/h"
+            shown_flow, unit = flow * _LPM_TO_LPH, "L/h"
             low, high = UNUSUAL_FLOW_MIN_LPM * _LPM_TO_LPH, UNUSUAL_FLOW_MAX_LPM * _LPM_TO_LPH
         if flow < UNUSUAL_FLOW_MIN_LPM:
-            warnings.append(f"flow rate {shown:.1f} {unit} < {low:.1f} {unit}")
+            warnings.append(_warn(texts, "warn_flow_low", flow=f"{shown_flow:.1f} {unit}", minimum=f"{low:.1f} {unit}"))
         elif flow > UNUSUAL_FLOW_MAX_LPM:
-            warnings.append(f"flow rate {shown:.0f} {unit} > {high:.0f} {unit}")
+            warnings.append(
+                _warn(texts, "warn_flow_high", flow=f"{shown_flow:.0f} {unit}", maximum=f"{high:.0f} {unit}")
+            )
     return warnings
 
 
@@ -720,7 +766,7 @@ def _device_resolver(hass):
     return resolve
 
 
-def meter_ownership_warnings(zone, other_zones, device_of) -> list[str]:
+def meter_ownership_warnings(zone, other_zones, device_of, texts: dict[str, str]) -> list[str]:
     """Report a flow meter that does not belong to this zone, and a mode without one.
 
     ``device_of`` maps an entity id to its device id (the entity registry's
@@ -742,10 +788,7 @@ def meter_ownership_warnings(zone, other_zones, device_of) -> list[str]:
 
     if not meter:
         if mode == DELIVERY_MODE_FLOW_METER:
-            warnings.append(
-                "delivery mode is 'Valve with flow meter sensor' but no flow meter is set:"
-                " the mode doses by measured volume, so the measuring entity is not optional"
-            )
+            warnings.append(_warn(texts, "warn_meter_mode_without_meter"))
         return warnings
 
     meter_device = device_of(meter)
@@ -759,12 +802,7 @@ def meter_ownership_warnings(zone, other_zones, device_of) -> list[str]:
         if other.get(CONF_ZONE_NAME) == zone.get(CONF_ZONE_NAME):
             continue
         if device_of(other.get(CONF_ZONE_VALVE)) == meter_device:
-            warnings.append(
-                f"the selected flow meter belongs to the valve of zone"
-                f" '{other.get(CONF_ZONE_NAME)}': it reports that zone's water, not this one's."
-                f" While that zone is idle this meter stays still, and a still meter here"
-                f" means no verified flow and a session that cannot be measured"
-            )
+            warnings.append(_warn(texts, "warn_meter_of_another_zone", zone=other.get(CONF_ZONE_NAME)))
             break
     return warnings
 
@@ -991,7 +1029,7 @@ def _custom_soil_missing_an_end(zone: dict) -> bool:
     return zone.get(CONF_ZONE_FIELD_CAPACITY) is None or zone.get(CONF_ZONE_WILTING_POINT) is None
 
 
-def _probe_role_warnings(zone: dict) -> list[str]:
+def _probe_role_warnings(zone: dict, texts: dict[str, str]) -> list[str]:
     """Say which role the probe will actually play, and on what ground.
 
     The defect this exists for is not a wrong number, it is a belief. A user who
@@ -1014,36 +1052,21 @@ def _probe_role_warnings(zone: dict) -> list[str]:
     depth = zone.get(CONF_ZONE_ROOT_DEPTH)
 
     if probe and depth is None:
-        return [
-            "Soil probe: no root depth, so the probe will be shown but will not set this zone's"
-            " deficit - the site's model keeps doing that. Give the depth its roots reach and the"
-            " zone waters by what the soil measures"
-        ]
+        return [_warn(texts, "warn_probe_no_depth")]
     if not probe and depth is not None:
-        return [
-            "Soil probe: the root depth will not be used, because this zone has no probe to read."
-            " Pick one, or clear the field"
-        ]
+        return [_warn(texts, "warn_depth_no_probe")]
     if probe and depth is not None and _custom_soil_missing_an_end(zone):
         # The third way a probe stays silent, and the one that went unsaid. Both
         # boxes are asked for now, so a zone can only reach this state if it was
         # saved before they were - which is precisely the zone whose owner has
         # been waiting for an explanation.
-        return [
-            "Soil probe: this zone's soil is Custom and one end of it is missing, so the probe will"
-            " be shown but will not set the deficit. Open the soil fields and give both the field"
-            " capacity and the wilting point, or pick a soil from the list"
-        ]
+        return [_warn(texts, "warn_probe_custom_soil_incomplete")]
     if probe and zone.get(CONF_ZONE_SOIL_TYPE, DEFAULT_SOIL_TYPE) == SOIL_TYPE_AUTO:
-        return [
-            "Soil probe: this zone will measure its deficit assuming a medium soil, since no soil"
-            " type was chosen. Sandy ground holds about half that water and clay about half again"
-            " more, so pick yours if you know it"
-        ]
+        return [_warn(texts, "warn_probe_assumed_soil")]
     return []
 
 
-def _ignored_override_warnings(zone: dict) -> list[str]:
+def _ignored_override_warnings(zone: dict, texts: dict[str, str]) -> list[str]:
     """Tell the user which values will not be used, and why.
 
     A preset is selected *and* the box holds a value: the preset wins, so the
@@ -1066,10 +1089,7 @@ def _ignored_override_warnings(zone: dict) -> list[str]:
         # only ever read behind Custom — so it would be dropped in silence,
         # which is the failure mode this whole rule exists to remove.
         chosen = f"'{table[selected]['label']}' is selected" if known else "nothing is selected"
-        warnings.append(
-            f"{label}: {chosen}, so your custom value {value} will not be used"
-            f" — choose 'Custom' to apply it, or clear the field"
-        )
+        warnings.append(_warn(texts, "warn_override_ignored", label=label, chosen=chosen, value=value))
     return warnings
 
 
@@ -1141,11 +1161,12 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors.update(zone_errors)
             else:
                 zone_metric = _zone_input_to_metric(user_input, imperial)
+                texts = await warning_texts(self.hass)
                 self._pending_warnings = (
-                    _unusual_zone_values(zone_metric, imperial)
-                    + _probe_role_warnings(zone_metric)
-                    + _ignored_override_warnings(zone_metric)
-                    + meter_ownership_warnings(zone_metric, self._zones, _device_resolver(self.hass))
+                    _unusual_zone_values(zone_metric, imperial, texts)
+                    + _probe_role_warnings(zone_metric, texts)
+                    + _ignored_override_warnings(zone_metric, texts)
+                    + meter_ownership_warnings(zone_metric, self._zones, _device_resolver(self.hass), texts)
                 )
                 if self._pending_warnings:
                     self._pending_zone = zone_metric
@@ -1353,14 +1374,16 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                     errors=errors,
                     description_placeholders={"soil_doc": SOIL_DOC_URL},
                 )
+            texts = await warning_texts(self.hass)
             self._pending_warnings = (
-                _unusual_zone_values(user_input, imperial)
-                + _probe_role_warnings(user_input)
-                + _ignored_override_warnings(user_input)
+                _unusual_zone_values(user_input, imperial, texts)
+                + _probe_role_warnings(user_input, texts)
+                + _ignored_override_warnings(user_input, texts)
                 + meter_ownership_warnings(
                     user_input,
                     self._config_entry.data.get(CONF_ZONES, []),
                     _device_resolver(self.hass),
+                    texts,
                 )
             )
             if self._pending_warnings:
@@ -1429,14 +1452,16 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
             user_input = _zone_input_to_metric(user_input, imperial)
             errors = _zone_errors(user_input)
             if not errors:
+                texts = await warning_texts(self.hass)
                 self._pending_warnings = (
-                    _unusual_zone_values(user_input, imperial)
-                    + _probe_role_warnings(user_input)
-                    + _ignored_override_warnings(user_input)
+                    _unusual_zone_values(user_input, imperial, texts)
+                    + _probe_role_warnings(user_input, texts)
+                    + _ignored_override_warnings(user_input, texts)
                     + meter_ownership_warnings(
                         user_input,
                         self._config_entry.data.get(CONF_ZONES, []),
                         _device_resolver(self.hass),
+                        texts,
                     )
                 )
                 if self._pending_warnings:
@@ -1803,10 +1828,12 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         imperial = _is_imperial(self.hass)
         zones = self._config_entry.data.get(CONF_ZONES, [])
         findings = []
+        texts = await warning_texts(self.hass)
         for z in zones:
-            findings.extend(f"- {z[CONF_ZONE_NAME]}: {w}" for w in _unusual_zone_values(z, imperial))
+            findings.extend(f"- {z[CONF_ZONE_NAME]}: {w}" for w in _unusual_zone_values(z, imperial, texts))
             findings.extend(
-                f"- {z[CONF_ZONE_NAME]}: {w}" for w in meter_ownership_warnings(z, zones, _device_resolver(self.hass))
+                f"- {z[CONF_ZONE_NAME]}: {w}"
+                for w in meter_ownership_warnings(z, zones, _device_resolver(self.hass), texts)
             )
         return self.async_show_form(
             step_id="check_zones",

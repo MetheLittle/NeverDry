@@ -48,6 +48,21 @@ from never_dry.const import (
 _COMPONENT = Path(__file__).resolve().parent.parent / "custom_components" / "never_dry"
 
 
+#: The English warning catalogue, read the way the flow resolves it at runtime.
+#: Asserting against the real strings rather than against literals is the point:
+#: a message that changes in the catalogue and not here is a test that has
+#: stopped describing the product.
+def _warning_catalogue() -> dict[str, str]:
+    import json
+    from pathlib import Path
+
+    strings = Path(__file__).resolve().parent.parent / "custom_components" / "never_dry" / "strings.json"
+    return json.loads(strings.read_text(encoding="utf-8"))["common"]
+
+
+WARNINGS = _warning_catalogue()
+
+
 def _entry(zones):
     entry = MagicMock()
     entry.entry_id = "abc"
@@ -165,23 +180,23 @@ class TestIgnoredValuesAreWarnedAbout:
 
     def test_preset_with_a_value_warns(self):
         zone = {CONF_ZONE_EXPOSURE: EXPOSURE_MORNING_SUN, CONF_ZONE_MICROCLIMATE_FACTOR: 0.7}
-        warnings = cf._ignored_override_warnings(zone)
+        warnings = cf._ignored_override_warnings(zone, WARNINGS)
         assert len(warnings) == 1
         assert "will not be used" in warnings[0]
         assert "Morning sun" in warnings[0]
 
     def test_a_value_with_nothing_selected_warns_too(self):
         """A Kc and no plant family: read as intent, but never actually applied."""
-        warnings = cf._ignored_override_warnings({CONF_ZONE_KC: 0.6})
+        warnings = cf._ignored_override_warnings({CONF_ZONE_KC: 0.6}, WARNINGS)
         assert len(warnings) == 1
         assert "nothing is selected" in warnings[0]
 
     def test_custom_with_a_value_is_silent(self):
         zone = {CONF_ZONE_EXPOSURE: EXPOSURE_CUSTOM, CONF_ZONE_MICROCLIMATE_FACTOR: 0.7}
-        assert cf._ignored_override_warnings(zone) == []
+        assert cf._ignored_override_warnings(zone, WARNINGS) == []
 
     def test_a_preset_with_no_value_is_silent(self):
-        assert cf._ignored_override_warnings({CONF_ZONE_EXPOSURE: EXPOSURE_MORNING_SUN}) == []
+        assert cf._ignored_override_warnings({CONF_ZONE_EXPOSURE: EXPOSURE_MORNING_SUN}, WARNINGS) == []
 
     def test_one_warning_per_pair(self):
         zone = {
@@ -192,7 +207,7 @@ class TestIgnoredValuesAreWarnedAbout:
             CONF_ZONE_EXPOSURE: EXPOSURE_MORNING_SUN,
             CONF_ZONE_MICROCLIMATE_FACTOR: 0.9,
         }
-        assert len(cf._ignored_override_warnings(zone)) == 3
+        assert len(cf._ignored_override_warnings(zone, WARNINGS)) == 3
 
 
 class TestInitialFlowExposure:

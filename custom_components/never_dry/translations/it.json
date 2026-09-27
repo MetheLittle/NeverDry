@@ -680,7 +680,18 @@
     "notification_watchdog_triggered_body": "La valvola della zona {zone} è rimasta aperta per più di {duration_min} min senza ricevere un comando di chiusura. NeverDry l'ha chiusa d'autorità per sicurezza. Verifica che l'automazione o la logica di erogazione funzionino correttamente.",
     "notification_water_me_now_zone_line": "- {zone}: deficit {deficit} mm, {liters} L ({minutes} min)",
     "notification_deficit_anomaly_title": "Deficit molto oltre la soglia",
-    "notification_deficit_anomaly_body": "Zona {zone}: il deficit di {deficit} mm supera {limit} mm, {multiplier} volte la soglia. L'irrigazione potrebbe non arrivare a questa zona. Controlla la valvola, la programmazione e il registro di Home Assistant."
+    "notification_deficit_anomaly_body": "Zona {zone}: il deficit di {deficit} mm supera {limit} mm, {multiplier} volte la soglia. L'irrigazione potrebbe non arrivare a questa zona. Controlla la valvola, la programmazione e il registro di Home Assistant.",
+    "warn_area_small": "L'area irrigata {area} è inferiore a {minimum}. Controlla che sia la superficie davvero bagnata, non tutto il giardino.",
+    "warn_guard_flow_missing": "Manca la portata di progetto. Serve per la durata prevista e per dimensionare il timeout di sicurezza, e in una versione futura diventerà obbligatoria (obiettivo v1.0).",
+    "warn_flow_low": "La portata di progetto {flow} è inferiore a {minimum}. Una zona così lenta impiega ore a erogare una dose normale.",
+    "warn_flow_high": "La portata di progetto {flow} supera {maximum}. Controlla l'unità: questa è la portata di una zona, non dell'intero impianto.",
+    "warn_probe_no_depth": "Sonda del terreno: manca la profondità delle radici, quindi la sonda verrà mostrata ma non deciderà il deficit di questa zona - continua a deciderlo il modello del sito. Indica la profondità che le radici raggiungono e la zona irrigherà in base a ciò che il terreno misura.",
+    "warn_depth_no_probe": "Sonda del terreno: la profondità delle radici non verrà usata, perché questa zona non ha una sonda da leggere. Scegline una, oppure svuota il campo.",
+    "warn_probe_custom_soil_incomplete": "Sonda del terreno: il suolo di questa zona è Personalizzato e manca uno dei due estremi, quindi la sonda verrà mostrata ma non deciderà il deficit. Inserisci sia la capacità di campo sia il punto di appassimento, oppure scegli un terreno fra quelli elencati.",
+    "warn_probe_assumed_soil": "Sonda del terreno: questa zona misurerà il deficit assumendo un terreno medio, perché non è stato scelto un tipo di suolo. Un terreno sabbioso trattiene circa la metà di quell'acqua e l'argilla circa la metà in più, quindi indica il tuo se lo conosci.",
+    "warn_override_ignored": "{label}: {chosen}, quindi il valore personalizzato {value} non verrà usato. Scegli Personalizzato per applicarlo, oppure svuota il campo.",
+    "warn_meter_mode_without_meter": "La modalità di erogazione è impostata su valvola con contatore, ma non è stato scelto nessun contatore: la modalità dosa in base al volume misurato, quindi l'entità che misura non è facoltativa.",
+    "warn_meter_of_another_zone": "Il contatore scelto appartiene alla valvola della zona {zone}: riporta l'acqua di quella zona, non di questa. Mentre quella zona è ferma questo contatore resta immobile, e un contatore immobile qui significa nessun flusso verificato e una sessione che non si può misurare."
   },
   "issues": {
     "soil_probe_needs_a_zone": {
