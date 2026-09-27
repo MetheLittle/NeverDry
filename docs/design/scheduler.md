@@ -809,6 +809,93 @@ closed *by rain* is not the same as one *interrupted*. The reload case leaves a
 dose still wanted; the rain case may well have satisfied it, and the zone's own
 deficit is what says which - not a flag on the session.
 
+#### 8.4.6 Two environments, fixed, and the zone already knows which
+
+§8.4.2 calls its five decisions site-level, and with a greenhouse in the
+installation that word covers two different things.
+
+Three of the five are not properties of an *installation* at all. They are
+properties of a **place**:
+
+- rain does not fall in a greenhouse, neither the forecast that defers a run
+  (§8.4.2) nor the downpour that closes one (§8.4.5);
+- the freeze interlock protects plumbing that is outdoors (§9.2);
+- the irrigability windows exist for sun, evaporation and not soaking a lawn
+  people are standing on - a greenhouse can be watered at noon, and the reasons
+  the windows exist do not reach inside it.
+
+The other two are properties of the **plumbing**, and stay single: the queue and
+its mutual exclusion, because the water comes from one pipe whether or not a
+zone is under glass, and the smallest dose worth delivering, which is about
+opening a valve rather than about weather.
+
+**So the scheduler is not duplicated; its inputs are.** Duplicating it would
+duplicate the queue as well, and two queues on one pipe is the failure §8.1 is
+written to prevent.
+
+**Two environments, fixed: outdoor and greenhouse.** Not created, not named, not
+deleted. That is the point rather than a simplification: an environment a user
+can create is an environment a user can create *twice*, or leave empty, or fill
+with zones that share a main with the other one - and every one of those is a
+conflict the software could not detect. A closed list of two cannot conflict
+with itself.
+
+**And nothing new is asked of anybody.** Each zone already declares whether it
+is outdoors; that is the declaration the freeze interlock reads today. So every
+zone is already in one of the two environments, and what changes is only where
+the three place-dependent settings live. An installation with no greenhouse has
+one environment with zones in it and one without, and behaves exactly as it does
+now.
+
+What this leaves open is smaller and worth naming rather than assuming: whether
+a greenhouse wants irrigability windows *at all*. The reasons for the outdoor
+ones do not apply, and "any time" may simply be the honest answer - in which
+case the greenhouse environment carries a freeze interlock that never fires, a
+rain rule that never fires, and no windows, which is a fair description of a
+greenhouse.
+
+#### 8.4.7 What a user built instead, and what it tells us
+
+@kstockl solved his eleven zones himself while this note was being written, with
+a Home Assistant automation, and published it (GH #270). It is worth reading as
+a specification rather than as a workaround: somebody with a real garden built
+the missing object by hand, and the shape they chose is evidence about the shape
+we should ship.
+
+**What it confirms.** Eleven zones, strictly one after another, each waiting for
+the previous one's duration before the next begins. Serial, queued, no overlap -
+built that way by someone who never read §8.1.
+
+**Three things it does that we would not, and each says something.**
+
+*It waits a fixed delay rather than a confirmed close.* Fifteen to thirty
+seconds between zones, chosen by hand. It works on his hardware and it is
+exactly what §8.3 argues against: on a poll-limited controller the same
+automation would open the next valve while the previous one is still reported
+running. He cannot check for a confirmed close from an automation - which is one
+reason the queue belongs in the integration.
+
+*It reads the raw moisture sensor, not the deficit.* His condition is "soil
+humidity below 20%", not "deficit past threshold". A user who has NeverDry
+computing a water balance chose to bypass it for the number his probe publishes
+directly. That is worth understanding rather than correcting: it may be the
+uncalibrated scale of `soil-moisture-model.md` §4 making the deficit hard to
+trust, or it may simply be that a percentage is legible and millimetres are not.
+
+*It marks a zone irrigated in order to skip it.* When a zone does not need
+water, the automation calls `mark_irrigated` - which zeroes a deficit that no
+water repaid. It is the right move in an automation that has no memory: without
+it the zone would be reconsidered on the next run. A scheduler with a queue does
+not need it, because a zone that was not admitted is simply not admitted, and
+its deficit stays true. Worth noting because the service was not designed for
+this, and it is now in a published example other people will copy.
+
+**And one thing it asks for that already exists.** He suggested being able to
+hide the card's buttons, so that the relay reset cannot be pressed by accident.
+The Custom layout added for GH #269 has a checkbox per section, buttons among
+them - so the request arrived after the answer, which is the good direction for
+once.
+
 ## 9. The irrigability envelope
 
 This is the reframing the rest of the note depends on. The scheduler stops
