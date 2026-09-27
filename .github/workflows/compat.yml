@@ -59,11 +59,23 @@ jobs:
         with:
           python-version: "3.13"
 
+      # Installing an old Home Assistant today does not reproduce an old
+      # environment: pip fits today's transitive dependencies underneath it. The
+      # first run of this job found exactly that - pycares 5, released four
+      # months after this Home Assistant, dropped a function the pinned aiodns
+      # still calls, and every import failed on a machine nobody had broken.
+      #
+      # So the version's own constraints file is used, which is what Home
+      # Assistant itself builds against, plus one pin it does not carry: it
+      # pins aiodns and leaves pycares underneath it free.
       - name: Install Home Assistant at the declared minimum
         run: |
           set -euo pipefail
+          version="${{ steps.declared.outputs.version }}"
+          constraints="https://raw.githubusercontent.com/home-assistant/core/${version}/homeassistant/package_constraints.txt"
           python -m pip install --upgrade pip
-          pip install "homeassistant==${{ steps.declared.outputs.version }}" pytest
+          curl -fsSL "$constraints" -o constraints.txt
+          pip install "homeassistant==${version}" "pycares<5" pytest -c constraints.txt
 
       - name: Run the compatibility tests
         run: pytest tests_compat/ -v
