@@ -19,7 +19,9 @@ not the argument.
   says which one it is - measured by the probe, estimated from the weather, or
   estimated because the probe has gone quiet. The third is the one that was
   missing: a zone that never had a probe and a zone whose probe has fallen
-  silent used to look identical, and they mean opposite things.
+  silent used to look identical, and they mean opposite things. The answer is
+  set in bold: on a line of small grey type it was the one thing a reader was
+  looking for and the hardest of the three to pick out.
 
 - **A compact card, and sections you can switch off**
   ([#269](https://github.com/never-dry/NeverDry/issues/269)). The zone card is
@@ -207,6 +209,13 @@ not the argument.
   registry unique_id, which does not move with the language. Kc and efficiency
   also stopped showing a decimal point in a card that used commas everywhere
   else.
+
+  Two further things had to change before that fix could be seen. With the zone
+  card and the model card on one dashboard, only the first of the two was told
+  when the registry answered, so the second kept what it had drawn with nothing
+  to draw from. And the card treated not knowing as an answer: it announced that
+  no NeverDry entities existed while the registry had simply not replied yet, and
+  it now says nothing at all until there is something to say.
 - **The form warnings arrive in your language**
   ([#286](https://github.com/never-dry/NeverDry/issues/286)). Eleven sentences
   were written in Python and reached every installation in English - and they
