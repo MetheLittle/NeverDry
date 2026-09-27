@@ -3976,7 +3976,16 @@ class ZoneAreaSensor(_ZoneTextSensor):
 
 
 class ZoneEfficiencySensor(_ZoneTextSensor):
-    """Configured zone efficiency."""
+    """Configured zone efficiency.
+
+    ``state_class`` on a dimensionless number, for a reason that is about
+    presentation rather than statistics: without a unit *or* a state class Home
+    Assistant shows the raw state string, so this read ``0.92`` beside a
+    threshold reading ``20,0 mm`` in the same Spanish card - one number
+    localised and the next not (GH #279, @laurash96).
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
@@ -3994,7 +4003,15 @@ class ZoneEfficiencySensor(_ZoneTextSensor):
 
 
 class ZoneKcSensor(_ZoneTextSensor):
-    """Current crop coefficient Kc (effective: base curve * site exposure)."""
+    """Current crop coefficient Kc (effective: base curve * site exposure).
+
+    Carries a ``state_class`` for the same presentation reason as
+    :class:`ZoneEfficiencySensor`. Unlike efficiency it genuinely varies - the
+    seasonal curve moves it through the year - so the long-term statistics this
+    also switches on are worth having rather than merely harmless.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
