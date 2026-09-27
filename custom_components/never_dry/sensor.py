@@ -2494,6 +2494,9 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             if vwc is None:
                 return
             self._probe_last_seen = stamp
+            # Restored together with the timestamp it is compared against: the
+            # two halves of the freshness judgement, or neither.
+            self._probe_quiet.restore(attributes.get("probe_quiet_samples"))
             self._probe_vwc = vwc
             measured = self._probe_model.step(VWCReading(vwc=vwc))
             self._probe_implied_mm = measured.value_mm
@@ -3182,6 +3185,13 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             # is a probe reporting a frozen value.
             if self._probe_value_moved_at is not None:
                 attrs["probe_value_moved_at"] = self._probe_value_moved_at.isoformat()
+            # The bar the age above is judged against. Restoring one without the
+            # other leaves an old age measured against nothing, and nothing is
+            # read as fresh - which is how a probe silent for fifteen hours was
+            # believed after a reload, and its zone's deficit fell by 9 mm.
+            samples = self._probe_quiet.as_samples()
+            if samples:
+                attrs["probe_quiet_samples"] = samples
         if self._probe_drives:
             # What the reading was multiplied by, published beside what it
             # produced. The number carries the authority of a measurement and

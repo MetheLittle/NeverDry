@@ -55,6 +55,7 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from itertools import pairwise
 from math import ceil
 from statistics import median
 
@@ -417,6 +418,50 @@ class QuietWatermark:
         """
         self._prune(at_s)
         return self._samples[0][1] if self._samples else None
+
+    def as_samples(self) -> list[list[float]]:
+        """The bar's evidence, in a shape that survives a restart.
+
+        It has to survive, because the other half of the judgement already does.
+        When the probe last spoke is restored from the entity's attributes; the
+        bar it is compared against was not, so after a reload the pair became an
+        old age measured against no bar at all - and no bar means believed. A
+        probe silent for fifteen hours was accepted as fresh, its zone's deficit
+        fell from 9.6 mm to 0.7 mm, and the only thing standing between that and
+        an unwatered garden was the 24-hour backstop.
+
+        Kept as a decreasing sequence, so this is a handful of pairs rather than
+        every gap the device has ever had.
+        """
+        return [[at_s, quiet_s] for at_s, quiet_s in self._samples]
+
+    def restore(self, samples: object) -> None:
+        """Take back evidence written by a previous run, and refuse anything else.
+
+        Attributes come back from storage as whatever was written there, which
+        over a version change may not be what this expects. A bar built from
+        rubbish is worse than no bar, so anything unrecognisable is dropped and
+        the bar simply relearns.
+        """
+        if not isinstance(samples, (list, tuple)):
+            return
+        restored: list[tuple[float, float]] = []
+        for pair in samples:
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                return
+            at_s, quiet_s = pair
+            if not isinstance(at_s, (int, float)) or not isinstance(quiet_s, (int, float)):
+                return
+            if isinstance(at_s, bool) or isinstance(quiet_s, bool):
+                return
+            restored.append((float(at_s), float(quiet_s)))
+        # The invariant the class relies on: strictly decreasing in quiet_s, so
+        # the front is the window's maximum. Restoring a sequence that breaks it
+        # would make value() answer with something that is not the maximum.
+        if any(a[1] <= b[1] for a, b in pairwise(restored)):
+            return
+        self._samples.clear()
+        self._samples.extend(restored)
 
     def _prune(self, at_s: float) -> None:
         while self._samples and at_s - self._samples[0][0] > self.window_s:
