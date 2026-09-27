@@ -10,10 +10,17 @@ water balance), `design_domain_object_model.md` (where objects live).
 answers a different question that we got wrong: **once a probe is in the ground,
 what is its reading allowed to mean?**
 
-It is deliberately unfinished. The reasoning below is derived from soil physics
-and from reading the code; the parts that need contact with a real garden are
-marked **OPEN** and are the subject of the questions in #126. Nothing here should
-be implemented before those answers arrive.
+It is partly settled and partly open, and the two are marked, because for a
+while they were not and this note read as though none of it had shipped.
+
+**Settled and running:** §5, who owns a zone's deficit - a completely declared
+per-zone probe measures it, every other zone estimates it, and a probe that
+falls silent hands back. That is in the product.
+
+**Still open:** §4, whether field capacity should be observed rather than
+declared, and the calibration question behind it. Those need contact with a real
+garden, are marked **OPEN**, and are the subject of the questions in #126.
+Nothing marked OPEN should be implemented before those answers arrive.
 
 ---
 
@@ -401,11 +408,42 @@ they have is the other, and it works for everyone rather than only for the few
 with a probe. See AI-172 (soil-type presets driving `field_capacity` / root
 depth).
 
-**Consequence for the code as it stands:** the per-zone probe wired on
-2026-08-16 makes the probe *own* the zone's deficit, which is exactly the
-position rejected here. It has to be revisited before the behaviour is offered
-to anyone — the binding and the migration are worth keeping, the ownership is
-not.
+**Settled 2026-09-27, and it is the "not foreclosed" path below rather than a
+reversal.** The rejection above is of probe ownership *by default*. What ships
+is the declared path that paragraph anticipates, and the rule is worth stating
+plainly because until now it was only in the code:
+
+> **A zone whose probe is completely declared measures its deficit. Every other
+> zone estimates it. A zone that was measuring and loses its probe goes back to
+> estimating, and says so.**
+
+"Completely declared" is three things, and the third is the one that surprises
+people:
+
+1. a moisture sensor bound to that zone;
+2. the depth its roots reach - the number no table holds, and the one that makes
+   the declaration deliberate rather than accidental;
+3. a soil with **both** ends of its interval. Every named soil carries them off
+   one texture row; Custom asks for them (see the entry for 2026-09-27 in the
+   revision history).
+
+Miss any one and the probe is shown beside the zone's figures and nothing else
+changes. That is why the depth is the switch: binding a sensor is something a
+user does casually, giving a root depth is not, so the deliberate act is what
+turns ownership on. The form says which of the three is missing rather than
+leaving the sensor sitting there ignored.
+
+**The fallback is not a mode, it is what happens when the measurement stops
+being one.** The weather model runs underneath the whole time, for every zone,
+whether or not a probe is driving. So a probe that goes quiet past its own
+observed rhythm costs an afternoon on the estimate rather than a season: the
+reading is set aside, the zone falls back, and a line goes in the log. Nothing
+has to be rebuilt, because nothing was ever switched off.
+
+That is also the reason the two numbers must not be confused: the measured
+deficit and the estimated one are on different scales, and moving between them
+without saying so is a change of ruler that reads as a change of weather
+(GH #234, 2026-09-27).
 
 ---
 
@@ -503,4 +541,5 @@ needing a lab reproduction.
 | 2026-08-08 | Initial draft. Written after the per-zone site exposure review (#147) surfaced the question of where a microclimate correction belongs, which in turn exposed the soil-probe model. Pending field input on #126. |
 | 2026-08-13 | The scale question of §4 is settled and shipped: readings are normalised to a fraction at the boundary, and anything that is not a water content on either scale is refused rather than clamped (#170). It changes nothing about §4 or §5 — a probe now reads on the right scale, which says nothing yet about what its number is worth or who owns the deficit. |
 | 2026-09-14 | The scale question is reopened by the field (#234): two installations report a zone pinned at zero deficit and never watering, which is the §4 mismatch arriving exactly where §4 predicted, plus a restore path that overwrote the weather reserve with the probe's number on every restart. Both are fixed. The probe is now read on the 0-100 scale alone, as the share of available water still present, which is bounded and cannot invert. §4 is **not** closed by this and says so: the interpretation assumes the probe's ends are the soil's ends, which the 2026-08-10 field input says they are not, so the deficit is now wrong by an unknown scale factor instead of being silently zero. Status stays **Draft**: §5 is still open, and so is the plateau observation that would make the number a measurement. |
+| 2026-09-27 | §5 settled, along the "not foreclosed" path rather than against it: a completely declared per-zone probe owns that zone's deficit, everything else estimates, and a probe that falls silent hands back to the estimate. Recorded because the behaviour had been shipping for three betas while this section still called it something to revisit before offering to anyone. The third condition, a soil with both ends of its interval, stopped being a restriction the same day: the Custom entry used to ask for the field capacity alone, which left the one gardener who had measured their own soil as the only one whose probe could not drive (#234). |
 | 2026-08-10 | Field input arrived on #126 and is recorded in §4. It confirms the unit-mismatch hypothesis and names its mechanism (factory calibration against dry air and open water, neither of which is a soil state), reports the probe depth (~8 cm against a fixed 0.30 m root depth), and proposes a two-point calibration — recorded as the fallback to observing the drainage plateau, not as the primary answer. The percentage-vs-fraction input scale (#150) is called out as a separate, smaller problem. Status stays **Draft**: §5, the decision this document exists to force, is still open. |
