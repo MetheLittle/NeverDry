@@ -403,9 +403,16 @@ wrong.** A group is a claim about plumbing the software cannot check, and a
 wrong group is indistinguishable from a right one until the pressure drops
 during a run that was admitted on its strength.
 
-So: the entry is the boundary, and the group is not designed until somebody
-turns up with two sources behind one entry. What would reopen it is that
-report, not a tidier model.
+So: **the entry is the default boundary, and a group is what you declare when
+it is not enough.** Optional, absent unless asked for, and the two cases that
+ask for it are already on file - the well gate of GH #74 and the master pump of
+GH #95, both of which are a set of zones sharing one thing that only one of
+them can use at a time.
+
+That ordering is what keeps the cost where it belongs. Nobody is asked to
+partition a garden they never needed to partition; somebody with two pumps can
+say so. And because a group is declared rather than inferred, an installation
+that says nothing behaves exactly as it does today.
 
 The entry boundary does have a failure of its own, and it is worth naming
 rather than discovering: two entries pointed at valves on the *same* main is a
@@ -491,7 +498,7 @@ the two durations or neither:
   rather than pick a default - the same discipline as the two ends of a Custom
   soil (`soil-moisture-model.md` §5).
 
-#### 8.4.2 The scheduler decides five things, for everyone
+#### 8.4.2 The scheduler decides six things, for everyone
 
 None of these is per zone, and pushing any of them onto a zone is what produces
 contradictions between zones:
@@ -500,17 +507,73 @@ contradictions between zones:
    and a queue so that a zone which becomes due while another is running waits
    rather than being dropped (§10).
 2. **The irrigability envelope.** When watering is permitted at all (§9.1).
-3. **Rain that has not fallen yet.** A single installation-wide rule: if enough
-   rain is forecast soon enough, defer. Not per zone - a forecast is about the
-   sky, and the sky is not a property of a zone. Note the separation
-   `rain-input` already establishes: **forecast millimetres defer a run, they
-   never enter the deficit.** Only observed rain does that.
+3. **Weather that has not happened yet.** A single installation-wide rule, and
+   it does two things rather than one.
+
+   *Defer:* if enough rain is forecast soon enough, hold the run. Not per zone -
+   a forecast is about the sky, and the sky is not a property of a zone.
+
+   *Anticipate:* bring a run **forward** when leaving it would cost more than
+   doing it now. This is @rpatel3001's request on GH #138, and it is the sharper
+   half: *"water when the current deficit is above the minimum and the forecast
+   deficit is above the maximum"*. A hot day coming and no rain means watering
+   tonight rather than at noon tomorrow; rain coming means not watering at all,
+   even though the soil is dry enough to justify it.
+
+   **Why it needs a band and not a threshold.** Without a lower bound, a hot
+   forecast would water ground that is barely dry. Without an upper bound, there
+   is nothing to compare the projection against. The band is what makes
+   anticipation safe.
+
+   **And why both ends can live here rather than on the zone.** The upper bound
+   already exists and is per zone: it is the zone's own threshold, the point at
+   which it wants water. So the scheduler does not need a second number per
+   zone - it needs two of its own:
+
+   - *how far it may anticipate*, as a fraction of each zone's threshold. At
+     0.7, a zone with a 12 mm threshold becomes eligible for anticipation at
+     8.4 mm, and one with 20 mm at 14 mm. One setting, proportionate everywhere.
+   - *how far ahead to look*, in hours.
+
+   The deficit is the zone's, but the scheduler is what reads it, so nothing is
+   moved to the wrong side by doing this here.
+
+   **Left empty, anticipation does not run.** Not a conventional value, not a
+   sensible default: absent. The scheduler then behaves exactly as it does
+   without this feature, which is what an installation that never asked for it
+   must keep doing - anticipation changes *when a garden is watered*, and
+   turning that on by default would move somebody's watering from tomorrow
+   morning to tonight because they upgraded. That is the failure `const.py`
+   already describes for soil: a default nobody is told about is the hardcoded
+   constant, with a dropdown in front of it.
+
+   **And one of the two without the other is refused**, as with cycle and soak
+   (§8.4.1) and the two ends of a Custom soil. A horizon with no anticipation
+   floor is not a degraded configuration, it is an unanswerable one, and the
+   form should say so rather than invent the missing half.
+
+   **The separation `rain-input` establishes holds throughout, and this is where
+   it earns its keep.** A projected deficit decides *whether to run*. It never
+   becomes the deficit: only observed rain and delivered water move that number.
+   A forecast that does not arrive must leave the model exactly where it was,
+   otherwise a dry garden is recorded as watered by weather that never came.
 4. **Frost and the winter interlock.** An outdoor zone is not watered when the
    installation is in winter mode or the observed conditions say freezing
    (§9.2). Indoor zones are unaffected, which is the one place the zone's own
    declaration enters - and it is a statement of fact about the zone, not a
    preference.
-5. **The smallest dose worth delivering.** Without one, the two *any deficit*
+5. **A shared resource, where one is declared.** Optional, and off unless
+   somebody says otherwise - §8.2 sets out why groups are not asked of everyone.
+   But the case they exist for is real and is already on file: the well gate of
+   GH #74, and a master pump on GH #95. Where two zones draw on one pump, one
+   well or one main, naming them together is the only way to say so, and the
+   scheduler then serialises within that set rather than across the whole entry.
+
+   Declared, never inferred. A group is a claim about plumbing the software
+   cannot check, so an undeclared installation behaves exactly as it does today:
+   one entry, one queue.
+
+6. **The smallest dose worth delivering.** Without one, the two *any deficit*
    modes of §8.4.1 degenerate: a deficit of 0.3 mm opens a valve for a few
    seconds, the ground does not notice, a meter with a one-litre resolution
    cannot see it, and the actuator has spent a cycle on nothing.
@@ -547,14 +610,16 @@ flowchart TD
     A[Zone evaluated] --> B{Is it time?}
     B -->|hour declared<br/>and not reached| X[Not now: zone]
     B -->|hour reached, or<br/>no hour declared| C{Does the deficit<br/>qualify?}
-    C -->|threshold required<br/>and not reached| X
-    C -->|any deficit, or<br/>threshold reached| F{Inside an<br/>irrigability window?}
+    C -->|threshold required<br/>and not reached| N{Anticipation on,<br/>and projected deficit<br/>past the threshold?}
+    C -->|any deficit, or<br/>threshold reached| F
+    N -->|no| X
+    N -->|yes| F{Inside an<br/>irrigability window?}
     F -->|no| Y[Deferred: scheduler]
     F -->|yes| G{Winter mode<br/>and outdoor?}
     G -->|yes| Z[Refused: scheduler]
     G -->|no| H{Rain forecast<br/>soon enough?}
     H -->|yes| Y
-    H -->|no| I{Another zone<br/>running?}
+    H -->|no| I{Another zone<br/>on the same<br/>resource running?}
     I -->|yes, serial| Y
     I -->|yes, parallel<br/>and room left| J
     I -->|no| J[Admitted]
@@ -571,8 +636,14 @@ and the two questions are asked in order - time, then deficit - so the four
 modes are two diamonds rather than four branches. That is also what keeps a
 scheduled top-up from quietly becoming a reactive one.
 
-**Everything that defers is the scheduler's**, and there is exactly one path
-that ends in a refusal rather than a deferral: the winter interlock. The
+**Anticipation is the one place the scheduler can make a zone water earlier
+than the zone asked**, and it is deliberately a side path rather than a change
+to the zone's own question: the zone still has to be past the anticipation
+floor, and the projection has to clear the zone's own threshold. It brings a
+run forward; it never invents one.
+
+**Everything else that the scheduler does defers**, and there is exactly one
+path that ends in a refusal rather than a deferral: the winter interlock. The
 difference matters - a deferred zone is still waiting and will be reconsidered,
 a refused one will not be until the condition changes.
 
@@ -580,6 +651,70 @@ a refused one will not be until the condition changes.
 has no part in deciding whether the run happens. Which is also why a queue must
 treat a soaking zone as still occupying its slot unless interleaving is turned
 on (§11).
+
+#### 8.4.4 Three things the shape does not yet hold
+
+Written as gaps rather than answers, because each one is asked on an open issue
+and none is settled.
+
+**A deadline is a constraint on the end, and everything here constrains the
+start** (GH #231). @sanderaernouts wants watering *finished* before sunrise: a
+drip hose in a front garden facing the sun, where watering at noon is the
+problem. The irrigability envelope (§9.1) says when a run may *begin*, and Q2
+asks what happens to a run still going when the window closes. Neither is a
+deadline.
+
+Honouring one means working backwards: estimate the duration, subtract it from
+the deadline, start then. Two things make that harder than it sounds, and both
+should be stated before anyone builds it.
+
+*The estimate is the weakest number in the system.* Duration is volume over
+flow rate, and `flow-rate-provenance.md` is an entire note about how unreliable
+that rate is until it has been measured. A deadline computed from it is a
+promise made on a figure known to be wrong, and missing it is exactly the
+failure the user was trying to avoid.
+
+*And with a queue, the calculation is not per zone.* Eleven zones that must all
+finish before sunrise need the backward calculation over the whole queue, not over each
+run. That turns the scheduler from something that answers *may this zone start
+now* into something that plans a sequence - a different object, and a much
+larger one.
+
+A cheaper reading, worth testing against the reporter before building the
+expensive one: a deadline that only *refuses to start* a run it does not
+believe will finish in time, and lets the envelope handle the rest. That keeps
+the scheduler stateless and turns a missed deadline into a run that never
+began, which for a front garden in the sun may be the right answer anyway.
+
+**Rain that arrives mid-run** (GH #213). Deferring for forecast rain is
+settled (§8.4.2); stopping a session because rain is *falling* is not, and it
+is a different question.
+
+One worry can be set aside: there is no double counting. Water delivered and
+rain fallen are two real contributions and both should reduce the deficit -
+the run credits what the valve delivered, the rain credits what the sky
+delivered, and the zone genuinely received both.
+
+What is open is smaller and practical. **How much rain stops a run** - a rate,
+or an amount accumulated since it started? And **is a stopped run resumed**?
+A session cut short leaves the deficit partly unmet, and the difference between
+*suspended* and *abandoned* decides whether the zone queues again in twenty
+minutes or waits for its next ordinary turn. Neither has an answer here.
+
+**A manual run is not scheduled, and must not be filtered as though it were**
+(GH #214). The smallest-dose floor of §8.4.2 exists to stop the *scheduler*
+opening a valve for nothing. Applied to a person who has chosen to water for
+two minutes, it becomes a refusal of an explicit instruction.
+
+The same holds for the rest of the path: a manual run bypasses the envelope,
+the modes, the anticipation band and the queue's ordering - though **not** the
+queue's mutual exclusion, because two valves on one pipe is a physical
+constraint and not a policy, and not the winter interlock, which protects the
+plumbing rather than the schedule.
+
+Worth stating plainly because the direction of drift is predictable: every
+guard written for the automatic path is a guard somebody will eventually apply
+to the manual one, each time for a locally sensible reason.
 
 ## 9. The irrigability envelope
 
@@ -1193,13 +1328,12 @@ the shared hydraulics rather than to any zone, and it leaves a zone able to
 claim something the pipe cannot honour. "Custom" has no definition yet, and
 until it has one this option cannot be costed.
 
-**A declared group**, deferred from the well-gate thread (GH #74), is the only
-one that names the constraint directly - and §8.2 sets out why it is not the
-answer here. Nobody has asked for it, including @safepay, who has two
-controllers and rules it out in the same comment. The shape that would need it
-is two independent sources behind a single entry, which is real, rare, and
-unreported. It is also the only option that asks the user for a claim about
-plumbing the software cannot check.
+**A declared group**, from the well-gate thread (GH #74), is the only one that
+names the constraint directly. It is now settled as an **optional third layer**
+rather than an alternative: absent by default, declared by anyone who needs it,
+and the right answer for the well gate and the master pump of GH #95. What it
+must never be is required, because a group is a claim about plumbing the
+software cannot verify.
 
 **So the question is narrower than it first looked: entry or zone.** And what
 settles it is the failure each one allows, not taste. The entry boundary
