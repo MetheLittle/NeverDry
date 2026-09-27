@@ -129,10 +129,16 @@ CONF_ZONE_VWC_SENSOR = "vwc_sensor"
 # model nobody asked for and a deficit scaled by a guess still looks like a
 # measurement. The soil is the opposite case, which is why it gets a dropdown.
 CONF_ZONE_ROOT_DEPTH = "root_depth_m"
-#: The ground, chosen rather than typed. Supplies the field capacity, which is
-#: why the box below is only read behind the Custom entry.
+#: The ground, chosen rather than typed. Supplies both ends of the reservoir,
+#: which is why the two boxes below are only read behind the Custom entry.
 CONF_ZONE_SOIL_TYPE = "soil_type"
 CONF_ZONE_FIELD_CAPACITY = "field_capacity"
+#: The other end, and the reason Custom used to cost a zone its probe. A probe
+#: reading says where the ground sits *between* dry and wet, so both ends are
+#: needed to turn it into millimetres; Custom supplied the top one only, and a
+#: zone whose owner had gone to the trouble of measuring their own soil was the
+#: one zone the probe could not drive. Asked for here rather than assumed.
+CONF_ZONE_WILTING_POINT = "wilting_point"
 
 #: A reading older than this is refused however rarely the probe speaks. It is a
 #: backstop, not the verdict: the verdict comes from the probe's own observed
@@ -260,11 +266,14 @@ EXPOSURES = {
 # contract above. ``label`` is developer-facing only, as everywhere else: the
 # dropdown text comes from selector.soil_type in the translations.
 #
-# The wilting point is carried and **not yet read by anything**. It is the floor
-# of the reservoir, and the reservoir is what turns a threshold in millimetres
-# into "water when half of it is gone" (AI-225). It is here because it arrives
-# with its companion from the same row, and splitting the row would mean
-# revisiting this table to add a column nobody could sanity-check on its own.
+# The wilting point is the floor of the reservoir: the water a soil still holds
+# when a plant can no longer pull any out. It arrives with its companion from
+# the same row, because splitting the row would mean revisiting this table to
+# add a column nobody could sanity-check on its own.
+#
+# ``Custom`` carries None for both. The pair is then asked for in the form
+# instead, which is the one place the "nobody owns these numbers" argument does
+# not hold: somebody who picks Custom has measured their soil.
 SOIL_TYPE_AUTO = "auto"
 SOIL_TYPE_SANDY = "sandy"
 SOIL_TYPE_LOAM = "loam"
@@ -348,6 +357,8 @@ DEFAULT_D_MAX = 100.0
 DEFAULT_EFFICIENCY = 0.85
 DEFAULT_THRESHOLD = 20.0
 DEFAULT_FIELD_CAPACITY = 0.30
+#: Floor of the reservoir when nothing better is known: the middle soil's.
+DEFAULT_WILTING_POINT = 0.12
 DEFAULT_ROOT_DEPTH = 0.30
 DEFAULT_INTER_ZONE_DELAY = 30
 DEFAULT_KC = 1.0

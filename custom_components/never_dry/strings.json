@@ -51,7 +51,8 @@
               "vwc_sensor": "Soil moisture probe (this zone)",
               "root_depth_m": "Root depth",
               "field_capacity": "Field capacity",
-              "soil_type": "Soil type"
+              "soil_type": "Soil type",
+              "wilting_point": "Wilting point"
             },
             "data_description": {
               "area_m2": "Surface area of this irrigation zone in square meters",
@@ -61,8 +62,9 @@
               "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground.",
               "vwc_sensor": "Optional. A probe buried in this zone, about a third of the root depth down and midway between two emitters. On its own it is shown beside the zone's figures and nothing else changes. Give it the root depth below and this zone waters by what its soil says.\n\n**The sensor must report on a 0-100 scale**, 0 for dry soil and 100 for wet, which is what garden moisture probes publish. A sensor on any other scale is not supported and its readings are ignored.\n\n**That scale is used uncalibrated, fixed at 0-100 taken at face value:** 0 is treated as the driest soil a plant can work in and 100 as a full one. Real probes are calibrated at the factory against dry air and open water, and neither of those is a state soil is ever in, so a full soil does not actually read 100. The millimetres this produces are therefore out by a factor nobody has measured, usually on the high side, which means watering somewhat more than needed rather than leaving a zone dry. If that matters to you, the reasoning and what would fix it are written up here: {soil_doc}",
               "root_depth_m": "Depth of the root zone the probe above speaks for, and the one number here that no table holds: a lawn, a hedge and a pot differ by a factor of four on the same ground. Fill it in and this zone waters by its probe instead of the weather estimate. Leave it and the probe stays a reading shown beside the estimate. The probe's 0-100 reading is read as how much of the water this soil can actually hold is still there, so the depth and the soil below are what turn it into millimetres.",
-              "field_capacity": "Only read when the soil type above is Custom. The water content this soil holds after it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay. Used for the weather estimate; a zone on Custom soil cannot be watered by its probe.",
-              "soil_type": "Optional. What this zone's ground is made of. It supplies how much water the soil holds and how much of that a plant can reach, so you do not have to know either number. Left on Automatic a medium soil is assumed, which is fair for most gardens and is said out loud when you save. Custom supplies only one of the two, so a probe cannot water a Custom-soil zone: pick a named soil for that."
+              "field_capacity": "The water this soil holds once it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay. Filled in only when the soil type is Custom, together with the wilting point below.",
+              "soil_type": "Optional. What this zone's ground is made of. The choice supplies the two numbers that say how much water this soil can put at a plant's disposal: how much it holds when full, and how much stays locked in when a plant can no longer pull any out. Left on Automatic a medium soil applies, and you are told so when you save. On Custom you give both numbers yourself, in the two boxes below.",
+              "wilting_point": "The water still in the soil when a plant can no longer pull any out: roughly 0.06 for sand, 0.12 for loam, 0.22 for clay. It must be lower than the field capacity, because what lies between the two is the reservoir a probe reads against. Filled in only when the soil type is Custom."
             }
           },
           "valve_and_pipe": {
@@ -132,7 +134,9 @@
       "et_method_missing_sensors": "That method needs sensors this installation has not declared. Pick the sensors it requires, or leave the method on Automatic.",
       "et_method_unknown": "Unknown evapotranspiration method.",
       "et_method_zone_probe": "A soil moisture probe belongs to a zone, not to the whole installation. Set it in that zone's options; the method here is the one that zones without a probe of their own run on.",
-      "field_capacity_required": "Choose a field capacity: the soil type is set to Custom, which takes its value from that field"
+      "field_capacity_required": "Choose a field capacity: the soil type is set to Custom, which takes its value from that field",
+      "wilting_point_required": "Enter a wilting point: the soil type is Custom, so both ends of the soil are yours to give",
+      "wilting_point_above_capacity": "The wilting point must be below the field capacity: the water plants can use is what lies between them"
     },
     "abort": {
       "already_configured": "NeverDry is already configured"
@@ -191,7 +195,8 @@
               "vwc_sensor": "Soil moisture probe (this zone)",
               "root_depth_m": "Root depth",
               "field_capacity": "Field capacity",
-              "soil_type": "Soil type"
+              "soil_type": "Soil type",
+              "wilting_point": "Wilting point"
             },
             "data_description": {
               "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
@@ -200,8 +205,9 @@
               "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground.",
               "vwc_sensor": "Optional. A probe buried in this zone, about a third of the root depth down and midway between two emitters. On its own it is shown beside the zone's figures and nothing else changes. Give it the root depth below and this zone waters by what its soil says.\n\n**The sensor must report on a 0-100 scale**, 0 for dry soil and 100 for wet, which is what garden moisture probes publish. A sensor on any other scale is not supported and its readings are ignored.\n\n**That scale is used uncalibrated, fixed at 0-100 taken at face value:** 0 is treated as the driest soil a plant can work in and 100 as a full one. Real probes are calibrated at the factory against dry air and open water, and neither of those is a state soil is ever in, so a full soil does not actually read 100. The millimetres this produces are therefore out by a factor nobody has measured, usually on the high side, which means watering somewhat more than needed rather than leaving a zone dry. If that matters to you, the reasoning and what would fix it are written up here: {soil_doc}",
               "root_depth_m": "Depth of the root zone the probe above speaks for, and the one number here that no table holds: a lawn, a hedge and a pot differ by a factor of four on the same ground. Fill it in and this zone waters by its probe instead of the weather estimate. Leave it and the probe stays a reading shown beside the estimate. The probe's 0-100 reading is read as how much of the water this soil can actually hold is still there, so the depth and the soil below are what turn it into millimetres.",
-              "field_capacity": "Only read when the soil type above is Custom. The water content this soil holds after it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay. Used for the weather estimate; a zone on Custom soil cannot be watered by its probe.",
-              "soil_type": "Optional. What this zone's ground is made of. It supplies how much water the soil holds and how much of that a plant can reach, so you do not have to know either number. Left on Automatic a medium soil is assumed, which is fair for most gardens and is said out loud when you save. Custom supplies only one of the two, so a probe cannot water a Custom-soil zone: pick a named soil for that."
+              "field_capacity": "The water this soil holds once it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay. Filled in only when the soil type is Custom, together with the wilting point below.",
+              "soil_type": "Optional. What this zone's ground is made of. The choice supplies the two numbers that say how much water this soil can put at a plant's disposal: how much it holds when full, and how much stays locked in when a plant can no longer pull any out. Left on Automatic a medium soil applies, and you are told so when you save. On Custom you give both numbers yourself, in the two boxes below.",
+              "wilting_point": "The water still in the soil when a plant can no longer pull any out: roughly 0.06 for sand, 0.12 for loam, 0.22 for clay. It must be lower than the field capacity, because what lies between the two is the reservoir a probe reads against. Filled in only when the soil type is Custom."
             }
           },
           "valve_and_pipe": {
@@ -264,7 +270,8 @@
               "vwc_sensor": "Soil moisture probe (this zone)",
               "root_depth_m": "Root depth",
               "field_capacity": "Field capacity",
-              "soil_type": "Soil type"
+              "soil_type": "Soil type",
+              "wilting_point": "Wilting point"
             },
             "data_description": {
               "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
@@ -273,8 +280,9 @@
               "microclimate_factor": "Used only when the exposure is Custom. Range 0.1–1.5; above 1.0 for zones that dry faster than open ground.",
               "vwc_sensor": "Optional. A probe buried in this zone, about a third of the root depth down and midway between two emitters. On its own it is shown beside the zone's figures and nothing else changes. Give it the root depth below and this zone waters by what its soil says.\n\n**The sensor must report on a 0-100 scale**, 0 for dry soil and 100 for wet, which is what garden moisture probes publish. A sensor on any other scale is not supported and its readings are ignored.\n\n**That scale is used uncalibrated, fixed at 0-100 taken at face value:** 0 is treated as the driest soil a plant can work in and 100 as a full one. Real probes are calibrated at the factory against dry air and open water, and neither of those is a state soil is ever in, so a full soil does not actually read 100. The millimetres this produces are therefore out by a factor nobody has measured, usually on the high side, which means watering somewhat more than needed rather than leaving a zone dry. If that matters to you, the reasoning and what would fix it are written up here: {soil_doc}",
               "root_depth_m": "Depth of the root zone the probe above speaks for, and the one number here that no table holds: a lawn, a hedge and a pot differ by a factor of four on the same ground. Fill it in and this zone waters by its probe instead of the weather estimate. Leave it and the probe stays a reading shown beside the estimate. The probe's 0-100 reading is read as how much of the water this soil can actually hold is still there, so the depth and the soil below are what turn it into millimetres.",
-              "field_capacity": "Only read when the soil type above is Custom. The water content this soil holds after it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay. Used for the weather estimate; a zone on Custom soil cannot be watered by its probe.",
-              "soil_type": "Optional. What this zone's ground is made of. It supplies how much water the soil holds and how much of that a plant can reach, so you do not have to know either number. Left on Automatic a medium soil is assumed, which is fair for most gardens and is said out loud when you save. Custom supplies only one of the two, so a probe cannot water a Custom-soil zone: pick a named soil for that."
+              "field_capacity": "The water this soil holds once it has finished draining, as a fraction: roughly 0.15 for sand, 0.25 for loam, 0.35 for clay. Filled in only when the soil type is Custom, together with the wilting point below.",
+              "soil_type": "Optional. What this zone's ground is made of. The choice supplies the two numbers that say how much water this soil can put at a plant's disposal: how much it holds when full, and how much stays locked in when a plant can no longer pull any out. Left on Automatic a medium soil applies, and you are told so when you save. On Custom you give both numbers yourself, in the two boxes below.",
+              "wilting_point": "The water still in the soil when a plant can no longer pull any out: roughly 0.06 for sand, 0.12 for loam, 0.22 for clay. It must be lower than the field capacity, because what lies between the two is the reservoir a probe reads against. Filled in only when the soil type is Custom."
             }
           },
           "valve_and_pipe": {
@@ -330,7 +338,9 @@
       "zone_already_exists": "A zone with this name already exists",
       "too_many_zones": "Maximum number of zones reached (50)",
       "zone_name_too_long": "Zone name is too long (max 64 characters)",
-      "field_capacity_required": "Choose a field capacity: the soil type is set to Custom, which takes its value from that field"
+      "field_capacity_required": "Choose a field capacity: the soil type is set to Custom, which takes its value from that field",
+      "wilting_point_required": "Enter a wilting point: the soil type is Custom, so both ends of the soil are yours to give",
+      "wilting_point_above_capacity": "The wilting point must be below the field capacity: the water plants can use is what lies between them"
     },
     "abort": {
       "no_zones": "No zones configured"
@@ -398,6 +408,11 @@
         "et_simple": "Simple (temperature only)",
         "hargreaves": "Hargreaves-Samani (daily max/min temperature)",
         "penman_monteith": "Penman-Monteith (FAO-56, full weather)"
+      }
+    },
+    "et_coefficient": {
+      "unit_of_measurement": {
+        "mm_per_celsius_per_day": "mm/°C/day"
       }
     },
     "soil_type": {
@@ -659,13 +674,24 @@
     "notification_irrigation_ineffective_body": "Zone {zone}: soil moisture did not rise after the last irrigation.",
     "notification_model_drift_title": "Model drift detected",
     "notification_model_drift_body": "Zone {zone}: moisture/model correlation has dropped to {correlation}.",
-    "notification_water_me_now_title": "Watering needed, and nothing to water with",
+    "notification_water_me_now_title": "Watering needed: no valve configured",
     "notification_water_me_now_body": "Your garden needs watering:\n\n{zones}\n\nNo irrigation valve is configured. Water by hand, or add a valve in the integration settings.",
     "notification_watchdog_triggered_title": "Valve force-closed by safety watchdog",
     "notification_watchdog_triggered_body": "Zone {zone} valve was open for more than {duration_min} min with no close command received. NeverDry forced it closed as a safety measure. Check that the automation or delivery logic is working correctly.",
     "notification_water_me_now_zone_line": "- {zone}: deficit {deficit} mm, {liters} L ({minutes} min)",
     "notification_deficit_anomaly_title": "Deficit far past the threshold",
-    "notification_deficit_anomaly_body": "Zone {zone}: deficit {deficit} mm is past {limit} mm, {multiplier} times the threshold. Watering may not be reaching this zone. Check the valve, the schedule and the Home Assistant log."
+    "notification_deficit_anomaly_body": "Zone {zone}: deficit {deficit} mm is past {limit} mm, {multiplier} times the threshold. Watering may not be reaching this zone. Check the valve, the schedule and the Home Assistant log.",
+    "warn_area_small": "Irrigated area {area} is below {minimum}. Check it is the area actually watered, not the whole garden.",
+    "warn_guard_flow_missing": "No design flow rate. It is used for the expected duration and to scale the safety timeout, and it will become required in a future release (target v1.0).",
+    "warn_flow_low": "Design flow rate {flow} is below {minimum}. A zone that slow takes hours to deliver an ordinary dose.",
+    "warn_flow_high": "Design flow rate {flow} is above {maximum}. Check the unit: this is the rate of one zone, not of the whole system.",
+    "warn_probe_no_depth": "Soil probe: no root depth, so the probe will be shown but will not set this zone's deficit - the site's model keeps doing that. Give the depth its roots reach and the zone waters by what the soil measures.",
+    "warn_depth_no_probe": "Soil probe: the root depth will not be used, because this zone has no probe to read. Pick one, or clear the field.",
+    "warn_probe_custom_soil_incomplete": "Soil probe: this zone's soil is Custom and one end of it is missing, so the probe will be shown but will not set the deficit. Give both the field capacity and the wilting point, or pick a soil from the list.",
+    "warn_probe_assumed_soil": "Soil probe: this zone will measure its deficit assuming a medium soil, since no soil type was chosen. Sandy ground holds about half that water and clay about half again more, so pick yours if you know it.",
+    "warn_override_ignored": "{label}: {chosen}, so your custom value {value} will not be used. Choose Custom to apply it, or clear the field.",
+    "warn_meter_mode_without_meter": "The delivery mode is set to a valve with a flow meter, but no flow meter is selected: the mode doses by measured volume, so the measuring entity is not optional.",
+    "warn_meter_of_another_zone": "The selected flow meter belongs to the valve of zone {zone}: it reports that zone's water, not this one's. While that zone is idle this meter stays still, and a still meter here means no verified flow and a session that cannot be measured."
   },
   "issues": {
     "soil_probe_needs_a_zone": {

@@ -26,6 +26,7 @@ from never_dry.const import (
     CONF_ZONE_ROOT_DEPTH,
     CONF_ZONE_SOIL_TYPE,
     CONF_ZONE_VWC_SENSOR,
+    CONF_ZONE_WILTING_POINT,
     CONF_ZONES,
     CONFIG_VERSION,
     PROBE_CADENCE_MEMORY_S,
@@ -38,14 +39,30 @@ from never_dry.sensor import DrynessIndexSensor, IrrigationZoneSensor
 HUB = {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r"}
 
 
+#: The English warning catalogue, read the way the flow resolves it at runtime.
+#: Asserting against the real strings rather than against literals is the point:
+#: a message that changes in the catalogue and not here is a test that has
+#: stopped describing the product.
+def _warning_catalogue() -> dict[str, str]:
+    import json
+    from pathlib import Path
+
+    strings = Path(__file__).resolve().parent.parent / "custom_components" / "never_dry" / "strings.json"
+    return json.loads(strings.read_text(encoding="utf-8"))["common"]
+
+
+WARNINGS = _warning_catalogue()
+
+
 def _zone(hass, dryness, **cfg):
     return IrrigationZoneSensor(hass, {CONF_ZONE_NAME: "Orto", CONF_ZONE_AREA: 20.0, **cfg}, dryness)
 
 
 #: A zone whose probe has been told what to read its readings with. The soil is
 #: named rather than left automatic so that the arithmetic in these tests stays
-#: legible, and it is a *named* soil rather than Custom because the probe needs
-#: both ends of the soil's interval and Custom supplies only one (GH #234).
+#: legible. Custom would now work too: it asks for both ends of the interval
+#: rather than the top one alone, which is what used to cost a Custom-soil zone
+#: its probe.
 #:
 #: Clay holds 0.36 and gives up nothing below 0.22, so 0.30 m of roots is a
 #: reservoir of (0.36 - 0.22) * 0.30 * 1000 = **42.0 mm**. A reading of 18 %
@@ -795,7 +812,7 @@ class TestWhatTheFormSaysAboutTheProbesRole:
     def test_a_probe_without_a_root_depth_is_told_it_will_not_drive(self):
         from never_dry.config_flow import _probe_role_warnings
 
-        warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil"})
+        warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil"}, WARNINGS)
 
         assert len(warnings) == 1
         assert "will not set" in warnings[0]
@@ -804,7 +821,7 @@ class TestWhatTheFormSaysAboutTheProbesRole:
     def test_a_named_soil_and_a_depth_say_nothing_because_the_choice_was_made(self):
         from never_dry.config_flow import _probe_role_warnings
 
-        assert _probe_role_warnings(dict(DRIVEN)) == []
+        assert _probe_role_warnings(dict(DRIVEN), WARNINGS) == []
 
     def test_an_assumed_soil_is_named_rather_than_passed_over(self):
         """The price of the automatic entry, and the condition that makes it fair.
@@ -814,23 +831,70 @@ class TestWhatTheFormSaysAboutTheProbesRole:
         """
         from never_dry.config_flow import _probe_role_warnings
 
-        warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil", CONF_ZONE_ROOT_DEPTH: 0.3})
+        warnings = _probe_role_warnings({CONF_ZONE_VWC_SENSOR: "sensor.soil", CONF_ZONE_ROOT_DEPTH: 0.3}, WARNINGS)
 
         assert len(warnings) == 1
         assert "medium soil" in warnings[0]
+
+    def test_a_half_declared_custom_soil_is_told_the_probe_will_not_drive(self):
+        """The third way a probe stays silent, and the one that went unsaid.
+
+        Sensor bound, depth given, and still no probe: the soil is Custom and
+        carries one end of its interval. The form used to warn about a missing
+        depth and about an assumed soil, and say nothing at all about this - so
+        the report that started all of this, "ignored completely, but still in
+        the settings", described a case its own warning did not cover.
+
+        Both boxes are asked for now, so only a zone saved before they existed
+        can be in this state. That is exactly the zone whose owner has been
+        waiting for an explanation.
+        """
+        from never_dry.config_flow import _probe_role_warnings
+
+        warnings = _probe_role_warnings(
+            {
+                CONF_ZONE_VWC_SENSOR: "sensor.soil",
+                CONF_ZONE_ROOT_DEPTH: 0.3,
+                CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
+                CONF_ZONE_FIELD_CAPACITY: 0.30,
+            },
+            WARNINGS,
+        )
+
+        assert len(warnings) == 1
+        assert "will not set the deficit" in warnings[0]
+        assert "wilting point" in warnings[0]
+
+    def test_a_custom_soil_with_both_ends_says_nothing(self):
+        """Complete is complete: the warning must not nag a correct zone."""
+        from never_dry.config_flow import _probe_role_warnings
+
+        assert (
+            _probe_role_warnings(
+                {
+                    CONF_ZONE_VWC_SENSOR: "sensor.soil",
+                    CONF_ZONE_ROOT_DEPTH: 0.3,
+                    CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
+                    CONF_ZONE_FIELD_CAPACITY: 0.30,
+                    CONF_ZONE_WILTING_POINT: 0.15,
+                },
+                WARNINGS,
+            )
+            == []
+        )
 
     def test_numbers_with_no_probe_to_read_are_flagged_as_unused(self):
         """The same shape as the ignored-override warnings: a value nobody reads."""
         from never_dry.config_flow import _probe_role_warnings
 
-        warnings = _probe_role_warnings({CONF_ZONE_ROOT_DEPTH: 0.3, CONF_ZONE_FIELD_CAPACITY: 0.25})
+        warnings = _probe_role_warnings({CONF_ZONE_ROOT_DEPTH: 0.3, CONF_ZONE_FIELD_CAPACITY: 0.25}, WARNINGS)
 
         assert "will not be used" in warnings[0]
 
     def test_a_zone_with_neither_is_not_lectured(self):
         from never_dry.config_flow import _probe_role_warnings
 
-        assert _probe_role_warnings({CONF_ZONE_NAME: "Orto"}) == []
+        assert _probe_role_warnings({CONF_ZONE_NAME: "Orto"}, WARNINGS) == []
 
 
 def test_root_depth_is_a_length_and_crosses_the_unit_boundary():
@@ -1067,7 +1131,9 @@ class TestTheGroundIsChosenNotTyped:
     def test_a_named_soil_makes_the_box_dead_weight_and_says_so(self):
         from never_dry.config_flow import _ignored_override_warnings
 
-        warnings = _ignored_override_warnings({CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CLAY, CONF_ZONE_FIELD_CAPACITY: 0.30})
+        warnings = _ignored_override_warnings(
+            {CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CLAY, CONF_ZONE_FIELD_CAPACITY: 0.30}, WARNINGS
+        )
 
         assert any("Field capacity" in w for w in warnings)
 
@@ -1365,3 +1431,205 @@ class TestAliveAndMovingAreDifferentQuestions:
         assert "probe_last_seen" in attrs
         assert "probe_value_moved_at" in attrs
         assert attrs["probe_last_seen"] != attrs["probe_value_moved_at"]
+
+
+class TestCustomSoilKeepsItsProbe:
+    """The owner who measured their own soil used to be the one who lost the probe.
+
+    Every named soil carries two numbers read off the same texture row: the
+    field capacity and the wilting point. A probe reading says where the ground
+    sits *between* them, so both are needed to turn it into millimetres. Custom
+    asked for the top one only, so ``_probe_drives`` was false and the zone ran
+    on the weather estimate - the most careful user getting the least capable
+    behaviour, and a form that explained the refusal instead of removing it.
+
+    Custom now asks for both. Not estimated from the one it has: somebody who
+    picks Custom has measured their soil, and a number we invented would be
+    indistinguishable from a measured one while being worse.
+    """
+
+    def test_a_custom_soil_with_both_ends_drives_the_zone(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(
+            hass_mock,
+            hub,
+            **{
+                CONF_ZONE_VWC_SENSOR: "sensor.orto_soil",
+                CONF_ZONE_ROOT_DEPTH: 0.30,
+                CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
+                CONF_ZONE_FIELD_CAPACITY: 0.36,
+                CONF_ZONE_WILTING_POINT: 0.22,
+            },
+        )
+
+        assert zone._probe_drives is True, "both ends given: the probe has everything it needs"
+        # The same numbers as the clay fixture, so the reservoir must match it.
+        zone._on_own_probe(_reading("18.0"))
+        assert zone._zone_deficit == pytest.approx(AT_18_PCT)
+
+    def test_a_custom_soil_missing_the_floor_still_cannot(self, hass_mock):
+        """The form refuses this combination, so it should only arrive from a
+        configuration written before the field existed. It must degrade to the
+        estimate rather than invent the missing end."""
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(
+            hass_mock,
+            hub,
+            **{
+                CONF_ZONE_VWC_SENSOR: "sensor.orto_soil",
+                CONF_ZONE_ROOT_DEPTH: 0.30,
+                CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
+                CONF_ZONE_FIELD_CAPACITY: 0.36,
+            },
+        )
+
+        assert zone._probe_drives is False
+
+
+class TestTheBarSurvivesAReloadToo:
+    """Field, 2026-09-27: editing one zone emptied another zone's deficit.
+
+    The probe on 'Giardino Melino' had been silent for fifteen hours and had
+    been correctly set aside the evening before, with the zone running on the
+    estimate. Then an unrelated zone was edited, which reloads the whole config
+    entry, and the deficit fell from 9.6 mm to 0.7 mm between two ticks two
+    minutes apart. No rain, no irrigation, no new reading: the probe was simply
+    believed again, and it reads 99%.
+
+    The cause is that only half the judgement survived. ``probe_last_seen`` is
+    restored from the attributes, so the age was right. The bar it is compared
+    against lived in memory alone and came back empty - and the guard reads
+
+        return floor_s is None or age_s <= floor_s
+
+    so an empty bar answers *fresh*, whatever the age. Fifteen hours of silence
+    then had nothing between it and the zone but the 24-hour backstop.
+    """
+
+    def _driven(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone.hass = hass_mock
+        hass_mock.states.get.return_value = None
+        return zone
+
+    @pytest.mark.asyncio
+    async def test_a_probe_silent_past_its_cadence_stays_set_aside(self, hass_mock):
+        """The field case, at the age it actually happened at: fifteen hours,
+        which is under the backstop and far over the probe's own rhythm."""
+        zone = self._driven(hass_mock)
+        silent_since = datetime.now(UTC) - timedelta(hours=15)
+        now_s = datetime.now(UTC).timestamp()
+        zone.async_get_last_state = _last_state(
+            {
+                "estimate_mm": 9.6,
+                "probe_moisture_pct": 99.0,
+                "probe_last_seen": silent_since.isoformat(),
+                # What the probe's own rhythm had been: about an hour.
+                "probe_quiet_samples": [[now_s - 7200, 3600.0]],
+            }
+        )
+
+        await zone.async_added_to_hass()
+
+        assert zone._probe_is_fresh() is False, "a bar restored with the age it judges must still refuse this probe"
+        assert zone.deficit_source == "site_model"
+        assert zone._zone_deficit == pytest.approx(9.6), "the reserve the zone had before the reload"
+
+    @pytest.mark.asyncio
+    async def test_without_the_bar_the_same_probe_is_believed(self, hass_mock):
+        """The bug itself, kept as a test so the fix cannot be undone quietly:
+        the identical state minus the restored bar is accepted as fresh."""
+        zone = self._driven(hass_mock)
+        silent_since = datetime.now(UTC) - timedelta(hours=15)
+        zone.async_get_last_state = _last_state(
+            {
+                "estimate_mm": 9.6,
+                "probe_moisture_pct": 99.0,
+                "probe_last_seen": silent_since.isoformat(),
+            }
+        )
+
+        await zone.async_added_to_hass()
+
+        assert zone._probe_is_fresh() is True, (
+            "with no bar there is nothing to fail: this is what the field saw, and why the bar is now persisted"
+        )
+
+    def test_the_bar_makes_a_round_trip(self, hass_mock):
+        zone = self._driven(hass_mock)
+        at = datetime.now(UTC).timestamp()
+        _has_come_back_from(zone, 300.0, 900.0, 600.0)
+        saved = zone._probe_quiet.as_samples()
+
+        fresh = self._driven(hass_mock)
+        fresh._probe_quiet.restore(saved)
+
+        assert fresh._probe_quiet.value(at) == zone._probe_quiet.value(at)
+
+    @pytest.mark.parametrize(
+        "rubbish",
+        [
+            None,
+            "not a list",
+            [["a", "b"]],
+            [[1.0]],
+            [[True, False]],
+            # Not decreasing: restoring this would make value() answer with
+            # something that is not the window's maximum.
+            [[100.0, 10.0], [200.0, 900.0]],
+        ],
+    )
+    def test_a_bar_that_cannot_be_trusted_is_dropped_rather_than_used(self, hass_mock, rubbish):
+        """Attributes come back as whatever was written, which after a version
+        change may not be this. A bar built from rubbish is worse than none."""
+        zone = self._driven(hass_mock)
+        _has_come_back_from(zone, 300.0)
+        before = zone._probe_quiet.value(datetime.now(UTC).timestamp())
+
+        zone._probe_quiet.restore(rubbish)
+
+        assert zone._probe_quiet.value(datetime.now(UTC).timestamp()) == before
+
+
+class TestTheZoneSaysWhereItsNumberCameFrom:
+    """Two zones reporting the same source for opposite reasons.
+
+    ``deficit_source`` answers *measured or estimated*, which is not enough: a
+    zone that never had a probe and a zone whose probe has gone quiet both read
+    ``site_model``, and only the second means a figure changed scale while
+    nothing happened in the garden. That is the 9.6 mm to 0.7 mm of GH #234,
+    where the card showed a collapse and the ruler had been swapped.
+
+    ``probe_set_aside`` is the missing half, kept beside the source rather than
+    folded into it: people write automations against that attribute, and a new
+    value would arrive unannounced.
+    """
+
+    def _driven(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone._on_own_probe(_reading("18.0"))
+        return zone
+
+    def test_a_driving_probe_says_measured_and_is_not_set_aside(self, hass_mock):
+        zone = self._driven(hass_mock)
+
+        assert zone.deficit_source == "zone_probe"
+        assert zone.probe_set_aside is False
+
+    def test_a_probe_gone_quiet_says_estimated_and_set_aside(self, hass_mock):
+        """The case the card could not tell apart."""
+        zone = self._driven(hass_mock)
+        _has_come_back_from(zone, 300.0, 310.0, 305.0)
+        zone._probe_last_seen = datetime.now(UTC) - timedelta(hours=6)
+
+        assert zone.deficit_source == "site_model"
+        assert zone.probe_set_aside is True, "a probe that should be driving and is not"
+
+    def test_a_zone_with_no_probe_says_estimated_and_nothing_is_set_aside(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub)
+
+        assert zone.deficit_source == "site_model"
+        assert zone.probe_set_aside is False, "nothing was set aside: there is no probe"

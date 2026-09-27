@@ -2155,7 +2155,13 @@ class IrrigationController:
                         zs.zone_name,
                         NotificationKind.DEFICIT_ANOMALY,
                         context={
-                            "deficit": f"{zone_deficit:.1f}",
+                            # Whole millimetres, like the limit and the litres beside it.
+                            # A decimal here is the only one in these notifications, and it
+                            # arrives formatted by Python with a point - so a Spanish or
+                            # German reader saw "0,22" in the forms and "21.4 mm" in the
+                            # alert. Rounding removes the question for every language
+                            # rather than answering it per country (GH #215).
+                            "deficit": f"{zone_deficit:.0f}",
                             "limit": f"{anomaly_limit:.0f}",
                             "multiplier": ANOMALY_DEFICIT_MULTIPLIER,
                         },
@@ -2196,7 +2202,7 @@ class IrrigationController:
         zone_lines = [
             line.format(
                 zone=zs.zone_name,
-                deficit=f"{zs._zone_deficit:.1f}",
+                deficit=f"{zs._zone_deficit:.0f}",
                 liters=f"{zs.volume_liters:.0f}",
                 minutes=zs.duration_s // 60,
             )

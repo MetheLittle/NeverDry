@@ -108,6 +108,22 @@ const I18N = {
     stop: "Stop",
     markIrrigated: "Mark irrigated",
     resetValve: "Reset valve",
+    layout: "Layout",
+    layoutFull: "Full",
+    layoutCompact: "Compact",
+    layoutCustom: "Custom",
+    sections: "Sections to show",
+    secStatus: "Status",
+    secBar: "Deficit bar",
+    secNext: "Next watering",
+    secLast: "Last watering",
+    secTotals: "Totals",
+    secParams: "Parameters",
+    secActions: "Buttons",
+    warningsAlways: "Warnings are always shown.",
+    srcProbe: "measured by the probe",
+    srcEstimate: "estimated from the weather",
+    srcProbeSetAside: "estimated: the probe has gone quiet",
   },
   it: {
     selectZone: "Seleziona una zona nella scheda.",
@@ -192,6 +208,22 @@ const I18N = {
     stop: "Stop",
     markIrrigated: "Segna come irrigata",
     resetValve: "Ripristina valvola",
+    layout: "Aspetto",
+    layoutFull: "Completa",
+    layoutCompact: "Compatta",
+    layoutCustom: "Personalizzata",
+    sections: "Sezioni da mostrare",
+    secStatus: "Stato",
+    secBar: "Barra del deficit",
+    secNext: "Prossima irrigazione",
+    secLast: "Ultima irrigazione",
+    secTotals: "Totali",
+    secParams: "Parametri",
+    secActions: "Pulsanti",
+    warningsAlways: "Gli avvisi si vedono sempre.",
+    srcProbe: "misurato dalla sonda",
+    srcEstimate: "stimato dal meteo",
+    srcProbeSetAside: "stimato: la sonda tace",
   },
   de: {
     selectZone: "Eine Zone im Karten-Editor auswählen.",
@@ -276,6 +308,22 @@ const I18N = {
     stop: "Stopp",
     markIrrigated: "Als bewässert markieren",
     resetValve: "Ventil zurücksetzen",
+    layout: "Darstellung",
+    layoutFull: "Vollständig",
+    layoutCompact: "Kompakt",
+    layoutCustom: "Benutzerdefiniert",
+    sections: "Angezeigte Abschnitte",
+    secStatus: "Status",
+    secBar: "Defizitbalken",
+    secNext: "Nächste Bewässerung",
+    secLast: "Letzte Bewässerung",
+    secTotals: "Summen",
+    secParams: "Parameter",
+    secActions: "Schaltflächen",
+    warningsAlways: "Warnungen werden immer angezeigt.",
+    srcProbe: "vom Sensor gemessen",
+    srcEstimate: "aus dem Wetter geschätzt",
+    srcProbeSetAside: "geschätzt: der Sensor schweigt",
   },
   es: {
     selectZone: "Selecciona una zona en el editor de la tarjeta.",
@@ -360,6 +408,22 @@ const I18N = {
     meterByVolume: "por volumen",
     meterGuardOff: "no puede verificar la apertura",
     meterMeasuring: "midiendo",
+    layout: "Aspecto",
+    layoutFull: "Completa",
+    layoutCompact: "Compacta",
+    layoutCustom: "Personalizada",
+    sections: "Secciones que se muestran",
+    secStatus: "Estado",
+    secBar: "Barra de déficit",
+    secNext: "Próximo riego",
+    secLast: "Último riego",
+    secTotals: "Totales",
+    secParams: "Parámetros",
+    secActions: "Botones",
+    warningsAlways: "Los avisos se muestran siempre.",
+    srcProbe: "medido por la sonda",
+    srcEstimate: "estimado a partir del tiempo",
+    srcProbeSetAside: "estimado: la sonda no responde",
   },
 };
 
@@ -496,7 +560,84 @@ const UID_PREFIX = {
 };
 
 // A NeverDry zone is a device created by the integration with this model.
+// ---- entity registry, read once and shared by both cards ----------------
+//
+// Entity ids are built from the entity's *translated* name, so on a Spanish
+// install the water balance sensor is `sensor.neverdry_metodo_de_balance_hidrico`
+// and any lookup by English suffix finds nothing at all (GH #279). unique_ids do
+// not move with the language, which is why they are what both cards match on.
+//
+// Module-level rather than per card: the registry is one thing, both cards want
+// the same answer, and two copies of this logic is how they drift apart.
+let _uidMap = null;
+let _uidLoading = false;
+
+function uidOf(entityId) {
+  return _uidMap ? _uidMap[entityId] : undefined;
+}
+
+function ensureUidRegistry(hass, onLoaded) {
+  if (_uidMap || _uidLoading || !hass) return;
+  _uidLoading = true;
+  hass
+    .callWS({ type: "config/entity_registry/list" })
+    .then((list) => {
+      const map = {};
+      for (const e of list) {
+        if (e.platform === "never_dry" && e.unique_id) map[e.entity_id] = e.unique_id;
+      }
+      _uidMap = map;
+    })
+    .catch(() => {
+      _uidMap = {}; // give up: the suffix fallback stays in effect
+    })
+    .finally(() => {
+      _uidLoading = false;
+      if (onLoaded) onLoaded();
+    });
+}
+
 const ZONE_MODEL = "Irrigation Zone";
+
+// Which parts of the card a configuration may switch off, and the selector that
+// finds each one. Warnings are deliberately absent: a compact card that goes
+// quiet about a valve stuck open would be worse than a long one, so that box is
+// never hidden by configuration - only by having nothing to say.
+const CARD_SECTIONS = {
+  status: ".nd-status",
+  bar: ".nd-bar-wrap",
+  next: '.nd-section[data-key="next"]',
+  last: '.nd-section[data-key="last"]',
+  totals: '.nd-section[data-key="totals"]',
+  params: '.nd-section[data-key="params"]',
+  actions: ".nd-actions",
+};
+
+// Compact keeps the two things an overview dashboard is for: is it watering,
+// and how dry is it. Everything else is detail, and detail is what the full
+// card is for.
+const COMPACT_SECTIONS = ["status", "bar"];
+
+function deficitSource(stateObj) {
+  // Three answers, not two. "Estimated" for a zone that never had a probe and
+  // "estimated" for a zone whose probe has gone quiet look identical in the
+  // figures and mean very different things: only the second is a number that
+  // changed scale while the garden did nothing.
+  const a = stateObj && stateObj.attributes;
+  if (!a || !a.deficit_source) return null;
+  if (a.deficit_source === "zone_probe") return "srcProbe";
+  return a.probe_set_aside ? "srcProbeSetAside" : "srcEstimate";
+}
+
+function visibleSections(config) {
+  const mode = (config && config.mode) || "full";
+  if (mode === "compact") return COMPACT_SECTIONS;
+  if (mode === "custom") {
+    const chosen = (config && config.sections) || [];
+    return Object.keys(CARD_SECTIONS).filter((k) => chosen.includes(k));
+  }
+  return Object.keys(CARD_SECTIONS);
+}
 
 class NeverDryZoneCard extends HTMLElement {
   setConfig(config) {
@@ -504,6 +645,16 @@ class NeverDryZoneCard extends HTMLElement {
     this._config = config;
     this._built = false;
     if (this._hass) this._render();
+  }
+
+  _applySections() {
+    // Hides, never shows: a section the card's own logic has emptied stays
+    // empty. This only takes away what the configuration did not ask for.
+    const shown = visibleSections(this._config);
+    for (const [key, selector] of Object.entries(CARD_SECTIONS)) {
+      const el = this.querySelector(selector);
+      if (el) el.classList.toggle("nd-off", !shown.includes(key));
+    }
   }
 
   set hass(hass) {
@@ -535,7 +686,7 @@ class NeverDryZoneCard extends HTMLElement {
     const out = {};
     if (!hass || !deviceId || !hass.entities) return out;
 
-    const uidMap = this._uidMap;
+    const uidMap = _uidMap;
     const suffixRoles = Object.entries(ROLE_SUFFIX).sort((a, b) => b[1].length - a[1].length);
     const uidRoles = Object.entries(UID_PREFIX);
 
@@ -582,26 +733,10 @@ class NeverDryZoneCard extends HTMLElement {
   }
 
   _ensureRegistry() {
-    // Lazily load entity_id -> unique_id for never_dry entities (admin WS call).
-    if (this._uidMap || this._uidLoading || !this._hass) return;
-    this._uidLoading = true;
-    this._hass
-      .callWS({ type: "config/entity_registry/list" })
-      .then((list) => {
-        const map = {};
-        for (const e of list) {
-          if (e.platform === "never_dry" && e.unique_id) map[e.entity_id] = e.unique_id;
-        }
-        this._uidMap = map;
-      })
-      .catch(() => {
-        this._uidMap = {}; // give up -> suffix fallback stays in effect
-      })
-      .finally(() => {
-        this._uidLoading = false;
-        this._built = false; // rebuild with corrected mapping
-        this._render();
-      });
+    ensureUidRegistry(this._hass, () => {
+      this._built = false; // rebuild with the corrected mapping
+      this._render();
+    });
   }
 
   _deviceName() {
@@ -632,6 +767,9 @@ class NeverDryZoneCard extends HTMLElement {
 
     if (!this._built) this._buildStructure();
     this._update(ents);
+    // After the update, because _update is what decides whether a section has
+    // anything in it; this only takes away what the configuration excluded.
+    this._applySections();
   }
 
   _renderEmpty(msg) {
@@ -754,8 +892,16 @@ class NeverDryZoneCard extends HTMLElement {
       this._el.barVal.textContent = `${pct.toFixed(0)}%`;
       const dStr = fmtState(hass, ents.deficit);
       const tStr = fmtState(hass, ents.threshold);
+      // Where the number came from, beside the number. The deficit can be a
+      // measurement or an estimate, and the two are on different scales - a
+      // zone once fell from 9.6 mm to 0.7 mm with no rain and no irrigation,
+      // because the probe was set aside and the ruler changed underneath it
+      // (GH #234). Nothing on screen said so.
+      const src = deficitSource(ents.deficit);
       this._el.barSub.textContent =
-        `${dStr} / ${tStr}` + (deficit >= threshold ? ` — ${t(hass, "due")}` : "");
+        `${dStr} / ${tStr}` +
+        (src ? ` · ${t(hass, src)}` : "") +
+        (deficit >= threshold ? ` · ${t(hass, "due")}` : "");
     } else {
       this._el.barFill.style.width = "0%";
       this._el.barVal.textContent = "—";
@@ -1319,6 +1465,9 @@ const CARD_CSS = `
   .nd-btn ha-icon { --mdc-icon-size:18px; }
   .nd-btn:hover:not(:disabled) { filter:brightness(.95); }
   .nd-btn:disabled { opacity:.4; cursor:not-allowed; }
+  /* Switched off by configuration, as opposed to empty: !important because the
+     sections set their own display when they have content. */
+  .nd-off { display: none !important; }
   .nd-btn.primary { background: var(--primary-color); color: var(--text-primary-color,#fff); }
   .nd-btn.warn { background: var(--error-color, #db4437); color:#fff; }
 `;
@@ -1339,6 +1488,8 @@ class NeverDryZoneCardEditor extends HTMLElement {
   _render() {
     const devices = zoneDevices(this._hass);
     const current = this._config.device_id || "";
+    const mode = this._config.mode || "full";
+    const shown = visibleSections(this._config);
     const options = devices
       .map(
         (d) =>
@@ -1359,18 +1510,76 @@ class NeverDryZoneCardEditor extends HTMLElement {
             ? `<span style="font-size:.8rem;color:var(--error-color)">${t(this._hass, "noZones")}</span>`
             : ""
         }
+
+        <label style="font-size:.85rem;color:var(--secondary-text-color);margin-top:8px">${t(this._hass, "layout")}</label>
+        <select id="nd-mode"
+          style="padding:8px;border-radius:6px;border:1px solid var(--divider-color);
+                 background:var(--card-background-color);color:var(--primary-text-color);font-size:.95rem">
+          ${["full", "compact", "custom"]
+            .map(
+              (m) =>
+                `<option value="${m}" ${m === mode ? "selected" : ""}>${escapeHtml(
+                  t(this._hass, m === "full" ? "layoutFull" : m === "compact" ? "layoutCompact" : "layoutCustom")
+                )}</option>`
+            )
+            .join("")}
+        </select>
+
+        ${
+          mode === "custom"
+            ? `<label style="font-size:.85rem;color:var(--secondary-text-color);margin-top:8px">${t(
+                this._hass,
+                "sections"
+              )}</label>
+               <div style="display:flex;flex-direction:column;gap:2px">
+                 ${Object.keys(CARD_SECTIONS)
+                   .map(
+                     (k) =>
+                       `<label style="display:flex;align-items:center;gap:8px;font-size:.9rem">
+                          <input type="checkbox" data-section="${k}" ${shown.includes(k) ? "checked" : ""}>
+                          ${escapeHtml(t(this._hass, "sec" + k.charAt(0).toUpperCase() + k.slice(1)))}
+                        </label>`
+                   )
+                   .join("")}
+               </div>`
+            : ""
+        }
+        <span style="font-size:.78rem;color:var(--secondary-text-color)">${escapeHtml(
+          t(this._hass, "warningsAlways")
+        )}</span>
       </div>`;
     this.querySelector("#nd-zone").addEventListener("change", (e) => {
-      this._config = { ...this._config, device_id: e.target.value };
-      this.dispatchEvent(
-        new CustomEvent("config-changed", {
-          detail: { config: this._config },
-          bubbles: true,
-          composed: true,
-        })
-      );
+      this._emit({ device_id: e.target.value });
     });
+    this.querySelector("#nd-mode").addEventListener("change", (e) => {
+      const mode = e.target.value;
+      // Moving to Custom starts from what Compact shows rather than from
+      // nothing: an empty card on the way to a configured one reads as broken.
+      const patch = { mode };
+      if (mode === "custom" && !this._config.sections) patch.sections = [...COMPACT_SECTIONS];
+      this._emit(patch);
+    });
+    for (const box of this.querySelectorAll("input[data-section]")) {
+      box.addEventListener("change", () => {
+        const chosen = [...this.querySelectorAll("input[data-section]")]
+          .filter((b) => b.checked)
+          .map((b) => b.dataset.section);
+        this._emit({ sections: chosen });
+      });
+    }
     this._built = true;
+  }
+
+  _emit(patch) {
+    this._config = { ...this._config, ...patch };
+    this._render();
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: this._config },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 }
 
@@ -1426,6 +1635,12 @@ class NeverDryModelCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    // The registry is what lets this card find its entity in any language; ask
+    // for it once and redraw when it lands.
+    ensureUidRegistry(hass, () => {
+      this._built = false;
+      this._render();
+    });
     this._render();
   }
 
@@ -1440,6 +1655,23 @@ class NeverDryModelCard extends HTMLElement {
     const hass = this._hass;
     if (!hass) return null;
     if (this._config && this._config.entity) return hass.states[this._config.entity] || null;
+
+    // By unique_id first: entity ids are generated from the *translated* name,
+    // so on a Spanish install this sensor is
+    // `sensor.neverdry_metodo_de_balance_hidrico` and an English suffix matches
+    // nothing - the card then reported "no NeverDry entities found" on an
+    // installation where every one of them was present (GH #279). The
+    // unique_id is `water_balance_method` in every language.
+    if (_uidMap) {
+      const byUid = Object.keys(_uidMap).find((e) => {
+        const uid = _uidMap[e];
+        return uid === "water_balance_method" || uid.endsWith("_water_balance_method");
+      });
+      if (byUid && hass.states[byUid]) return hass.states[byUid];
+    }
+
+    // Suffix, while the registry is still loading or could not be read. Right
+    // for English, and the reason this was the only path for so long.
     const id = Object.keys(hass.states).find((e) => e.endsWith("_water_balance_method"));
     return id ? hass.states[id] : null;
   }

@@ -24,7 +24,7 @@ does not let anyone write it.
 | English | source | source | n/a, every string originates here |
 | Italian | complete | complete | **against the running product**, 2026-09-13 |
 | German | complete | complete | **against the running product**, 2026-09-17, by @MetheLittle |
-| Spanish | complete | complete | **against the running product** for the configuration and options forms and the entity names, 2026-09-21, and the zone card, 2026-09-26, by @laurash96 (native speaker, Colombia); notifications, repairs, services and the model card read in the file only (the model card finds no entity on a Spanish install, #279). Five notification strings added 2026-09-26 were read in the file that day, with two points still open in #215 |
+| Spanish | complete | complete | **against the running product** for the configuration and options forms and the entity names, 2026-09-21, and the zone card, 2026-09-26, by @laurash96 (native speaker, Colombia); notifications, repairs, services and the model card read in the file only. The model card found no entity on a Spanish install (#279); fixed on 2026-09-27 by matching entities on their identifier instead of their name, so the next read-back can reach it. Five notification strings added 2026-09-26 were read in the file that day, with two points still open in #215. **22 strings added on 2026-09-27 are written, not read back**: the form warnings, the wilting point fields and their two errors |
 
 **Read back** is the column that matters, and it is deliberately not a yes or a
 no. There are two different verifications behind that word and they do not catch

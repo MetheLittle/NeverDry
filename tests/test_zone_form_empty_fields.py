@@ -56,6 +56,7 @@ from never_dry.const import (
     CONF_ZONE_VALVE,
     CONF_ZONE_VOLUME_ENTITY,
     CONF_ZONE_VWC_SENSOR,
+    CONF_ZONE_WILTING_POINT,
     CONF_ZONES,
     DELIVERY_MODE_ESTIMATED_FLOW,
     DELIVERY_MODE_FLOW_METER,
@@ -149,6 +150,7 @@ FILLED = {
     CONF_ZONE_ROOT_DEPTH: 0.3,
     CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
     CONF_ZONE_FIELD_CAPACITY: 0.25,
+    CONF_ZONE_WILTING_POINT: 0.12,
     CONF_ZONE_EXPOSURE: EXPOSURE_CUSTOM,
     CONF_ZONE_MICROCLIMATE_FACTOR: 1.1,
     CONF_ZONE_VALVE: "switch.prato",
@@ -173,6 +175,7 @@ REFUSED_WHEN_EMPTY = {
     CONF_ZONE_EFFICIENCY: "efficiency_required",
     CONF_ZONE_FLOW_RATE: "flow_rate_required",
     CONF_ZONE_FIELD_CAPACITY: "field_capacity_required",
+    CONF_ZONE_WILTING_POINT: "wilting_point_required",
 }
 
 
@@ -492,3 +495,38 @@ class TestZoneWithNoValve:
 
         assert _was_refused(door, result)
         assert result["errors"]["base"] == "flow_rate_required"
+
+
+class TestTheTwoEndsOfACustomSoil:
+    """Both filled is not the same as both sensible.
+
+    The pair is a reservoir: full at the field capacity, empty at the wilting
+    point, and a probe reads where the ground sits between them. Put the floor
+    at or above the ceiling and the reservoir is zero or negative - which does
+    not fail loudly. It produces a zone that either never waters or asks for a
+    nonsensical volume, from two numbers the form took without a word.
+
+    Only a Custom soil can reach this state. A soil picked from the list brings
+    a pair off one texture row, and those cannot contradict each other.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("door", DOORS)
+    @pytest.mark.parametrize("floor", [0.25, 0.30])
+    async def test_a_floor_at_or_above_the_ceiling_is_refused(self, hass_mock, seeded, door, floor):
+        payload = _payload()
+        section = ZONE_FORM[CONF_ZONE_WILTING_POINT][0]
+        target = payload[section] if section else payload
+        target[CONF_ZONE_WILTING_POINT] = floor  # capacity in FILLED is 0.25
+
+        result, _flow = await _submit(door, hass_mock, payload)
+
+        assert _was_refused(door, result), f"{door}: a wilting point of {floor} against a capacity of 0.25 was accepted"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("door", DOORS)
+    async def test_a_floor_below_the_ceiling_is_accepted(self, hass_mock, seeded, door):
+        """The guard must not refuse the ordinary case it exists to protect."""
+        result, _flow = await _submit(door, hass_mock, _payload())
+
+        assert not _was_refused(door, result)

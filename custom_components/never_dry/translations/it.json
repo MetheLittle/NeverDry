@@ -51,7 +51,8 @@
               "vwc_sensor": "Sonda di umidità del suolo (questa zona)",
               "root_depth_m": "Profondità delle radici",
               "field_capacity": "Capacità di campo",
-              "soil_type": "Tipo di suolo"
+              "soil_type": "Tipo di suolo",
+              "wilting_point": "Punto di appassimento"
             },
             "data_description": {
               "area_m2": "Superficie di questa zona di irrigazione in metri quadrati",
@@ -61,8 +62,9 @@
               "microclimate_factor": "Usato solo quando l'esposizione è impostata su Personalizzato. Intervallo da 0,1 a 1,5; sopra 1.0 per zone che asciugano più in fretta del terreno aperto.",
               "vwc_sensor": "Opzionale. Una sonda interrata in questa zona, a circa un terzo della profondita' radicale e a meta' strada fra due gocciolatoi. Da sola viene mostrata accanto ai numeri della zona e nient'altro cambia. Dalle la profondita' radicale qui sotto e la zona irrighera' in base a cio' che dice il suo terreno.\n\n**Il sensore deve riportare su scala 0-100**, 0 per terreno asciutto e 100 per bagnato, che e' cio' che pubblicano le sonde da giardino. Un sensore su un'altra scala non e' supportato e le sue letture vengono ignorate.\n\n**Quella scala viene usata non calibrata, fissata a 0-100 preso alla lettera:** lo 0 e' trattato come il terreno piu' asciutto in cui una pianta possa vivere e il 100 come un terreno pieno. Le sonde reali sono tarate in fabbrica su aria secca e acqua libera, e nessuno dei due e' uno stato in cui il terreno si trovi mai, quindi un terreno pieno non legge davvero 100. I millimetri che ne escono sono percio' sbagliati di un fattore che nessuno ha misurato, di solito per eccesso: si irriga un po' piu' del necessario, non si lascia una zona a secco. Se la cosa ti interessa, il ragionamento e cosa lo risolverebbe sono scritti qui: {soil_doc}",
               "root_depth_m": "Profondita' dello strato radicale per cui la sonda qui sopra parla, ed e' il solo numero di questa sezione che nessuna tabella contiene: un prato, una siepe e un vaso differiscono di quattro volte sullo stesso terreno. Compilalo e la zona irrighera' secondo la sonda invece della stima meteo. Lascialo vuoto e la sonda resta una lettura mostrata accanto alla stima. La lettura 0-100 viene interpretata come quanta acqua fra quella che il terreno puo' davvero trattenere e' ancora presente, quindi sono la profondita' e il terreno qui sotto a trasformarla in millimetri.",
-              "field_capacity": "Letto solo quando il tipo di terreno qui sopra e' Personalizzato. Il contenuto d'acqua che questo suolo trattiene dopo aver finito di drenare, come frazione: circa 0.15 per la sabbia, 0.25 per il terreno medio, 0.35 per l'argilla. Serve per la stima meteo; una zona su terreno Personalizzato non puo' essere irrigata dalla propria sonda.",
-              "soil_type": "Opzionale. Di cosa e' fatto il terreno di questa zona. Fornisce quanta acqua il suolo trattiene e quanta di quella una pianta riesce a raggiungere, cosi' non devi conoscere nessuno dei due numeri. Lasciato su Automatico si assume un terreno medio, che va bene per la maggior parte dei giardini e viene detto esplicitamente al salvataggio. Personalizzato fornisce solo uno dei due valori, quindi una sonda non puo' irrigare una zona su terreno Personalizzato: per farlo scegli un terreno fra quelli elencati."
+              "field_capacity": "L'acqua che questo terreno trattiene dopo aver finito di sgrondare, come frazione: circa 0,15 per la sabbia, 0,25 per il terreno medio, 0,35 per l'argilla. Si compila solo con tipo di suolo Personalizzato, insieme al punto di appassimento qui sotto.",
+              "soil_type": "Opzionale. Di cosa è fatto il terreno di questa zona. Dalla scelta arrivano i due numeri che dicono quanta acqua questo terreno può mettere a disposizione delle piante: quanta ne trattiene da pieno e quanta ne resta imprigionata quando la pianta non riesce più a estrarla. Lasciato su Automatico vale un terreno medio, e te lo diciamo al salvataggio. Con Personalizzato i due numeri li inserisci tu, nelle due caselle qui sotto.",
+              "wilting_point": "L'acqua che resta nel terreno quando la pianta non riesce più a estrarla: circa 0,06 per la sabbia, 0,12 per il terreno medio, 0,22 per l'argilla. Deve essere minore della capacità di campo, perché quello che sta fra i due è il serbatoio su cui la sonda legge quanto la zona si è asciugata. Si compila solo con tipo di suolo Personalizzato."
             }
           },
           "valve_and_pipe": {
@@ -132,7 +134,9 @@
       "et_method_missing_sensors": "Questo metodo richiede sensori che l'installazione non ha dichiarato. Indica i sensori richiesti, oppure lascia il metodo su Automatico.",
       "et_method_unknown": "Metodo di evapotraspirazione sconosciuto.",
       "et_method_zone_probe": "Una sonda di umidità del suolo appartiene a una zona, non all'intero impianto. Impostala nelle opzioni di quella zona; il metodo scelto qui vale per le zone che non hanno una sonda propria.",
-      "field_capacity_required": "Inserisci una capacità di campo: il tipo di suolo è impostato su Personalizzato, che prende il valore da quel campo"
+      "field_capacity_required": "Inserisci una capacità di campo: il tipo di suolo è impostato su Personalizzato, che prende il valore da quel campo",
+      "wilting_point_required": "Inserisci un punto di appassimento: il tipo di suolo è Personalizzato, quindi i due estremi del terreno li dichiari tu",
+      "wilting_point_above_capacity": "Il punto di appassimento deve essere minore della capacità di campo: l'acqua che le piante possono usare è quella che sta fra i due"
     },
     "abort": {
       "already_configured": "NeverDry è già configurato"
@@ -191,7 +195,8 @@
               "vwc_sensor": "Sonda di umidità del suolo (questa zona)",
               "root_depth_m": "Profondità delle radici",
               "field_capacity": "Capacità di campo",
-              "soil_type": "Tipo di suolo"
+              "soil_type": "Tipo di suolo",
+              "wilting_point": "Punto di appassimento"
             },
             "data_description": {
               "plant_family": "Imposta la curva stagionale del Kc per ciò che cresce qui. Scegli Personalizzato per inserire un Kc fisso qui sotto.",
@@ -200,8 +205,9 @@
               "microclimate_factor": "Usato solo quando l'esposizione è impostata su Personalizzato. Intervallo da 0,1 a 1,5; sopra 1.0 per zone che asciugano più in fretta del terreno aperto.",
               "vwc_sensor": "Opzionale. Una sonda interrata in questa zona, a circa un terzo della profondita' radicale e a meta' strada fra due gocciolatoi. Da sola viene mostrata accanto ai numeri della zona e nient'altro cambia. Dalle la profondita' radicale qui sotto e la zona irrighera' in base a cio' che dice il suo terreno.\n\n**Il sensore deve riportare su scala 0-100**, 0 per terreno asciutto e 100 per bagnato, che e' cio' che pubblicano le sonde da giardino. Un sensore su un'altra scala non e' supportato e le sue letture vengono ignorate.\n\n**Quella scala viene usata non calibrata, fissata a 0-100 preso alla lettera:** lo 0 e' trattato come il terreno piu' asciutto in cui una pianta possa vivere e il 100 come un terreno pieno. Le sonde reali sono tarate in fabbrica su aria secca e acqua libera, e nessuno dei due e' uno stato in cui il terreno si trovi mai, quindi un terreno pieno non legge davvero 100. I millimetri che ne escono sono percio' sbagliati di un fattore che nessuno ha misurato, di solito per eccesso: si irriga un po' piu' del necessario, non si lascia una zona a secco. Se la cosa ti interessa, il ragionamento e cosa lo risolverebbe sono scritti qui: {soil_doc}",
               "root_depth_m": "Profondita' dello strato radicale per cui la sonda qui sopra parla, ed e' il solo numero di questa sezione che nessuna tabella contiene: un prato, una siepe e un vaso differiscono di quattro volte sullo stesso terreno. Compilalo e la zona irrighera' secondo la sonda invece della stima meteo. Lascialo vuoto e la sonda resta una lettura mostrata accanto alla stima. La lettura 0-100 viene interpretata come quanta acqua fra quella che il terreno puo' davvero trattenere e' ancora presente, quindi sono la profondita' e il terreno qui sotto a trasformarla in millimetri.",
-              "field_capacity": "Letto solo quando il tipo di terreno qui sopra e' Personalizzato. Il contenuto d'acqua che questo suolo trattiene dopo aver finito di drenare, come frazione: circa 0.15 per la sabbia, 0.25 per il terreno medio, 0.35 per l'argilla. Serve per la stima meteo; una zona su terreno Personalizzato non puo' essere irrigata dalla propria sonda.",
-              "soil_type": "Opzionale. Di cosa e' fatto il terreno di questa zona. Fornisce quanta acqua il suolo trattiene e quanta di quella una pianta riesce a raggiungere, cosi' non devi conoscere nessuno dei due numeri. Lasciato su Automatico si assume un terreno medio, che va bene per la maggior parte dei giardini e viene detto esplicitamente al salvataggio. Personalizzato fornisce solo uno dei due valori, quindi una sonda non puo' irrigare una zona su terreno Personalizzato: per farlo scegli un terreno fra quelli elencati."
+              "field_capacity": "L'acqua che questo terreno trattiene dopo aver finito di sgrondare, come frazione: circa 0,15 per la sabbia, 0,25 per il terreno medio, 0,35 per l'argilla. Si compila solo con tipo di suolo Personalizzato, insieme al punto di appassimento qui sotto.",
+              "soil_type": "Opzionale. Di cosa è fatto il terreno di questa zona. Dalla scelta arrivano i due numeri che dicono quanta acqua questo terreno può mettere a disposizione delle piante: quanta ne trattiene da pieno e quanta ne resta imprigionata quando la pianta non riesce più a estrarla. Lasciato su Automatico vale un terreno medio, e te lo diciamo al salvataggio. Con Personalizzato i due numeri li inserisci tu, nelle due caselle qui sotto.",
+              "wilting_point": "L'acqua che resta nel terreno quando la pianta non riesce più a estrarla: circa 0,06 per la sabbia, 0,12 per il terreno medio, 0,22 per l'argilla. Deve essere minore della capacità di campo, perché quello che sta fra i due è il serbatoio su cui la sonda legge quanto la zona si è asciugata. Si compila solo con tipo di suolo Personalizzato."
             }
           },
           "valve_and_pipe": {
@@ -264,7 +270,8 @@
               "vwc_sensor": "Sonda di umidità del suolo (questa zona)",
               "root_depth_m": "Profondità delle radici",
               "field_capacity": "Capacità di campo",
-              "soil_type": "Tipo di suolo"
+              "soil_type": "Tipo di suolo",
+              "wilting_point": "Punto di appassimento"
             },
             "data_description": {
               "plant_family": "Imposta la curva stagionale del Kc per ciò che cresce qui. Scegli Personalizzato per inserire un Kc fisso qui sotto.",
@@ -273,8 +280,9 @@
               "microclimate_factor": "Usato solo quando l'esposizione è impostata su Personalizzato. Intervallo da 0,1 a 1,5; sopra 1.0 per zone che asciugano più in fretta del terreno aperto.",
               "vwc_sensor": "Opzionale. Una sonda interrata in questa zona, a circa un terzo della profondita' radicale e a meta' strada fra due gocciolatoi. Da sola viene mostrata accanto ai numeri della zona e nient'altro cambia. Dalle la profondita' radicale qui sotto e la zona irrighera' in base a cio' che dice il suo terreno.\n\n**Il sensore deve riportare su scala 0-100**, 0 per terreno asciutto e 100 per bagnato, che e' cio' che pubblicano le sonde da giardino. Un sensore su un'altra scala non e' supportato e le sue letture vengono ignorate.\n\n**Quella scala viene usata non calibrata, fissata a 0-100 preso alla lettera:** lo 0 e' trattato come il terreno piu' asciutto in cui una pianta possa vivere e il 100 come un terreno pieno. Le sonde reali sono tarate in fabbrica su aria secca e acqua libera, e nessuno dei due e' uno stato in cui il terreno si trovi mai, quindi un terreno pieno non legge davvero 100. I millimetri che ne escono sono percio' sbagliati di un fattore che nessuno ha misurato, di solito per eccesso: si irriga un po' piu' del necessario, non si lascia una zona a secco. Se la cosa ti interessa, il ragionamento e cosa lo risolverebbe sono scritti qui: {soil_doc}",
               "root_depth_m": "Profondita' dello strato radicale per cui la sonda qui sopra parla, ed e' il solo numero di questa sezione che nessuna tabella contiene: un prato, una siepe e un vaso differiscono di quattro volte sullo stesso terreno. Compilalo e la zona irrighera' secondo la sonda invece della stima meteo. Lascialo vuoto e la sonda resta una lettura mostrata accanto alla stima. La lettura 0-100 viene interpretata come quanta acqua fra quella che il terreno puo' davvero trattenere e' ancora presente, quindi sono la profondita' e il terreno qui sotto a trasformarla in millimetri.",
-              "field_capacity": "Letto solo quando il tipo di terreno qui sopra e' Personalizzato. Il contenuto d'acqua che questo suolo trattiene dopo aver finito di drenare, come frazione: circa 0.15 per la sabbia, 0.25 per il terreno medio, 0.35 per l'argilla. Serve per la stima meteo; una zona su terreno Personalizzato non puo' essere irrigata dalla propria sonda.",
-              "soil_type": "Opzionale. Di cosa e' fatto il terreno di questa zona. Fornisce quanta acqua il suolo trattiene e quanta di quella una pianta riesce a raggiungere, cosi' non devi conoscere nessuno dei due numeri. Lasciato su Automatico si assume un terreno medio, che va bene per la maggior parte dei giardini e viene detto esplicitamente al salvataggio. Personalizzato fornisce solo uno dei due valori, quindi una sonda non puo' irrigare una zona su terreno Personalizzato: per farlo scegli un terreno fra quelli elencati."
+              "field_capacity": "L'acqua che questo terreno trattiene dopo aver finito di sgrondare, come frazione: circa 0,15 per la sabbia, 0,25 per il terreno medio, 0,35 per l'argilla. Si compila solo con tipo di suolo Personalizzato, insieme al punto di appassimento qui sotto.",
+              "soil_type": "Opzionale. Di cosa è fatto il terreno di questa zona. Dalla scelta arrivano i due numeri che dicono quanta acqua questo terreno può mettere a disposizione delle piante: quanta ne trattiene da pieno e quanta ne resta imprigionata quando la pianta non riesce più a estrarla. Lasciato su Automatico vale un terreno medio, e te lo diciamo al salvataggio. Con Personalizzato i due numeri li inserisci tu, nelle due caselle qui sotto.",
+              "wilting_point": "L'acqua che resta nel terreno quando la pianta non riesce più a estrarla: circa 0,06 per la sabbia, 0,12 per il terreno medio, 0,22 per l'argilla. Deve essere minore della capacità di campo, perché quello che sta fra i due è il serbatoio su cui la sonda legge quanto la zona si è asciugata. Si compila solo con tipo di suolo Personalizzato."
             }
           },
           "valve_and_pipe": {
@@ -330,7 +338,9 @@
       "zone_already_exists": "Esiste già una zona con questo nome",
       "too_many_zones": "È stato raggiunto il numero massimo di zone (50)",
       "zone_name_too_long": "Il nome della zona è troppo lungo (massimo 64 caratteri)",
-      "field_capacity_required": "Inserisci una capacità di campo: il tipo di suolo è impostato su Personalizzato, che prende il valore da quel campo"
+      "field_capacity_required": "Inserisci una capacità di campo: il tipo di suolo è impostato su Personalizzato, che prende il valore da quel campo",
+      "wilting_point_required": "Inserisci un punto di appassimento: il tipo di suolo è Personalizzato, quindi i due estremi del terreno li dichiari tu",
+      "wilting_point_above_capacity": "Il punto di appassimento deve essere minore della capacità di campo: l'acqua che le piante possono usare è quella che sta fra i due"
     },
     "abort": {
       "no_zones": "Nessuna zona configurata"
@@ -398,6 +408,11 @@
         "et_simple": "Semplice (solo temperatura)",
         "hargreaves": "Hargreaves-Samani (temperatura max/min giornaliera)",
         "penman_monteith": "Penman-Monteith (FAO-56, meteo completo)"
+      }
+    },
+    "et_coefficient": {
+      "unit_of_measurement": {
+        "mm_per_celsius_per_day": "mm/°C/giorno"
       }
     },
     "soil_type": {
@@ -659,13 +674,24 @@
     "notification_irrigation_ineffective_body": "Zona {zone}: l'umidità del suolo non è salita dopo l'ultima irrigazione.",
     "notification_model_drift_title": "Rilevata deriva del modello",
     "notification_model_drift_body": "Zona {zone}: la correlazione fra umidità e modello è scesa a {correlation}.",
-    "notification_water_me_now_title": "Serve irrigare, e non c'è con cosa",
+    "notification_water_me_now_title": "Serve irrigare: nessuna valvola configurata",
     "notification_water_me_now_body": "Il giardino ha bisogno d'acqua:\n\n{zones}\n\nNessuna valvola di irrigazione è configurata. Irriga a mano, oppure aggiungi una valvola nelle impostazioni dell'integrazione.",
     "notification_watchdog_triggered_title": "Valvola chiusa d'autorità dal watchdog di sicurezza",
     "notification_watchdog_triggered_body": "La valvola della zona {zone} è rimasta aperta per più di {duration_min} min senza ricevere un comando di chiusura. NeverDry l'ha chiusa d'autorità per sicurezza. Verifica che l'automazione o la logica di erogazione funzionino correttamente.",
     "notification_water_me_now_zone_line": "- {zone}: deficit {deficit} mm, {liters} L ({minutes} min)",
     "notification_deficit_anomaly_title": "Deficit molto oltre la soglia",
-    "notification_deficit_anomaly_body": "Zona {zone}: il deficit di {deficit} mm supera {limit} mm, {multiplier} volte la soglia. L'irrigazione potrebbe non arrivare a questa zona. Controlla la valvola, la programmazione e il registro di Home Assistant."
+    "notification_deficit_anomaly_body": "Zona {zone}: il deficit di {deficit} mm supera {limit} mm, {multiplier} volte la soglia. L'irrigazione potrebbe non arrivare a questa zona. Controlla la valvola, la programmazione e il registro di Home Assistant.",
+    "warn_area_small": "L'area irrigata {area} è inferiore a {minimum}. Controlla che sia la superficie davvero bagnata, non tutto il giardino.",
+    "warn_guard_flow_missing": "Manca la portata di progetto. Serve per la durata prevista e per dimensionare il timeout di sicurezza, e in una versione futura diventerà obbligatoria (obiettivo v1.0).",
+    "warn_flow_low": "La portata di progetto {flow} è inferiore a {minimum}. Una zona così lenta impiega ore a erogare una dose normale.",
+    "warn_flow_high": "La portata di progetto {flow} supera {maximum}. Controlla l'unità: questa è la portata di una zona, non dell'intero impianto.",
+    "warn_probe_no_depth": "Sonda del terreno: manca la profondità delle radici, quindi la sonda verrà mostrata ma non deciderà il deficit di questa zona - continua a deciderlo il modello del sito. Indica la profondità che le radici raggiungono e la zona irrigherà in base a ciò che il terreno misura.",
+    "warn_depth_no_probe": "Sonda del terreno: la profondità delle radici non verrà usata, perché questa zona non ha una sonda da leggere. Scegline una, oppure svuota il campo.",
+    "warn_probe_custom_soil_incomplete": "Sonda del terreno: il suolo di questa zona è Personalizzato e manca uno dei due estremi, quindi la sonda verrà mostrata ma non deciderà il deficit. Inserisci sia la capacità di campo sia il punto di appassimento, oppure scegli un terreno fra quelli elencati.",
+    "warn_probe_assumed_soil": "Sonda del terreno: questa zona misurerà il deficit assumendo un terreno medio, perché non è stato scelto un tipo di suolo. Un terreno sabbioso trattiene circa la metà di quell'acqua e l'argilla circa la metà in più, quindi indica il tuo se lo conosci.",
+    "warn_override_ignored": "{label}: {chosen}, quindi il valore personalizzato {value} non verrà usato. Scegli Personalizzato per applicarlo, oppure svuota il campo.",
+    "warn_meter_mode_without_meter": "La modalità di erogazione è impostata su valvola con contatore, ma non è stato scelto nessun contatore: la modalità dosa in base al volume misurato, quindi l'entità che misura non è facoltativa.",
+    "warn_meter_of_another_zone": "Il contatore scelto appartiene alla valvola della zona {zone}: riporta l'acqua di quella zona, non di questa. Mentre quella zona è ferma questo contatore resta immobile, e un contatore immobile qui significa nessun flusso verificato e una sessione che non si può misurare."
   },
   "issues": {
     "soil_probe_needs_a_zone": {

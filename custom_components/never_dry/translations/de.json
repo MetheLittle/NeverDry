@@ -51,7 +51,8 @@
               "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)",
               "root_depth_m": "Wurzeltiefe",
               "field_capacity": "Feldkapazität",
-              "soil_type": "Bodenart"
+              "soil_type": "Bodenart",
+              "wilting_point": "Welkepunkt"
             },
             "data_description": {
               "area_m2": "Fläche dieser Bewässerungszone in Quadratmetern",
@@ -61,8 +62,9 @@
               "microclimate_factor": "Wird nur verwendet, wenn die Standort-Exposition benutzerdefiniert ist. Bereich 0,1-1,5; über 1,0 für Zonen, die schneller trocknen als offenes Gelände.",
               "vwc_sensor": "Optional. Ein Bodenfeuchte-Sensor, der in dieser Zone zu etwa einem Drittel der Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Dient nur zur Anzeige des Wertes in der Zonen-Übersicht und ändert sonst nichts. Ist die Wurzeltiefe unten angeben wird die Zone auf Basis der gemessenen Bodenfeuchte bewässert.\n\n**Der Sensor muss Werte zwischen 0 und 100 liefern** (0 für trockenen Boden, 100 für nassen Boden); dies entspricht dem Standard von Bodenfeuchtemessern für Gartenanlagen. Sensoren mit anderem Wertebereich werden nicht unterstützt; die Messwerte werden ignoriert.\n\n**Der Wertebereich wird unkalibriert verwendet und ist fest zwischen 0-100 eingestellt:** Der Wert 0 entspricht der Bodenfeuchte am Welkepunkt und 100 steht für vollständig gesättigten Boden. Da handelsübliche Sensoren ab Werk auf 'lufttrocken' und 'reines Wasser' kalibriert sind - Zustände, die im Boden so nicht vorkommen - zeigt ein Bodenfeuchte-Sensor bei vollständig gesättigtem Boden niemals 100 an. Die sich daraus ergebenden Millimeterangaben weichen daher um einen unbekannten Faktor ab (meist nach oben), was dazu führt, dass eher etwas mehr als nötig bewässert wird. Wenn es von Bedeutung ist: Die Begründung und der Lösungsansatz sind hier aufgeführt: {soil_doc}",
               "root_depth_m": "Tiefe des Wurzelbereichs, den der obige Sensor erfasst - liefert einen Wert, der in keiner Tabelle steht: Rasen, Hecke und Pflanzkübel unterscheiden sich im selben Boden um den Faktor vier. Einen Wert angeben und diese Zone misst ihr Defizit anstatt es zu berechnen. Leer lassen und der Bodenfeuchte-Sensor dient nur zur Anzeige des Messwerts neben der Berechnung. Der Messwert im Bereich von 0 bis 100 gibt an, welcher Anteil der tatsächlich im Boden speicherbaren Wassermenge noch vorhanden ist; die Umrechnung in Millimeter hängt also von der Tiefe und der Bodenart (weiter unten) ab.",
-              "field_capacity": "Wird nur verwendet, wenn die Bodenart oben auf benutzerdefiniert steht. Die Wassermenge, den der wassergesättigte Boden halten kann als Bruchzahl: Ungefähr 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton. Verwendet für die Berechnung auf Basis der Wetterdaten; eine Zone mit benutzerdefinierter Bodenart kann nicht über einen Bodenfeuchte-Sensor bewässert werden.",
-              "soil_type": "Optional. Welche Bodenart ist in dieser Zone. Liefert den Wert für die Feldkapazität, gegen die der Messwert des Sensors abgeglichen wird. Bei automatisch, wird ein mittelbindiger Boden angenommen, was für die meisten Gärten passt. Beim Speichern erfolgt ein entsprechender Hinweis. Benutzerdefiniert unterstützt nur eine Variante: Ein Bodenfeuchte-Sensor kann nicht gleichzeitig verwendet werden - dafür eine vordefinierte Bodenart auswählen."
+              "field_capacity": "Das Wasser, das dieser Boden hält, nachdem er abgetrocknet ist, als Anteil: etwa 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton. Nur bei Bodenart Benutzerdefiniert auszufüllen, zusammen mit dem Welkepunkt darunter.",
+              "soil_type": "Optional. Woraus der Boden dieser Zone besteht. Die Auswahl liefert die beiden Werte, die angeben, wie viel Wasser dieser Boden einer Pflanze zur Verfügung stellen kann: wie viel er im vollen Zustand hält und wie viel gebunden bleibt, wenn die Pflanze nichts mehr entnehmen kann. Auf Automatisch gilt ein mittlerer Boden, und beim Speichern wird darauf hingewiesen. Bei Benutzerdefiniert geben Sie beide Werte selbst in den zwei Feldern darunter an.",
+              "wilting_point": "Das Wasser, das im Boden bleibt, wenn die Pflanze nichts mehr entnehmen kann: etwa 0,06 für Sand, 0,12 für Lehm, 0,22 für Ton. Er muss unter der Feldkapazität liegen, denn was dazwischen liegt, ist der Speicher, an dem ein Sensor abliest. Nur bei Bodenart Benutzerdefiniert auszufüllen."
             }
           },
           "valve_and_pipe": {
@@ -132,7 +134,9 @@
       "et_method_missing_sensors": "Dieses Modell benötigt Sensoren, welche nicht deklariert wurden. Die benötigten Sensoren auswählen oder das Modell auf automatisch lassen.",
       "et_method_unknown": "Unbekanntes Evapotranspirations-Modell",
       "et_method_zone_probe": "Ein Bodenfeuchte-Sensor ist einer Zone zugeordnet und nicht dem gesamten System. Diesen Sensor in den Optionen der betreffenden Zone festlegen; diese Modelleinstellung gilt für Zonen ohne eigenen Sensor.",
-      "field_capacity_required": "Wert für Feldkapazität eintragen: Die Bodenart steht auf benutzerdefiniert. Der Wert aus diesem Feld wird verwendet."
+      "field_capacity_required": "Wert für Feldkapazität eintragen: Die Bodenart steht auf benutzerdefiniert. Der Wert aus diesem Feld wird verwendet.",
+      "wilting_point_required": "Geben Sie einen Welkepunkt an: die Bodenart ist Benutzerdefiniert, also geben Sie beide Grenzen selbst an",
+      "wilting_point_above_capacity": "Der Welkepunkt muss unter der Feldkapazität liegen: das für Pflanzen verfügbare Wasser ist das, was dazwischen liegt"
     },
     "abort": {
       "already_configured": "NeverDry ist bereits konfiguriert"
@@ -191,7 +195,8 @@
               "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)",
               "root_depth_m": "Wurzeltiefe",
               "field_capacity": "Feldkapazität",
-              "soil_type": "Bodenart"
+              "soil_type": "Bodenart",
+              "wilting_point": "Welkepunkt"
             },
             "data_description": {
               "plant_family": "Setzt die saisonale Kc-Kurve für das, was hier wächst. Benutzerdefiniert wählen, um unten einen festen Kc zu setzen.",
@@ -200,8 +205,9 @@
               "microclimate_factor": "Wird nur verwendet, wenn die Standort-Exposition benutzerdefiniert ist. Bereich 0,1-1,5; über 1,0 für Zonen, die schneller trocknen als offenes Gelände.",
               "vwc_sensor": "Optional. Ein Bodenfeuchte-Sensor, der in dieser Zone zu etwa einem Drittel der Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Dient nur zur Anzeige des Wertes in der Zonen-Übersicht und ändert sonst nichts. Die Wurzeltiefe unten angeben und die Zone wird auf Basis der gemessenen Bodenfeuchte bewässert.\n\n**Der Sensor muss Werte zwischen 0 und 100 liefern** (0 für trockenen Boden, 100 für nassen Boden); dies entspricht dem Standard von Bodenfeuchtemessern für Gartenanlagen. Sensoren mit anderem Wertebereich werden nicht unterstützt; die Messwerte werden ignoriert.\n\n**Der Wertebereich wird unkalibriert verwendet und ist fest zwischen 0-100 eingestellt:** Der Wert 0 entspricht der Bodenfeuchte am Welkepunkt und 100 steht für vollständig gesättigten Boden. Da handelsübliche Sensoren ab Werk auf 'lufttrocken' und 'reines Wasser' kalibriert sind - Zustände, die im Boden so nicht vorkommen - zeigt ein Bodenfeuchte-Sensor bei vollständig gesättigtem Boden niemals 100 an. Die sich daraus ergebenden Millimeterangaben weichen daher um einen unbekannten Faktor ab (meist nach oben), was dazu führt, dass eher etwas mehr als nötig bewässert wird. Wenn es von Bedeutung ist: Die Begründung und der Lösungsansatz sind hier aufgeführt: {soil_doc}",
               "root_depth_m": "Tiefe des Wurzelbereichs, den der obige Sensor erfasst - liefert einen Wert, der in keiner Tabelle steht: Rasen, Hecke und Pflanzkübel unterscheiden sich im selben Boden um den Faktor vier. Einen Wert angeben und diese Zone misst ihr Defizit anstatt es zu berechnen. Leer lassen und der Bodenfeuchte-Sensor dient nur zur Anzeige des Messwerts neben der Berechnung. Der Messwert des Sensors im Bereich von 0 bis 100 gibt an, welcher Anteil der tatsächlich im Boden speicherbaren Wassermenge noch vorhanden ist; die Umrechnung in Millimeter hängt also von der Tiefe und der Bodenart ab.",
-              "field_capacity": "Wird nur verwendet, wenn die Bodenart oben auf benutzerdefiniert steht. Wassermenge, den der wassergesättigte Boden halten kann als Bruchzahl: Etwa 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton. Verwendet für die Wetterberechnung; eine Zone mit benutzerdefinierter Bodenart kann nicht über einen Bodenfeuchte-Sensor bewässert werden.",
-              "soil_type": "Optional. Welche Bodenart ist in dieser Zone. Liefert den Wert für die Feldkapazität, gegen die der Messwert des Sensors abgeglichen wird. Wenn auf automatisch belassen, wird ein mittelbindiger Boden angenommen, was für die meisten Gärten passt. Beim Speichern erfolgt ein entsprechender Hinweis. Benutzerdefiniert unterstützt nur eine Variante: Ein Bodenfeuchte-Sensor kann nicht gleichzeitig verwendet werden - dafür eine vordefinierte Bodenart auswählen."
+              "field_capacity": "Das Wasser, das dieser Boden hält, nachdem er abgetrocknet ist, als Anteil: etwa 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton. Nur bei Bodenart Benutzerdefiniert auszufüllen, zusammen mit dem Welkepunkt darunter.",
+              "soil_type": "Optional. Woraus der Boden dieser Zone besteht. Die Auswahl liefert die beiden Werte, die angeben, wie viel Wasser dieser Boden einer Pflanze zur Verfügung stellen kann: wie viel er im vollen Zustand hält und wie viel gebunden bleibt, wenn die Pflanze nichts mehr entnehmen kann. Auf Automatisch gilt ein mittlerer Boden, und beim Speichern wird darauf hingewiesen. Bei Benutzerdefiniert geben Sie beide Werte selbst in den zwei Feldern darunter an.",
+              "wilting_point": "Das Wasser, das im Boden bleibt, wenn die Pflanze nichts mehr entnehmen kann: etwa 0,06 für Sand, 0,12 für Lehm, 0,22 für Ton. Er muss unter der Feldkapazität liegen, denn was dazwischen liegt, ist der Speicher, an dem ein Sensor abliest. Nur bei Bodenart Benutzerdefiniert auszufüllen."
             }
           },
           "valve_and_pipe": {
@@ -264,7 +270,8 @@
               "vwc_sensor": "Bodenfeuchte-Sensor (für diese Zone)",
               "root_depth_m": "Wurzeltiefe",
               "field_capacity": "Feldkapazität",
-              "soil_type": "Bodenart"
+              "soil_type": "Bodenart",
+              "wilting_point": "Welkepunkt"
             },
             "data_description": {
               "plant_family": "Setzt die saisonale Kc-Kurve für das, was hier wächst. Benutzerdefiniert wählen, um unten einen festen Kc zu setzen.",
@@ -273,8 +280,9 @@
               "microclimate_factor": "Wird nur verwendet, wenn die Standort-Exposition benutzerdefiniert ist. Bereich 0,1-1,5; über 1,0 für Zonen, die schneller trocknen als offenes Gelände.",
               "vwc_sensor": "Optional. Ein Bodenfeuchte-Sensor, der in dieser Zone zu etwa einem Drittel der Wurzeltiefe im Boden steckt und in der Mitte zwischen zwei Emittern platziert ist. Dient nur zur Anzeige des Wertes in der Zonen-Übersicht und ändert sonst nichts. Ist die Wurzeltiefe unten angeben wird die Zone auf Basis der gemessenen Bodenfeuchte bewässert.\n\n**Der Sensor muss Werte zwischen 0 und 100 liefern** (0 für trockenen Boden, 100 für nassen Boden); dies entspricht dem Standard von Bodenfeuchtemessern für Gartenanlagen. Sensoren mit anderem Wertebereich werden nicht unterstützt; die Messwerte werden ignoriert.\n\n**Der Wertebereich wird unkalibriert verwendet und ist fest zwischen 0-100 eingestellt:** Der Wert 0 entspricht der Bodenfeuchte am Welkepunkt und 100 steht für vollständig gesättigten Boden. Da handelsübliche Sensoren ab Werk auf 'lufttrocken' und 'reines Wasser' kalibriert sind - Zustände, die im Boden so nicht vorkommen - zeigt ein Bodenfeuchte-Sensor bei vollständig gesättigtem Boden niemals 100 an. Die sich daraus ergebenden Millimeterangaben weichen daher um einen unbekannten Faktor ab (meist nach oben), was dazu führt, dass eher etwas mehr als nötig bewässert wird. Wenn es von Bedeutung ist: Die Begründung und der Lösungsansatz sind hier aufgeführt: {soil_doc}",
               "root_depth_m": "Tiefe des Wurzelbereichs, den der obige Sensor erfasst - liefert einen Wert, der in keiner Tabelle steht: Rasen, Hecke und Pflanzkübel unterscheiden sich im selben Boden um den Faktor vier. Einen Wert angeben und diese Zone misst ihr Defizit anstatt es zu berechnen. Leer lassen und der Bodenfeuchte-Sensor dient nur zur Anzeige des Messwerts neben der Berechnung. Der Messwert im Bereich von 0 bis 100 gibt an, welcher Anteil der tatsächlich im Boden speicherbaren Wassermenge noch vorhanden ist; die Umrechnung in Millimeter hängt also von der Tiefe und der Bodenart (weiter unten) ab.",
-              "field_capacity": "Wird nur verwendet, wenn die Bodenart oben auf benutzerdefiniert steht. Die Wassermenge, den der wassergesättigte Boden halten kann als Bruchzahl: Ungefähr 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton. Verwendet für die Wetterberechnung; eine Zone mit benutzerdefinierter Bodenart kann nicht über einen Bodenfeuchte-Sensor bewässert werden.",
-              "soil_type": "Optional. Welche Bodenart ist in dieser Zone. Liefert den Wert für die Feldkapazität, gegen die der Messwert des Sensors abgeglichen wird. Wenn auf automatisch belassen, wird ein mittelbindiger Boden angenommen, was für die meisten Gärten passt. Beim Speichern erfolgt ein entsprechender Hinweis. Benutzerdefiniert unterstützt nur eine Variante: Ein Bodenfeuchte-Sensor kann nicht gleichzeitig verwendet werden - dafür eine vordefinierte Bodenart auswählen."
+              "field_capacity": "Das Wasser, das dieser Boden hält, nachdem er abgetrocknet ist, als Anteil: etwa 0,15 für Sand, 0,25 für Lehm, 0,35 für Ton. Nur bei Bodenart Benutzerdefiniert auszufüllen, zusammen mit dem Welkepunkt darunter.",
+              "soil_type": "Optional. Woraus der Boden dieser Zone besteht. Die Auswahl liefert die beiden Werte, die angeben, wie viel Wasser dieser Boden einer Pflanze zur Verfügung stellen kann: wie viel er im vollen Zustand hält und wie viel gebunden bleibt, wenn die Pflanze nichts mehr entnehmen kann. Auf Automatisch gilt ein mittlerer Boden, und beim Speichern wird darauf hingewiesen. Bei Benutzerdefiniert geben Sie beide Werte selbst in den zwei Feldern darunter an.",
+              "wilting_point": "Das Wasser, das im Boden bleibt, wenn die Pflanze nichts mehr entnehmen kann: etwa 0,06 für Sand, 0,12 für Lehm, 0,22 für Ton. Er muss unter der Feldkapazität liegen, denn was dazwischen liegt, ist der Speicher, an dem ein Sensor abliest. Nur bei Bodenart Benutzerdefiniert auszufüllen."
             }
           },
           "valve_and_pipe": {
@@ -330,7 +338,9 @@
       "zone_already_exists": "Eine Zone mit diesem Namen existiert bereits",
       "too_many_zones": "Maximale Zonenanzahl erreicht (50)",
       "zone_name_too_long": "Zonen-Name zu lang (max. 64 Zeichen)",
-      "field_capacity_required": "Wert für Feldkapazität eintragen: Die Bodenart steht auf benutzerdefiniert. Der Wert aus diesem Feld wird verwendet."
+      "field_capacity_required": "Wert für Feldkapazität eintragen: Die Bodenart steht auf benutzerdefiniert. Der Wert aus diesem Feld wird verwendet.",
+      "wilting_point_required": "Geben Sie einen Welkepunkt an: die Bodenart ist Benutzerdefiniert, also geben Sie beide Grenzen selbst an",
+      "wilting_point_above_capacity": "Der Welkepunkt muss unter der Feldkapazität liegen: das für Pflanzen verfügbare Wasser ist das, was dazwischen liegt"
     },
     "abort": {
       "no_zones": "Keine Zonen angelegt"
@@ -398,6 +408,11 @@
         "et_simple": "Einfach (nur Temperatur)",
         "hargreaves": "Hargreaves-Samani (tägliche max./min. Temperatur)",
         "penman_monteith": "Penman-Monteith (FAO-56, alle Wetter Sensoren)"
+      }
+    },
+    "et_coefficient": {
+      "unit_of_measurement": {
+        "mm_per_celsius_per_day": "mm/°C/Tag"
       }
     },
     "soil_type": {
@@ -659,13 +674,24 @@
     "notification_irrigation_ineffective_body": "Zone {zone}: Die Bodenfeuchte ist nach der letzten Bewässerung nicht gestiegen.",
     "notification_model_drift_title": "Modellabweichung erkannt",
     "notification_model_drift_body": "Zone {zone}: Die Korrelation zwischen Feuchtigkeit und Modell ist auf {correlation} gefallen.",
-    "notification_water_me_now_title": "Bewässerung nötig, aber kein Ventil vorhanden",
+    "notification_water_me_now_title": "Bewässerung nötig: kein Ventil konfiguriert",
     "notification_water_me_now_body": "Ihr Garten braucht Wasser:\n\n{zones}\n\nEs ist kein Bewässerungsventil konfiguriert. Gießen Sie von Hand, oder fügen Sie in den Einstellungen der Integration ein Ventil hinzu.",
     "notification_watchdog_triggered_title": "Ventil vom Sicherheits-Watchdog zwangsweise geschlossen",
     "notification_watchdog_triggered_body": "Das Ventil der Zone {zone} ist länger als {duration_min} Min. geöffnet, ohne einen Schließbefehl erhalten zu haben. NeverDry hat es aus Sicherheitsgründen zwangsweise geschlossen. Prüfe, ob die Automatisierung oder die Wasserabgabe korrekt funktioniert.",
     "notification_water_me_now_zone_line": "- {zone}: Defizit {deficit} mm, {liters} L ({minutes} min)",
     "notification_deficit_anomaly_title": "Defizit weit über dem Schwellenwert",
-    "notification_deficit_anomaly_body": "Zone {zone}: das Defizit von {deficit} mm liegt über {limit} mm, dem {multiplier}-fachen des Schwellenwerts. Die Bewässerung erreicht diese Zone möglicherweise nicht. Prüfen Sie Ventil, Zeitplan und das Home-Assistant-Protokoll."
+    "notification_deficit_anomaly_body": "Zone {zone}: das Defizit von {deficit} mm liegt über {limit} mm, dem {multiplier}-fachen des Schwellenwerts. Die Bewässerung erreicht diese Zone möglicherweise nicht. Prüfen Sie Ventil, Zeitplan und das Home-Assistant-Protokoll.",
+    "warn_area_small": "Die bewässerte Fläche {area} liegt unter {minimum}. Prüfen Sie, ob es die tatsächlich bewässerte Fläche ist und nicht der ganze Garten.",
+    "warn_guard_flow_missing": "Keine Auslegungs-Durchflussrate. Sie wird für die erwartete Dauer und für den Sicherheits-Timeout gebraucht und wird in einer künftigen Version verpflichtend (Ziel v1.0).",
+    "warn_flow_low": "Die Auslegungs-Durchflussrate {flow} liegt unter {minimum}. Eine so langsame Zone braucht Stunden für eine normale Gabe.",
+    "warn_flow_high": "Die Auslegungs-Durchflussrate {flow} liegt über {maximum}. Prüfen Sie die Einheit: das ist die Rate einer Zone, nicht der ganzen Anlage.",
+    "warn_probe_no_depth": "Bodensensor: keine Wurzeltiefe angegeben, der Sensor wird also angezeigt, bestimmt aber nicht das Defizit dieser Zone - das tut weiterhin das Modell der Anlage. Geben Sie die Tiefe an, die die Wurzeln erreichen, und die Zone bewässert nach dem, was der Boden misst.",
+    "warn_depth_no_probe": "Bodensensor: die Wurzeltiefe wird nicht verwendet, weil diese Zone keinen Sensor hat. Wählen Sie einen aus oder leeren Sie das Feld.",
+    "warn_probe_custom_soil_incomplete": "Bodensensor: die Bodenart dieser Zone ist Benutzerdefiniert und eine der beiden Grenzen fehlt, der Sensor wird also angezeigt, bestimmt aber nicht das Defizit. Geben Sie sowohl die Feldkapazität als auch den Welkepunkt an, oder wählen Sie eine Bodenart aus der Liste.",
+    "warn_probe_assumed_soil": "Bodensensor: diese Zone bestimmt ihr Defizit unter Annahme eines mittleren Bodens, da keine Bodenart gewählt wurde. Sandiger Boden hält etwa die Hälfte dieses Wassers, Ton etwa die Hälfte mehr - wählen Sie Ihre Bodenart, wenn Sie sie kennen.",
+    "warn_override_ignored": "{label}: {chosen}, Ihr eigener Wert {value} wird also nicht verwendet. Wählen Sie Benutzerdefiniert, um ihn anzuwenden, oder leeren Sie das Feld.",
+    "warn_meter_mode_without_meter": "Als Abgabemodus ist Ventil mit Durchflusszähler eingestellt, es ist aber kein Zähler gewählt: der Modus dosiert nach gemessenem Volumen, die messende Entität ist also nicht optional.",
+    "warn_meter_of_another_zone": "Der gewählte Durchflusszähler gehört zum Ventil der Zone {zone}: er meldet das Wasser jener Zone, nicht dieser. Solange jene Zone ruht, steht dieser Zähler still, und ein stillstehender Zähler bedeutet hier keinen bestätigten Durchfluss und eine Bewässerung, die nicht gemessen werden kann."
   },
   "issues": {
     "soil_probe_needs_a_zone": {

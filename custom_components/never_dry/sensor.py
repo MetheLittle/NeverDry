@@ -85,6 +85,7 @@ from .const import (
     CONF_ZONE_VALVE,
     CONF_ZONE_VOLUME_ENTITY,
     CONF_ZONE_VWC_SENSOR,
+    CONF_ZONE_WILTING_POINT,
     CONF_ZONES,
     DEFAULT_ALPHA,
     DEFAULT_ANEMOMETER_HEIGHT_M,
@@ -1921,12 +1922,15 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         soil = SOIL_TYPES.get(self._soil_type, SOIL_TYPES[DEFAULT_SOIL_TYPE])
         preset = soil["field_capacity"]
         self._own_field_capacity = zone_config.get(CONF_ZONE_FIELD_CAPACITY) if preset is None else preset
-        # The other end of the interval, and the reason a probe needs a soil
-        # *row* rather than a single number: the reading says where the ground
-        # sits between dry and wet, so both ends have to come from the same soil.
-        # ``Custom`` supplies a field capacity and no wilting point, which is why
-        # a probe cannot drive a Custom-soil zone (the form says so).
-        self._own_wilting_point = soil["wilting_point"]
+        # The other end of the interval, and the reason a probe needs a soil *row*
+        # rather than a single number: the reading says where the ground sits
+        # between dry and wet, so both ends have to come from the same soil.
+        # Custom carries neither, and asks for both in the form - which is what
+        # lets a probe drive a Custom-soil zone at all. It used to supply the top
+        # end only, so the one owner who had measured their own soil was the one
+        # who lost the probe.
+        preset_floor = soil["wilting_point"]
+        self._own_wilting_point = zone_config.get(CONF_ZONE_WILTING_POINT) if preset_floor is None else preset_floor
         self._probe_drives = bool(self._own_probe) and None not in (
             self._own_root_depth,
             self._own_field_capacity,
@@ -2137,6 +2141,23 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         """Which of the two numbers is the one this zone is acting on."""
         self._review_probe_standing()
         return "zone_probe" if self._zone.measured_deficit is not None else "site_model"
+
+    @property
+    def probe_set_aside(self) -> bool:
+        """A probe that should be driving this zone, and currently is not.
+
+        Kept apart from :attr:`deficit_source` rather than folded into it as a
+        third value, because that attribute is something people write
+        automations against and a new value would arrive unannounced.
+
+        The distinction it carries is the one the field asked for. Two zones can
+        both report ``site_model`` for opposite reasons: one has no probe and
+        never did, the other has one that has gone quiet - and only the second
+        means a number changed scale without anything happening in the garden.
+        That is the 9.6 mm to 0.7 mm of GH #234, where nothing on screen said
+        the ruler had been swapped.
+        """
+        return bool(self._probe_drives) and self._zone.measured_deficit is None
 
     def _probe_is_fresh(self) -> bool:
         """Whether the probe has spoken recently enough for its reading to stand.
@@ -2490,6 +2511,9 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             if vwc is None:
                 return
             self._probe_last_seen = stamp
+            # Restored together with the timestamp it is compared against: the
+            # two halves of the freshness judgement, or neither.
+            self._probe_quiet.restore(attributes.get("probe_quiet_samples"))
             self._probe_vwc = vwc
             measured = self._probe_model.step(VWCReading(vwc=vwc))
             self._probe_implied_mm = measured.value_mm
@@ -3113,6 +3137,7 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             # the wrong one of the two is GH #234's second defect.
             "estimate_mm": round(self._et_deficit, 2),
             "deficit_source": self.deficit_source,
+            "probe_set_aside": self.probe_set_aside,
             "irrigating": self._irrigating,
             "awaiting_valve": self._awaiting_valve,
         }
@@ -3178,6 +3203,13 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             # is a probe reporting a frozen value.
             if self._probe_value_moved_at is not None:
                 attrs["probe_value_moved_at"] = self._probe_value_moved_at.isoformat()
+            # The bar the age above is judged against. Restoring one without the
+            # other leaves an old age measured against nothing, and nothing is
+            # read as fresh - which is how a probe silent for fifteen hours was
+            # believed after a reload, and its zone's deficit fell by 9 mm.
+            samples = self._probe_quiet.as_samples()
+            if samples:
+                attrs["probe_quiet_samples"] = samples
         if self._probe_drives:
             # What the reading was multiplied by, published beside what it
             # produced. The number carries the authority of a measurement and
@@ -3300,6 +3332,12 @@ class ZoneDeficitSensor(SensorEntity):
             "flow_rate_lpm": self._zone_sensor._flow_rate,
             "irrigating": self._zone_sensor._irrigating,
             "awaiting_valve": self._zone_sensor._awaiting_valve,
+            # Where this number came from, on the entity that shows the number.
+            # It lived only on the parent zone entity, which is not what the
+            # card reads - so the one figure whose meaning can change had no way
+            # to say which meaning was current.
+            "deficit_source": self._zone_sensor.deficit_source,
+            "probe_set_aside": self._zone_sensor.probe_set_aside,
         }
         if self._zone_sensor._last_irrigated:
             attrs["last_session_duration_s"] = self._zone_sensor._last_session_duration_s
@@ -3565,18 +3603,34 @@ class _ZoneTextSensor(SensorEntity):
         unique_suffix: str,
         device_info: DeviceInfo | None = None,
         diagnostic: bool = False,
+        follows_session: bool = False,
     ) -> None:
+        """``follows_session`` for anything that changes when a session closes.
+
+        Without it the entity keeps whatever it last published until Home
+        Assistant next polls it, which is fine for a value that changes with the
+        weather and wrong for one that changes the instant a button is pressed:
+        *Mark irrigated* rewrote the zone and the page went on showing the
+        previous run for up to half a minute, which reads as a button that did
+        not work (GH #216).
+        """
         self._zone_sensor = zone_sensor
         self._attr_translation_key = translation_key
         self._attr_icon = icon
         slug = zone_sensor.zone_name.lower().replace(" ", "_")
         self._attr_unique_id = f"{unique_suffix}_{slug}"
+        if follows_session:
+            zone_sensor.register_session_listener(self._on_session_update)
         if device_info:
             self._attr_device_info = device_info
         if diagnostic:
             from homeassistant.const import EntityCategory
 
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def _on_session_update(self) -> None:
+        if getattr(self, "hass", None):
+            self.async_write_ha_state()
 
 
 class ZoneLastIrrigatedSensor(_ZoneTextSensor):
@@ -3594,6 +3648,7 @@ class ZoneLastIrrigatedSensor(_ZoneTextSensor):
             "mdi:clock-outline",
             "last_irrigated_zone",
             device_info,
+            follows_session=True,
         )
 
     @property
@@ -3640,6 +3695,7 @@ class ZoneLastSourceSensor(_ZoneTextSensor):
             "mdi:information-outline",
             "last_source_zone",
             device_info,
+            follows_session=True,
         )
 
     @property
@@ -3873,6 +3929,7 @@ class ZoneLastVolumeSensor(_ZoneTextSensor):
             "mdi:water",
             "last_volume_zone",
             device_info,
+            follows_session=True,
         )
 
     @property
@@ -3962,7 +4019,16 @@ class ZoneAreaSensor(_ZoneTextSensor):
 
 
 class ZoneEfficiencySensor(_ZoneTextSensor):
-    """Configured zone efficiency."""
+    """Configured zone efficiency.
+
+    ``state_class`` on a dimensionless number, for a reason that is about
+    presentation rather than statistics: without a unit *or* a state class Home
+    Assistant shows the raw state string, so this read ``0.92`` beside a
+    threshold reading ``20,0 mm`` in the same Spanish card - one number
+    localised and the next not (GH #279, @laurash96).
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
@@ -3980,7 +4046,15 @@ class ZoneEfficiencySensor(_ZoneTextSensor):
 
 
 class ZoneKcSensor(_ZoneTextSensor):
-    """Current crop coefficient Kc (effective: base curve * site exposure)."""
+    """Current crop coefficient Kc (effective: base curve * site exposure).
+
+    Carries a ``state_class`` for the same presentation reason as
+    :class:`ZoneEfficiencySensor`. Unlike efficiency it genuinely varies - the
+    seasonal curve moves it through the year - so the long-term statistics this
+    also switches on are worth having rather than merely harmless.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
