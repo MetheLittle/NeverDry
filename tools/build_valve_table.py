@@ -89,6 +89,15 @@ _COMMAND_CAVEATS = {
     "device_runtime_cap": (
         "it closes on its own preset runtime, so a run ends when the device decides rather than when NeverDry does"
     ),
+    # Distinct from device_runtime_cap, which is one valve closing itself. This is a
+    # controller that can order and time a whole set of zones on its own, which is the
+    # same job the scheduler does: left enabled, two schedulers share one set of pipes
+    # and neither knows about the other. The rows carrying it were reported with it
+    # switched off, and that is worth recording rather than assuming.
+    "firmware_scheduler": (
+        "the controller can sequence and time the valves itself, and this row was reported with that turned off "
+        "so NeverDry decides"
+    ),
 }
 
 
