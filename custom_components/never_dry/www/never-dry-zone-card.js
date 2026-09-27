@@ -548,6 +548,43 @@ const UID_PREFIX = {
 };
 
 // A NeverDry zone is a device created by the integration with this model.
+// ---- entity registry, read once and shared by both cards ----------------
+//
+// Entity ids are built from the entity's *translated* name, so on a Spanish
+// install the water balance sensor is `sensor.neverdry_metodo_de_balance_hidrico`
+// and any lookup by English suffix finds nothing at all (GH #279). unique_ids do
+// not move with the language, which is why they are what both cards match on.
+//
+// Module-level rather than per card: the registry is one thing, both cards want
+// the same answer, and two copies of this logic is how they drift apart.
+let _uidMap = null;
+let _uidLoading = false;
+
+function uidOf(entityId) {
+  return _uidMap ? _uidMap[entityId] : undefined;
+}
+
+function ensureUidRegistry(hass, onLoaded) {
+  if (_uidMap || _uidLoading || !hass) return;
+  _uidLoading = true;
+  hass
+    .callWS({ type: "config/entity_registry/list" })
+    .then((list) => {
+      const map = {};
+      for (const e of list) {
+        if (e.platform === "never_dry" && e.unique_id) map[e.entity_id] = e.unique_id;
+      }
+      _uidMap = map;
+    })
+    .catch(() => {
+      _uidMap = {}; // give up: the suffix fallback stays in effect
+    })
+    .finally(() => {
+      _uidLoading = false;
+      if (onLoaded) onLoaded();
+    });
+}
+
 const ZONE_MODEL = "Irrigation Zone";
 
 // Which parts of the card a configuration may switch off, and the selector that
@@ -626,7 +663,7 @@ class NeverDryZoneCard extends HTMLElement {
     const out = {};
     if (!hass || !deviceId || !hass.entities) return out;
 
-    const uidMap = this._uidMap;
+    const uidMap = _uidMap;
     const suffixRoles = Object.entries(ROLE_SUFFIX).sort((a, b) => b[1].length - a[1].length);
     const uidRoles = Object.entries(UID_PREFIX);
 
@@ -673,26 +710,10 @@ class NeverDryZoneCard extends HTMLElement {
   }
 
   _ensureRegistry() {
-    // Lazily load entity_id -> unique_id for never_dry entities (admin WS call).
-    if (this._uidMap || this._uidLoading || !this._hass) return;
-    this._uidLoading = true;
-    this._hass
-      .callWS({ type: "config/entity_registry/list" })
-      .then((list) => {
-        const map = {};
-        for (const e of list) {
-          if (e.platform === "never_dry" && e.unique_id) map[e.entity_id] = e.unique_id;
-        }
-        this._uidMap = map;
-      })
-      .catch(() => {
-        this._uidMap = {}; // give up -> suffix fallback stays in effect
-      })
-      .finally(() => {
-        this._uidLoading = false;
-        this._built = false; // rebuild with corrected mapping
-        this._render();
-      });
+    ensureUidRegistry(this._hass, () => {
+      this._built = false; // rebuild with the corrected mapping
+      this._render();
+    });
   }
 
   _deviceName() {
@@ -1583,6 +1604,12 @@ class NeverDryModelCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    // The registry is what lets this card find its entity in any language; ask
+    // for it once and redraw when it lands.
+    ensureUidRegistry(hass, () => {
+      this._built = false;
+      this._render();
+    });
     this._render();
   }
 
@@ -1597,6 +1624,23 @@ class NeverDryModelCard extends HTMLElement {
     const hass = this._hass;
     if (!hass) return null;
     if (this._config && this._config.entity) return hass.states[this._config.entity] || null;
+
+    // By unique_id first: entity ids are generated from the *translated* name,
+    // so on a Spanish install this sensor is
+    // `sensor.neverdry_metodo_de_balance_hidrico` and an English suffix matches
+    // nothing - the card then reported "no NeverDry entities found" on an
+    // installation where every one of them was present (GH #279). The
+    // unique_id is `water_balance_method` in every language.
+    if (_uidMap) {
+      const byUid = Object.keys(_uidMap).find((e) => {
+        const uid = _uidMap[e];
+        return uid === "water_balance_method" || uid.endsWith("_water_balance_method");
+      });
+      if (byUid && hass.states[byUid]) return hass.states[byUid];
+    }
+
+    // Suffix, while the registry is still loading or could not be read. Right
+    // for English, and the reason this was the only path for so long.
     const id = Object.keys(hass.states).find((e) => e.endsWith("_water_balance_method"));
     return id ? hass.states[id] : null;
   }
