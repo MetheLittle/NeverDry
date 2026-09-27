@@ -484,6 +484,19 @@ a reactive mode that may water at an unwelcome hour.
 
 **On the deficit, only at the threshold** is what the product does now.
 
+**Two axes is the structure, not the interface.** The pair guarantees the set is
+complete; it does not follow that a user should be asked twice. The form this
+note assumes is **one dropdown with four entries**, named after gardens rather
+than mechanisms - *every evening*, *when it needs it, in the evening*, *little
+and often*, *when the ground is dry* - with the axes behind them. It is the same
+discipline the project already applies elsewhere: the dropdown decides, and
+what lies underneath is ours to keep coherent rather than the user's to
+assemble.
+
+That is a proposal and not a decision: nobody has seen those four names beside
+each other in a real form, and a name that reads well in a design note can still
+be the one nobody picks.
+
 Note what the hour is **not**, per §10.1: even in the top row it is a request,
 not a promise. Eleven zones cannot all start at 05:00, so a declared hour is
 read as *not before this*.
@@ -537,6 +550,14 @@ contradictions between zones:
 
    The deficit is the zone's, but the scheduler is what reads it, so nothing is
    moved to the wrong side by doing this here.
+
+   **What it anticipates is the deficit, never the clock.** A zone that declares
+   an hour still does not start before it. Anticipation lets a run happen while
+   the soil is drier than the zone's own floor and not yet at its threshold; it
+   does not move the hour the user chose, and a zone set to six that watered at
+   ten the night before would be exactly the surprise this note spends its
+   length avoiding. In the diagram of §8.4.3 that ordering is visible: the
+   question about time is asked first and answered alone.
 
    **Left empty, anticipation does not run.** Not a conventional value, not a
    sensible default: absent. The scheduler then behaves exactly as it does
@@ -715,6 +736,78 @@ plumbing rather than the schedule.
 Worth stating plainly because the direction of drift is predictable: every
 guard written for the automatic path is a guard somebody will eventually apply
 to the manual one, each time for a locally sensible reason.
+
+#### 8.4.5 Resuming an interrupted run belongs here
+
+Three things in this note interrupt a run, and they were written as three
+separate problems:
+
+- a configuration change reloads the entry and cuts short whatever was watering
+  (GH #282);
+- rain begins while a zone is running (GH #213, and §8.4.4);
+- a zone is dropped rather than queued because something else was running
+  (§8.1, GH #270 and GH #239).
+
+They are one problem. Each leaves a zone that was given part of its dose, and
+each asks the same question: **does it get the rest, and when?**
+
+**And the answer belongs to the scheduler, because nothing else knows enough to
+give it.** Resuming is not a property of the session that was cut short: it
+needs to know whether the irrigability window is still open, whether another
+zone now holds the shared resource, whether it has rained since, and whether the
+installation has meanwhile entered winter. Those are the scheduler's four
+questions from §8.4.2, asked again. A session object that resumed itself would
+be re-deciding admission with none of the information admission is decided on.
+
+**Half of it is already free, which is worth knowing before building
+machinery.** A zone that waters *on the deficit* needs no resumption at all: the
+water it did not receive is still missing, so its deficit is still above the
+line, so it comes round again on its own at the next evaluation. The deferral
+counter of §4 is the only memory involved, and it already exists.
+
+**The half that is not free is the zone that waters at an hour.** Cut that run
+short and the remaining deficit changes nothing, because the trigger is the
+clock and the clock has passed. It waits a day - which is precisely the case
+where a user notices, because they chose an hour for a reason.
+
+So the shape is narrower than "resume interrupted sessions". It is: **a run that
+was interrupted before delivering its dose makes its zone eligible again for as
+long as the envelope allows, whatever its trigger says.** One rule, and it
+turns the clock from a gate into what §10.1 already says it is - a lower bound
+rather than a promise.
+
+**Rain closes the runs, the zones do their own accounting.** That settles the
+part §8.4.4 left open, and it settles it by splitting the question rather than
+answering it once.
+
+*Deciding is the scheduler's, and it is one decision for the installation.* Rain
+that has begun falling is an event in the sky, not in a zone, so it does not
+make sense to ask each zone separately whether it should stop: the scheduler
+hears it once and closes what is running.
+
+*Counting is the zone's, and it already works.* Each zone credits the water its
+valve actually delivered up to the moment it closed - the ordinary settlement of
+a short delivery - and the rain reaches it through the observed-rain channel
+like any other rain. Nothing new is needed, and this is why the double counting
+worried about earlier was never there: the two figures come from two different
+places and describe two different things the zone received.
+
+**"Everything running" means everything outdoors.** Rain does not fall in a
+greenhouse or under a canopy, and closing a greenhouse's run because it is
+raining in the garden would be the same error as refusing it for frost - which
+§9.2 already refuses to make. The zone's indoor declaration is a statement of
+fact, and it applies here for the same reason it applies there.
+
+What stays open is narrower than before, and it is one question rather than
+three: **how much rain closes a run.** A rate, or an amount since the run began?
+Too little and a passing shower ends a watering that was needed; too much and
+the zone keeps running under a downpour. That number wants the field, not this
+note.
+
+One distinction to keep, because it decides whether §8.4.5's rule applies: a run
+closed *by rain* is not the same as one *interrupted*. The reload case leaves a
+dose still wanted; the rain case may well have satisfied it, and the zone's own
+deficit is what says which - not a flag on the session.
 
 ## 9. The irrigability envelope
 
