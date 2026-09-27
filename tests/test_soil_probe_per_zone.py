@@ -821,6 +821,51 @@ class TestWhatTheFormSaysAboutTheProbesRole:
         assert len(warnings) == 1
         assert "medium soil" in warnings[0]
 
+    def test_a_half_declared_custom_soil_is_told_the_probe_will_not_drive(self):
+        """The third way a probe stays silent, and the one that went unsaid.
+
+        Sensor bound, depth given, and still no probe: the soil is Custom and
+        carries one end of its interval. The form used to warn about a missing
+        depth and about an assumed soil, and say nothing at all about this - so
+        the report that started all of this, "ignored completely, but still in
+        the settings", described a case its own warning did not cover.
+
+        Both boxes are asked for now, so only a zone saved before they existed
+        can be in this state. That is exactly the zone whose owner has been
+        waiting for an explanation.
+        """
+        from never_dry.config_flow import _probe_role_warnings
+
+        warnings = _probe_role_warnings(
+            {
+                CONF_ZONE_VWC_SENSOR: "sensor.soil",
+                CONF_ZONE_ROOT_DEPTH: 0.3,
+                CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
+                CONF_ZONE_FIELD_CAPACITY: 0.30,
+            }
+        )
+
+        assert len(warnings) == 1
+        assert "will not set the deficit" in warnings[0]
+        assert "wilting point" in warnings[0]
+
+    def test_a_custom_soil_with_both_ends_says_nothing(self):
+        """Complete is complete: the warning must not nag a correct zone."""
+        from never_dry.config_flow import _probe_role_warnings
+
+        assert (
+            _probe_role_warnings(
+                {
+                    CONF_ZONE_VWC_SENSOR: "sensor.soil",
+                    CONF_ZONE_ROOT_DEPTH: 0.3,
+                    CONF_ZONE_SOIL_TYPE: SOIL_TYPE_CUSTOM,
+                    CONF_ZONE_FIELD_CAPACITY: 0.30,
+                    CONF_ZONE_WILTING_POINT: 0.15,
+                }
+            )
+            == []
+        )
+
     def test_numbers_with_no_probe_to_read_are_flagged_as_unused(self):
         """The same shape as the ignored-override warnings: a value nobody reads."""
         from never_dry.config_flow import _probe_role_warnings

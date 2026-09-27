@@ -87,6 +87,7 @@ from .const import (
     RAIN_TYPE_DAILY_TOTAL,
     RAIN_TYPE_EVENT,
     SOIL_TYPE_AUTO,
+    SOIL_TYPE_CUSTOM,
     SOIL_TYPES,
     SYSTEM_TYPE_CUSTOM,
     SYSTEM_TYPE_DRIP,
@@ -983,6 +984,13 @@ def _soil_interval_errors(user_input: dict) -> dict[str, str]:
     return errors
 
 
+def _custom_soil_missing_an_end(zone: dict) -> bool:
+    """A Custom soil that carries only one of the two numbers a probe needs."""
+    if zone.get(CONF_ZONE_SOIL_TYPE, DEFAULT_SOIL_TYPE) != SOIL_TYPE_CUSTOM:
+        return False
+    return zone.get(CONF_ZONE_FIELD_CAPACITY) is None or zone.get(CONF_ZONE_WILTING_POINT) is None
+
+
 def _probe_role_warnings(zone: dict) -> list[str]:
     """Say which role the probe will actually play, and on what ground.
 
@@ -1015,6 +1023,16 @@ def _probe_role_warnings(zone: dict) -> list[str]:
         return [
             "Soil probe: the root depth will not be used, because this zone has no probe to read."
             " Pick one, or clear the field"
+        ]
+    if probe and depth is not None and _custom_soil_missing_an_end(zone):
+        # The third way a probe stays silent, and the one that went unsaid. Both
+        # boxes are asked for now, so a zone can only reach this state if it was
+        # saved before they were - which is precisely the zone whose owner has
+        # been waiting for an explanation.
+        return [
+            "Soil probe: this zone's soil is Custom and one end of it is missing, so the probe will"
+            " be shown but will not set the deficit. Open the soil fields and give both the field"
+            " capacity and the wilting point, or pick a soil from the list"
         ]
     if probe and zone.get(CONF_ZONE_SOIL_TYPE, DEFAULT_SOIL_TYPE) == SOIL_TYPE_AUTO:
         return [
