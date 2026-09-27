@@ -1365,3 +1365,109 @@ class TestAliveAndMovingAreDifferentQuestions:
         assert "probe_last_seen" in attrs
         assert "probe_value_moved_at" in attrs
         assert attrs["probe_last_seen"] != attrs["probe_value_moved_at"]
+
+
+class TestTheBarSurvivesAReloadToo:
+    """Field, 2026-09-27: editing one zone emptied another zone's deficit.
+
+    The probe on 'Giardino Melino' had been silent for fifteen hours and had
+    been correctly set aside the evening before, with the zone running on the
+    estimate. Then an unrelated zone was edited, which reloads the whole config
+    entry, and the deficit fell from 9.6 mm to 0.7 mm between two ticks two
+    minutes apart. No rain, no irrigation, no new reading: the probe was simply
+    believed again, and it reads 99%.
+
+    The cause is that only half the judgement survived. ``probe_last_seen`` is
+    restored from the attributes, so the age was right. The bar it is compared
+    against lived in memory alone and came back empty - and the guard reads
+
+        return floor_s is None or age_s <= floor_s
+
+    so an empty bar answers *fresh*, whatever the age. Fifteen hours of silence
+    then had nothing between it and the zone but the 24-hour backstop.
+    """
+
+    def _driven(self, hass_mock):
+        hub = DrynessIndexSensor(hass_mock, dict(HUB))
+        zone = _zone(hass_mock, hub, **DRIVEN)
+        zone.hass = hass_mock
+        hass_mock.states.get.return_value = None
+        return zone
+
+    @pytest.mark.asyncio
+    async def test_a_probe_silent_past_its_cadence_stays_set_aside(self, hass_mock):
+        """The field case, at the age it actually happened at: fifteen hours,
+        which is under the backstop and far over the probe's own rhythm."""
+        zone = self._driven(hass_mock)
+        silent_since = datetime.now(UTC) - timedelta(hours=15)
+        now_s = datetime.now(UTC).timestamp()
+        zone.async_get_last_state = _last_state(
+            {
+                "estimate_mm": 9.6,
+                "probe_moisture_pct": 99.0,
+                "probe_last_seen": silent_since.isoformat(),
+                # What the probe's own rhythm had been: about an hour.
+                "probe_quiet_samples": [[now_s - 7200, 3600.0]],
+            }
+        )
+
+        await zone.async_added_to_hass()
+
+        assert zone._probe_is_fresh() is False, "a bar restored with the age it judges must still refuse this probe"
+        assert zone.deficit_source == "site_model"
+        assert zone._zone_deficit == pytest.approx(9.6), "the reserve the zone had before the reload"
+
+    @pytest.mark.asyncio
+    async def test_without_the_bar_the_same_probe_is_believed(self, hass_mock):
+        """The bug itself, kept as a test so the fix cannot be undone quietly:
+        the identical state minus the restored bar is accepted as fresh."""
+        zone = self._driven(hass_mock)
+        silent_since = datetime.now(UTC) - timedelta(hours=15)
+        zone.async_get_last_state = _last_state(
+            {
+                "estimate_mm": 9.6,
+                "probe_moisture_pct": 99.0,
+                "probe_last_seen": silent_since.isoformat(),
+            }
+        )
+
+        await zone.async_added_to_hass()
+
+        assert zone._probe_is_fresh() is True, (
+            "with no bar there is nothing to fail: this is what the field saw, and why the bar is now persisted"
+        )
+
+    def test_the_bar_makes_a_round_trip(self, hass_mock):
+        zone = self._driven(hass_mock)
+        at = datetime.now(UTC).timestamp()
+        _has_come_back_from(zone, 300.0, 900.0, 600.0)
+        saved = zone._probe_quiet.as_samples()
+
+        fresh = self._driven(hass_mock)
+        fresh._probe_quiet.restore(saved)
+
+        assert fresh._probe_quiet.value(at) == zone._probe_quiet.value(at)
+
+    @pytest.mark.parametrize(
+        "rubbish",
+        [
+            None,
+            "not a list",
+            [["a", "b"]],
+            [[1.0]],
+            [[True, False]],
+            # Not decreasing: restoring this would make value() answer with
+            # something that is not the window's maximum.
+            [[100.0, 10.0], [200.0, 900.0]],
+        ],
+    )
+    def test_a_bar_that_cannot_be_trusted_is_dropped_rather_than_used(self, hass_mock, rubbish):
+        """Attributes come back as whatever was written, which after a version
+        change may not be this. A bar built from rubbish is worse than none."""
+        zone = self._driven(hass_mock)
+        _has_come_back_from(zone, 300.0)
+        before = zone._probe_quiet.value(datetime.now(UTC).timestamp())
+
+        zone._probe_quiet.restore(rubbish)
+
+        assert zone._probe_quiet.value(datetime.now(UTC).timestamp()) == before
