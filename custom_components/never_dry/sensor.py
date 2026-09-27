@@ -3579,18 +3579,34 @@ class _ZoneTextSensor(SensorEntity):
         unique_suffix: str,
         device_info: DeviceInfo | None = None,
         diagnostic: bool = False,
+        follows_session: bool = False,
     ) -> None:
+        """``follows_session`` for anything that changes when a session closes.
+
+        Without it the entity keeps whatever it last published until Home
+        Assistant next polls it, which is fine for a value that changes with the
+        weather and wrong for one that changes the instant a button is pressed:
+        *Mark irrigated* rewrote the zone and the page went on showing the
+        previous run for up to half a minute, which reads as a button that did
+        not work (GH #216).
+        """
         self._zone_sensor = zone_sensor
         self._attr_translation_key = translation_key
         self._attr_icon = icon
         slug = zone_sensor.zone_name.lower().replace(" ", "_")
         self._attr_unique_id = f"{unique_suffix}_{slug}"
+        if follows_session:
+            zone_sensor.register_session_listener(self._on_session_update)
         if device_info:
             self._attr_device_info = device_info
         if diagnostic:
             from homeassistant.const import EntityCategory
 
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def _on_session_update(self) -> None:
+        if getattr(self, "hass", None):
+            self.async_write_ha_state()
 
 
 class ZoneLastIrrigatedSensor(_ZoneTextSensor):
@@ -3608,6 +3624,7 @@ class ZoneLastIrrigatedSensor(_ZoneTextSensor):
             "mdi:clock-outline",
             "last_irrigated_zone",
             device_info,
+            follows_session=True,
         )
 
     @property
@@ -3654,6 +3671,7 @@ class ZoneLastSourceSensor(_ZoneTextSensor):
             "mdi:information-outline",
             "last_source_zone",
             device_info,
+            follows_session=True,
         )
 
     @property
@@ -3887,6 +3905,7 @@ class ZoneLastVolumeSensor(_ZoneTextSensor):
             "mdi:water",
             "last_volume_zone",
             device_info,
+            follows_session=True,
         )
 
     @property

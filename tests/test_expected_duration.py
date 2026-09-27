@@ -300,3 +300,62 @@ class TestSessionListeners:
         zone.register_session_listener(lambda: calls.append(1))
         zone.notify_session_listeners()
         assert calls == [1]
+
+
+class TestMarkIrrigatedRefreshesWhatItChanges:
+    """Every entity the button rewrites must redraw when it is pressed.
+
+    Field report GH #216: *Mark irrigated* reset the volume immediately while
+    the time and the deficit stood still until the next poll - a button that
+    changes the zone and leaves the page showing the previous run for up to
+    half a minute, which reads as a button that did not work.
+
+    Two of those were fixed in September by routing ``reset_deficit`` through
+    the session listeners. What that did not reach were the entities on the
+    text-sensor base, which registers nothing: the *last irrigated* timestamp,
+    the source that irrigated it, and the volume of that run. All three are
+    written by ``mark_irrigated``.
+
+    This test is against the *set*, not against three entities: it fails when
+    something the button changes has no way to say so.
+    """
+
+    #: What ``Zone.mark_irrigated`` writes, and the entity that shows each.
+    REWRITTEN_BY_THE_BUTTON = (
+        ("ZoneDeficitSensor", "the deficit it clears"),
+        ("ZoneLastIrrigatedSensor", "when it was irrigated"),
+        ("ZoneLastSourceSensor", "what irrigated it"),
+        ("ZoneLastVolumeSensor", "the volume credited"),
+        ("ZoneSessionWaterSensor", "the running total"),
+        ("ZoneLastDurationSensor", "how long the last run took"),
+    )
+
+    def test_each_one_follows_the_session(self, di_sensor):
+        import inspect
+
+        from never_dry import sensor as sensor_module
+
+        missing = []
+        for name, shows in self.REWRITTEN_BY_THE_BUTTON:
+            cls = getattr(sensor_module, name)
+            source = inspect.getsource(cls)
+            follows = "follows_session=True" in source or "register_session_listener" in source
+            if not follows:
+                missing.append(f"{name} ({shows})")
+
+        assert not missing, (
+            "these entities are rewritten by Mark irrigated and have no way to redraw, so the page "
+            "keeps the previous run until Home Assistant next polls:\n  " + "\n  ".join(missing)
+        )
+
+    def test_the_listener_actually_fires_on_mark_irrigated(self, di_sensor):
+        """The registration is half of it; this is the other half."""
+        hass = _hass_with_meter(0.0, "L")
+        zone = _make_zone(di_sensor, hass, flow_rate=5.0)
+        zone._zone_deficit = 8.0
+        calls = []
+        zone.register_session_listener(lambda: calls.append(1))
+
+        zone.reset_deficit("mark_irrigated")
+
+        assert calls, "pressing the button must notify the entities that show what it changed"
