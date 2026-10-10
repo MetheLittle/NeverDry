@@ -1601,6 +1601,12 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                                 selector.NumberSelectorConfig(min=0.05, max=0.6, step=0.01, mode="box")
                             ),
                             vol.Optional(
+                                CONF_ZONE_WILTING_POINT,
+                                description={"suggested_value": _d(CONF_ZONE_WILTING_POINT, None)},
+                            ): selector.NumberSelector(
+                                selector.NumberSelectorConfig(min=0.01, max=0.4, step=0.01, mode="box")
+                            ),
+                            vol.Optional(
                                 CONF_ZONE_EXPOSURE,
                                 description={"suggested_value": _d(CONF_ZONE_EXPOSURE, DEFAULT_EXPOSURE)},
                             ): selector.SelectSelector(
