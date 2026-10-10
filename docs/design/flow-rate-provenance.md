@@ -294,6 +294,37 @@ delivery reveals counter increments, and the smallest ever seen is the meter's
 limit of detection. No test is required, though a supervised test contributes
 its observed step too.
 
+## A way in without a figure: the watering habit (GH #212)
+
+*Decided 2026-09-30 with @MetheLittle; raised by @laurafabry in GH #196, who
+could not finish setup.* The design flow rate is required for a zone with a
+valve, since without it a volume cannot become a duration. Someone without a
+meter, and without the emitters' ratings, cannot answer it in litres per hour.
+
+**Minutes do not replace it.** NeverDry decides how much water is needed, not
+for how long; a fixed number of minutes waters the same in July and in October,
+which is what a timer already does. So the model stays, and only the question
+changes.
+
+**Beside the field, not instead of it.** A choice in the zone decides how the
+rate is declared: *I know the flow rate*, or *I know how long I usually water*.
+The choice decides and the box under it is read, as everywhere else in the form.
+
+**The anchor is the zone's own irrigation threshold.** It is the deficit at
+which the zone already says it wants water, so it is the "properly dry" the
+question refers to, and the user has set it already. The rate is the volume the
+zone gives back at that threshold, computed exactly as it computes a watering
+(`threshold × area ÷ efficiency`), divided by the minutes declared. A custom
+deficit was considered and dropped: millimetres of deficit are less legible than
+litres per hour, not more.
+
+**It is a declaration, and the form says so.** On a zone with a meter nothing is
+at stake: the historical rate takes over after the first metered sessions. On a
+zone without one, the derived rate is never checked and is still used for every
+future duration, so the form states it where the minutes are entered.
+
+Not written yet; it is built after the 0.12.0 stable.
+
 ## Open
 
 - Notifying when historical ÷ design falls below a fraction of the zone's own
