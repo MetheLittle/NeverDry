@@ -27,7 +27,8 @@ environments, outdoor and greenhouse, and the shared pump declined) and §8.4.7
 
 **Added 2026-10-10**, and not yet reflected in section 14: section 8.5 (the
 electrical limit of a controller board, GH #320, held by a valve coordinator
-rather than by the scheduler).
+rather than by the scheduler) and section 8.6 (the master stays on for the
+whole sequence, GH #95).
 
 Nothing is binding while the note is `Draft`: a working answer is still a
 proposal.
@@ -1000,6 +1001,27 @@ Three choices keep each side from having to know too much:
 The coordinator is described in `../design_domain_object_model.md` as a
 proposed object. It is not written, and it lands with the scheduler work,
 together with the wiring between the two.
+
+### 8.6 The master stays on for the whole sequence
+
+*From GH #95 (@MrEcosse, @safepay); decided 2026-10-10.* The master valve or
+pump follows zone activity, and on its own that rule cycles it: with the
+written defaults, a 10 s linger against a 30 s inter-zone delay, a pump would
+stop and restart between every pair of zones, which is exactly what the linger
+exists to prevent.
+
+The fix belongs here, not in the linger. **The scheduler knows the sequence**,
+so it keeps the master on while another zone of the same sequence is still to
+run, whatever the gap. The linger then has one job only: the pause after the
+last zone, counted from that zone's **confirmed** close, for the same reason a
+queue waits for a closed valve and not for a timer (section 8.3).
+
+What is asked of the user is the master's entity and nothing else. Its start
+order (1 s after the first zone valve is confirmed open, safe for a pump and
+harmless for a master valve), its 5 s linger and the zones it serves (all of
+them) are defaults; a signed start offset, the linger and a per-zone "does not
+use the master" flag are optional. The full decision is in
+`../design_domain_object_model.md`, under the master valve/pump.
 
 ## 9. The irrigability envelope
 

@@ -1,7 +1,7 @@
 # Design — Domain Object Model
 
 **Status:** Accepted (ADR), 2026-08-16
-**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object; 2026-08-01 RFC to dissolve `System` into `Environment` + capability-matched models; 2026-10-10 a valve coordinator proposed for the electrical limit of a controller board, GH #320)
+**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object; 2026-08-01 RFC to dissolve `System` into `Environment` + capability-matched models; 2026-10-10 a valve coordinator proposed for the electrical limit of a controller board, GH #320; 2026-10-10 the master's start order, linger and per-zone opt-out, GH #95)
 **Related:** GH #74 (actuator abstraction discussion), GH #94 (`valve.*` support), GH #95 (master valve/pump), GH #320 (station limit of a 24 VAC controller), [Water-Balance Reference Model](design_water_balance_reference_model.md) (where the deficit lives), [Domain Model Anomalies](design_domain_model_anomalies.md) (code-verified audit against this model)
 
 ## Purpose
@@ -142,6 +142,7 @@ classDiagram
         +d_max : own reservoir
         +threshold_mm
         +cycle_soak : CycleSoakRule
+        +uses_master : optional, default yes
         +deficit : Deficit, starts at 0
         +counters : WaterCounters
         +effective_kc(base_kc)
@@ -204,7 +205,8 @@ classDiagram
     }
 
     class MasterDriver {
-        +off_delay_s
+        +start_delay_s : 1 s after the first zone opens, optional
+        +off_delay_s : 5 s after the last confirmed close, optional
         +follow(any_zone_driver_active)
     }
 
@@ -442,8 +444,12 @@ activity, takes no decisions, has no notion of liters.
 
 | Member | Kind | Meaning |
 |---|---|---|
-| `off_delay_s` | attr | Linger delay after the last active zone |
-| `follow(any_zone_driver_active)` | method | ON while any ZoneDriver is active, OFF (after the linger) when none is |
+| `start_delay_s` | attr | When the master starts relative to the first zone valve. **Default: 1 s after the first zone valve is confirmed open.** Optional and signed: negative starts it before the zone |
+| `off_delay_s` | attr | Linger after the last zone of the sequence is **confirmed** closed. **Default: 5 s.** Optional |
+| `follow(any_zone_driver_active)` | method | ON while any ZoneDriver is active, OFF (after the linger) when none is. Across a serial sequence the scheduler keeps it ON through the gap between zones (see the design decision below) |
+
+The written code still has `off_delay_s = 10` and no start delay; both change to the values
+above when the master is wired, together with the scheduler.
 
 ### ValveCoordinator (proposed)
 
@@ -521,6 +527,27 @@ Its *execution* however is a Driver: modeling it as a Driver specialization mean
 layers (never leave the pump running on error/stop/restart) are written once in the base and
 inherited — instead of duplicating watchdog and error handling inside "system" as a special
 case.
+
+**What the user configures: the entity, and nothing else.** *Decided 2026-10-10 on GH #95,
+from @MrEcosse's working setup and @safepay's review.* Everything else has a default that is
+safe for both kinds of master, so the kind is never asked:
+
+- **Start order: 1 s after the first zone valve is confirmed open.** A pump-start relay needs
+  exactly this, or it runs against a closed line. A master valve tolerates it, since a zone line
+  without pressure for one second harms nothing. The opposite default, master first, would be
+  right for valves and harmful for pumps, so it is the one that stays optional.
+- **Kept on for the whole sequence.** While the scheduler has another zone to run in the same
+  sequence, the master stays on through the gap between zones, however long the inter-zone delay
+  is. The linger applies only after the last zone, and counts from its **confirmed** close, not
+  from the command.
+- **Linger: 5 s**, the figure from the field.
+- **Every zone uses it.** A zone that does not (drip from the mains beside a lawn on a tank pump)
+  says so with an optional per-zone flag.
+
+Optional, for whoever wants to look under the bonnet: a signed start offset, the linger, the
+per-zone flag. A second pump serving a different set of zones is the declared group of the
+scheduler note, also optional. The master is **not** counted in a controller board's electrical
+limit: it stays hydraulic, and that limit is declared net of it (the `ValveCoordinator`).
 
 ### Cycle & soak: a Zone rule
 
