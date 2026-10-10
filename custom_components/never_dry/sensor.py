@@ -902,6 +902,12 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         # what the installation declared, which is the capability match.
         self._configured_method = config.get(CONF_ET_METHOD, DEFAULT_ET_METHOD)
         self._method_reason = ""
+        # The stable half of the reason, for the card to translate itself (#313,
+        # second half — card-side, not Python-side: see _select_model). `reason`
+        # stays alongside it in English for one release, so a card older than
+        # this change still shows something readable instead of the bare code.
+        self._reason_code = ""
+        self._reason_params: dict = {}
         self._last_et_rate = 0.0
         # What the model was last fed, split into what came from a sensor and
         # what the integration worked out. Kept so the answer can be checked
@@ -1005,13 +1011,19 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         running = type(self._model).method_id
 
         if explicit and running == self._configured_method:
+            self._reason_code = "explicit"
+            self._reason_params = {}
             self._method_reason = "chosen explicitly"
         elif explicit:
+            self._reason_code = "fallback"
+            self._reason_params = {"method": self._configured_method}
             self._method_reason = (
                 f"'{self._configured_method}' was chosen but this installation cannot run it; "
                 f"using the best it supports"
             )
         elif observed_range_c is not None and observed_range_c < DiurnalRange.IMPLAUSIBLE_RANGE_C:
+            self._reason_code = "flat_range"
+            self._reason_params = {"range": round(observed_range_c, 1)}
             self._method_reason = (
                 f"automatic: the temperature sensor shows a daily swing of only "
                 f"{observed_range_c:.1f} °C, which is too flat to be real weather — so the methods "
@@ -1019,6 +1031,8 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 f"you want Hargreaves-Samani, select it explicitly."
             )
         else:
+            self._reason_code = "auto"
+            self._reason_params = {}
             self._method_reason = "automatic: the best method the declared sensors support"
 
     @property
@@ -1360,6 +1374,8 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             "status": "warming up",
             "measured_temperature_c": round(temp_c, 2),
             "diurnal_window_hours": self._diurnal.coverage_h,
+            "warming_up_code": "daily_range",
+            "warming_up_params": {"hours": DiurnalRange.MIN_COVERAGE_H},
             "warming_up_because": f"the daily range needs {DiurnalRange.MIN_COVERAGE_H} hours of readings",
         }
 
@@ -1389,6 +1405,8 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             # fall back for this step and pick the richer reading up on the next.
             self._last_inputs = {
                 **self._warming_up_inputs(temp_c),
+                "warming_up_code": "sensor_unreadable",
+                "warming_up_params": {},
                 "warming_up_because": "a required sensor was unreadable this tick",
             }
             return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
@@ -4163,6 +4181,8 @@ class WaterBalanceMethodSensor(SensorEntity):
         return {
             "configured": self._hub._configured_method,
             "reason": self._hub._method_reason,
+            "reason_code": self._hub._reason_code,
+            "reason_params": self._hub._reason_params,
             "reference_frame": self._hub.reference_frame.value,
             "declared_sensors": sorted(k.value for k in self._hub.environment.declared_sensors),
             "et_rate_mm_h": round(self._hub.current_et_rate, 4),

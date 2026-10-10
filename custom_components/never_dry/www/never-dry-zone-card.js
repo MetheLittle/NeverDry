@@ -63,6 +63,16 @@ const I18N = {
     modelRate: "Reference ET rate",
     modelMeasured: "Read from sensors",
     modelDerived: "Worked out by NeverDry",
+    method_et_simple: "Simple",
+    method_hargreaves: "Hargreaves-Samani",
+    method_penman_monteith: "Penman-Monteith",
+    reasonExplicit: "Chosen explicitly",
+    reasonFallback: "{method} was chosen but this installation cannot run it; using the best it supports",
+    reasonFlatRange:
+      "Automatic: the temperature sensor shows a daily swing of only {range} °C, which is too flat to be real weather — so the methods that read the daily range were left out. If your sensor is genuinely outdoors and you want {hargreaves}, select it explicitly.",
+    reasonAuto: "Automatic: the best method the declared sensors support",
+    warmingDailyRange: "The daily range needs {hours} hours of readings",
+    warmingSensorUnreadable: "A required sensor was unreadable this tick",
     measured_temperature_c: "Temperature",
     measured_humidity_pct: "Relative humidity",
     measured_wind_raw: "Wind speed",
@@ -163,6 +173,17 @@ const I18N = {
     modelRate: "Evapotraspirazione di riferimento",
     modelMeasured: "Misurati dai sensori",
     modelDerived: "Ricavati da NeverDry",
+    method_et_simple: "Semplice",
+    method_hargreaves: "Hargreaves-Samani",
+    method_penman_monteith: "Penman-Monteith",
+    reasonExplicit: "Scelto esplicitamente",
+    reasonFallback:
+      "È stato scelto {method}, ma questa installazione non può eseguirlo; viene usato il migliore supportato",
+    reasonFlatRange:
+      "Automatico: il sensore di temperatura mostra un'escursione giornaliera di soli {range} °C, troppo piatta per essere meteo reale — quindi i metodi che leggono l'escursione giornaliera sono stati esclusi. Se il sensore è davvero all'aperto e vuoi usare {hargreaves}, selezionalo esplicitamente.",
+    reasonAuto: "Automatico: il metodo migliore supportato dai sensori dichiarati",
+    warmingDailyRange: "L'escursione giornaliera richiede {hours} ore di letture",
+    warmingSensorUnreadable: "Un sensore necessario non è stato leggibile in questo ciclo",
     measured_temperature_c: "Temperatura",
     measured_humidity_pct: "Umidità relativa",
     measured_wind_raw: "Velocità del vento",
@@ -263,6 +284,17 @@ const I18N = {
     modelRate: "Referenz-ET-Rate",
     modelMeasured: "Sensor-Meßwerte",
     modelDerived: "Von NeverDry berechnet",
+    method_et_simple: "Einfach",
+    method_hargreaves: "Hargreaves-Samani",
+    method_penman_monteith: "Penman-Monteith",
+    reasonExplicit: "Explizit ausgewählt",
+    reasonFallback:
+      "{method} wurde ausgewählt, kann auf dieser Installation aber nicht laufen; die beste unterstützte Methode wird verwendet",
+    reasonFlatRange:
+      "Automatisch: Der Temperatursensor zeigt eine Tagesschwankung von nur {range} °C, was zu flach für echtes Wetter ist — deshalb wurden die Methoden ausgeschlossen, die die Tagesschwankung auswerten. Wenn der Sensor tatsächlich im Freien ist und {hargreaves} gewünscht wird, kann es explizit ausgewählt werden.",
+    reasonAuto: "Automatisch: die beste Methode, die die angegebenen Sensoren unterstützen",
+    warmingDailyRange: "Die Tagesschwankung benötigt {hours} Stunden an Messwerten",
+    warmingSensorUnreadable: "Ein erforderlicher Sensor konnte in diesem Zyklus nicht gelesen werden",
     measured_temperature_c: "Temperatur",
     measured_humidity_pct: "Relative Luftfeuchtigkeit",
     measured_wind_raw: "Windgeschwindigkeit (roh)",
@@ -353,6 +385,16 @@ const I18N = {
     modelRate: "Tasa de ET de referencia",
     modelMeasured: "Medidos por los sensores",
     modelDerived: "Calculados por NeverDry",
+    method_et_simple: "Simple",
+    method_hargreaves: "Hargreaves-Samani",
+    method_penman_monteith: "Penman-Monteith",
+    reasonExplicit: "Elegido explícitamente",
+    reasonFallback: "Se eligió «{method}», pero esta instalación no puede usarlo; se está usando el mejor que sí puede",
+    reasonFlatRange:
+      "Automático: el sensor de temperatura muestra una oscilación diaria de solo {range} °C, demasiado plana para ser clima real, así que se descartaron los métodos que leen esa oscilación. Si tu sensor está realmente a la intemperie y quieres usar {hargreaves}, selecciónalo explícitamente.",
+    reasonAuto: "Automático: el mejor método que permiten los sensores declarados",
+    warmingDailyRange: "La oscilación diaria necesita {hours} horas de lecturas",
+    warmingSensorUnreadable: "Un sensor necesario no se pudo leer en este ciclo",
     measured_temperature_c: "Temperatura",
     measured_humidity_pct: "Humedad relativa",
     measured_wind_raw: "Velocidad del viento",
@@ -474,6 +516,62 @@ const VALVE_STATE_I18N = {
 function t(hass, key) {
   const lang = ((hass && hass.language) || "en").split("-")[0];
   return (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
+}
+
+/**
+ * `t()` plus `{param}` substitution, for the sentences the hub assembles from a
+ * stable code and raw data (GH #313) instead of sending finished text: the
+ * card is the one place per language that already owns static card text, so
+ * the sentence is built here, the same as every other label.
+ */
+function tf(hass, key, params) {
+  return t(hass, key).replace(/\{(\w+)\}/g, (whole, name) => {
+    const value = params && params[name];
+    return value === undefined ? whole : String(value);
+  });
+}
+
+/** The dropdown's short name for an ET method id — "hargreaves" → "Hargreaves-Samani". */
+function methodLabel(hass, methodId) {
+  const key = `method_${methodId}`;
+  const label = t(hass, key);
+  // t() answers with the key itself when no dictionary has it: a method this
+  // card version does not know reads as its id, not as "method_<id>".
+  return label === key ? String(methodId) : label;
+}
+
+/**
+ * The method-choice sentence, from `reason_code` + `reason_params` when
+ * present, falling back to the hub's own English `reason` otherwise — an
+ * older integration that has not shipped this yet, or a future code this
+ * card version does not recognise, both read as English rather than nothing.
+ */
+function reasonText(hass, a) {
+  const params = a.reason_params || {};
+  switch (a.reason_code) {
+    case "explicit":
+      return t(hass, "reasonExplicit");
+    case "fallback":
+      return tf(hass, "reasonFallback", { method: methodLabel(hass, params.method) });
+    case "flat_range":
+      return tf(hass, "reasonFlatRange", { range: params.range, hargreaves: methodLabel(hass, "hargreaves") });
+    case "auto":
+      return t(hass, "reasonAuto");
+    default:
+      return a.reason || "";
+  }
+}
+
+/** The warming-up sentence, same code+params-with-English-fallback shape as reasonText. */
+function warmingUpText(hass, a) {
+  switch (a.warming_up_code) {
+    case "daily_range":
+      return tf(hass, "warmingDailyRange", { hours: (a.warming_up_params || {}).hours });
+    case "sensor_unreadable":
+      return t(hass, "warmingSensorUnreadable");
+    default:
+      return a.warming_up_because || "";
+  }
 }
 
 function valveStateLabel(hass, state) {
@@ -1732,11 +1830,11 @@ class NeverDryModelCard extends HTMLElement {
         <ha-icon icon="mdi:function-variant"></ha-icon>
         <div>
           <div class="ndm-title">${escapeHtml(method)}</div>
-          <div class="ndm-sub">${escapeHtml(a.reason || "")}</div>
+          <div class="ndm-sub">${escapeHtml(reasonText(hass, a))}</div>
         </div>
       </div>
       ${rate === undefined ? "" : `<div class="ndm-rate"><span>${escapeHtml(t(hass, "modelRate"))}</span><b>${escapeHtml(String(rate))} mm/h</b></div>`}
-      ${a.status && a.warming_up_because ? `<div class="ndm-warn">${escapeHtml(a.warming_up_because)}</div>` : ""}
+      ${a.status && (a.warming_up_code || a.warming_up_because) ? `<div class="ndm-warn">${escapeHtml(warmingUpText(hass, a))}</div>` : ""}
       ${this._group(hass, t(hass, "modelMeasured"), MODEL_MEASURED, a, "measured")}
       ${this._group(hass, t(hass, "modelDerived"), MODEL_DERIVED, a, "derived")}
     `;
