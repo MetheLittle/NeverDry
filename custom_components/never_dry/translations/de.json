@@ -199,6 +199,7 @@
               "wilting_point": "Welkepunkt"
             },
             "data_description": {
+              "area_m2": "Fläche dieser Bewässerungszone in Quadratmetern",
               "plant_family": "Setzt die saisonale Kc-Kurve für das, was hier wächst. Benutzerdefiniert wählen, um unten einen festen Kc zu setzen.",
               "kc": "Wird nur verwendet, wenn die Pflanzenfamilie benutzerdefiniert ist. Bei jeder anderen Pflanzenfamilie gilt die saisonale Kurve und dieses Feld wird ignoriert.",
               "exposure": "Wie viel Sonne und Wind bekommt diese Zone im Vergleich zu einem offenen Gelände? Multipliziert den Kc, damit die Zone ihre saisonale Kurve behält anstatt nur einen festen Wert zu nutzen. Benutzerdefiniert wählen, um unten einen eigenen Faktor einzugeben.",
@@ -224,8 +225,14 @@
               "delivery_timeout": "Sicherheitsabschaltung"
             },
             "data_description": {
+              "valve": "Schalter-Entität die das Bewässerungsventil für diese Zone steuert. Leer lassen für Beobachtungs-Modus (kein Ventil)",
+              "delivery_mode": "Wie das Ventil Wasser liefert. Geschätzter Durchfluss: Einfaches Ein-/Aus-Ventil, Dauer wird berechnet anhand der Durchflussmenge. Durchflussmesser: Ventil mit Durchfluss-Sensor, schließt beim erreichten Zielvolumen. Volumen-Vorgabe: Smartes Ventil mit Volumenziel, schließt sich dann selbst.",
+              "flow_rate_lpm": "Die Summe aller Verbrauchswerte der in dieser Zone verwendeten Emitter - Sprinkler, Tropfer und Mikro-Sprüher - Angabe in Litern pro Stunde. Dieser Wert kann den Herstellerangaben des Emitters oder dem Bewässerungsplan entnommen werden; eine eigene Messung ist nicht nötig. Dieser Wert entspricht der zu liefernden Gesamt-Wassermenge für diese Bewässerungszone und ist zwingend erforderlich, da ohne diesen keine Bewässerungsdauer berechnet werden kann. Die tatsächliche Wassermenge der Zone wird im laufenden Betrieb gemessen; die Abweichung zwischen den beiden Werten sollte beobachtet werden.",
+              "flow_meter_sensor": "Beide Varianten sind geeignet. NeverDry unterscheidet sie anhand der Maßeinheit. Ein Summenzähler (L, m³) wird vor und nach der Bewässerung gelesen; die Differenz ergibt das gelieferte Volumen. Dies ist die genauere der beiden Methoden, da sie nicht von der Übermittlungsfrequenz abhängt. Alternativ wird die aktuelle Durchflussrate (L/min, L/h, m³/h) über die Dauer der Bewässerung verwendet; hierbei bestimmt die Häufigkeit der Datenübermittlung durch das Ventil die Genauigkeit des Messwerts. Erforderlich wenn der Bewässerungs-Modus mit Durchflussmesser verwendet wird.",
+              "volume_entity": "Zahlentität vom smarten Ventil, die ein Volumenziel in Litern bereit stellt. Erforderlich wenn der Bewässerungs-Modus das Volumen des Ventils verwendet",
               "system_type": "Legt die Effizienz der Zone fest (Tropfbewässerung 0,92, Mikro-Sprinkler 0,80, Versenkregner 0,68, manuell 0,55). Benutzerdefiniert wählen, um unten einen eigenen Wert einzugeben.",
-              "efficiency": "Wird nur verwendet, wenn die Beregnungsart benutzerdefiniert ist. Bei jeder anderen Art wird dieses Feld ignoriert, was im Formular angezeigt wird."
+              "efficiency": "Wird nur verwendet, wenn die Beregnungsart benutzerdefiniert ist. Bei jeder anderen Art wird dieses Feld ignoriert, was im Formular angezeigt wird.",
+              "delivery_timeout": "Maximale Wartezeit bei berechneter oder selbst schließender Bewässerung bevor das Ventil forciert geschlossen wird (Sicherheitsabschaltung)"
             }
           },
           "scheduling": {
@@ -235,6 +242,10 @@
               "irrigation_mode": "Bewässerungs-Modus",
               "irrigation_time": "Tägliche Bewässerungszeit",
               "threshold": "Schwellenwert"
+            },
+            "data_description": {
+              "irrigation_time": "Tageszeit zu der NeverDry das Defizit überprüft und, wenn er über dem Schwellenwert liegt, bewässert. Leer lassen, um den automatische Planung zu deaktivieren",
+              "threshold": "Defizitwert; löst die automatische Bewässerung für diese Zone aus."
             }
           }
         }
@@ -274,6 +285,7 @@
               "wilting_point": "Welkepunkt"
             },
             "data_description": {
+              "area_m2": "Fläche dieser Bewässerungszone in Quadratmetern",
               "plant_family": "Setzt die saisonale Kc-Kurve für das, was hier wächst. Benutzerdefiniert wählen, um unten einen festen Kc zu setzen.",
               "kc": "Wird nur verwendet, wenn die Pflanzenfamilie benutzerdefiniert ist. Bei jeder anderen Pflanzenfamilie gilt die saisonale Kurve und dieses Feld wird ignoriert.",
               "exposure": "Wie viel Sonne und Wind bekommt diese Zone im Vergleich zu einem offenen Gelände? Multipliziert den Kc, damit die Zone ihre saisonale Kurve behält anstatt nur einen festen Wert zu nutzen. Benutzerdefiniert wählen, um unten einen eigenen Faktor einzugeben.",
@@ -299,8 +311,14 @@
               "delivery_timeout": "Sicherheitsabschaltung"
             },
             "data_description": {
+              "valve": "Schalter-Entität die das Bewässerungsventil für diese Zone steuert. Leer lassen für Beobachtungs-Modus (kein Ventil)",
+              "delivery_mode": "Wie das Ventil Wasser liefert. Geschätzter Durchfluss: Einfaches Ein-/Aus-Ventil, Dauer wird berechnet anhand der Durchflussmenge. Durchflussmesser: Ventil mit Durchfluss-Sensor, schließt beim erreichten Zielvolumen. Volumen-Vorgabe: Smartes Ventil mit Volumenziel, schließt sich dann selbst.",
+              "flow_rate_lpm": "Die Summe aller Verbrauchswerte der in dieser Zone verwendeten Emitter - Sprinkler, Tropfer und Mikro-Sprüher - Angabe in Litern pro Stunde. Dieser Wert kann den Herstellerangaben des Emitters oder dem Bewässerungsplan entnommen werden; eine eigene Messung ist nicht nötig. Dieser Wert entspricht der zu liefernden Gesamt-Wassermenge für diese Bewässerungszone und ist zwingend erforderlich, da ohne diesen keine Bewässerungsdauer berechnet werden kann. Die tatsächliche Wassermenge der Zone wird im laufenden Betrieb gemessen; die Abweichung zwischen den beiden Werten sollte beobachtet werden.",
+              "flow_meter_sensor": "Beide Varianten sind geeignet. NeverDry unterscheidet sie anhand der Maßeinheit. Ein Summenzähler (L, m³) wird vor und nach der Bewässerung gelesen; die Differenz ergibt das gelieferte Volumen. Dies ist die genauere der beiden Methoden, da sie nicht von der Übermittlungsfrequenz abhängt. Alternativ wird die aktuelle Durchflussrate (L/min, L/h, m³/h) über die Dauer der Bewässerung verwendet; hierbei bestimmt die Häufigkeit der Datenübermittlung durch das Ventil die Genauigkeit des Messwerts. Erforderlich wenn der Bewässerungs-Modus mit Durchflussmesser verwendet wird.",
+              "volume_entity": "Zahlentität vom smarten Ventil, die ein Volumenziel in Litern bereit stellt. Erforderlich wenn der Bewässerungs-Modus das Volumen des Ventils verwendet",
               "system_type": "Legt die Effizienz der Zone fest (Tropfbewässerung 0,92, Mikro-Sprinkler 0,80, Versenkregner 0,68, manuell 0,55). Benutzerdefiniert wählen, um unten einen eigenen Wert einzugeben.",
-              "efficiency": "Wird nur verwendet, wenn die Beregnungsart benutzerdefiniert ist. Bei jeder anderen Art wird dieses Feld ignoriert, was im Formular angezeigt wird."
+              "efficiency": "Wird nur verwendet, wenn die Beregnungsart benutzerdefiniert ist. Bei jeder anderen Art wird dieses Feld ignoriert, was im Formular angezeigt wird.",
+              "delivery_timeout": "Maximale Wartezeit bei berechneter oder selbst schließender Bewässerung bevor das Ventil forciert geschlossen wird (Sicherheitsabschaltung)"
             }
           },
           "scheduling": {
@@ -310,6 +328,10 @@
               "irrigation_mode": "Bewässerungs-Modus",
               "irrigation_time": "Tägliche Bewässerungszeit",
               "threshold": "Schwellenwert"
+            },
+            "data_description": {
+              "irrigation_time": "Tageszeit zu der NeverDry das Defizit überprüft und, wenn er über dem Schwellenwert liegt, bewässert. Leer lassen, um den automatische Planung zu deaktivieren",
+              "threshold": "Defizitwert; löst die automatische Bewässerung für diese Zone aus."
             }
           }
         }

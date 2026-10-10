@@ -199,6 +199,7 @@
               "wilting_point": "Punto de marchitez"
             },
             "data_description": {
+              "area_m2": "Superficie de esta zona de riego en metros cuadrados",
               "plant_family": "Fija la curva estacional del Kc para lo que crece aquí. Elige Personalizado para indicar un Kc fijo abajo.",
               "kc": "Se usa solo cuando la familia de plantas está en Personalizado. Con cualquier otra familia vale la curva estacional y este campo se ignora.",
               "exposure": "Cuánto sol y viento recibe esta zona comparada con un sitio abierto. Multiplica el Kc, así la zona conserva su curva estacional en lugar de quedarse fija en un solo valor. Elige Personalizada para indicar tu propio factor abajo.",
@@ -224,8 +225,14 @@
               "delivery_timeout": "Tiempo máximo de seguridad"
             },
             "data_description": {
+              "valve": "La entidad interruptor que controla la válvula de riego de esta zona. Déjalo vacío para el modo de solo seguimiento (sin válvula)",
+              "delivery_mode": "Cómo suministra el agua tu válvula. Caudal estimado: válvula simple on/off, la duración se calcula a partir del caudal. Caudalímetro: válvula con sensor de caudal, se cierra al alcanzar el volumen objetivo. Volumen preestablecido: válvula inteligente que acepta un volumen objetivo y se cierra por sí sola.",
+              "flow_rate_lpm": "La suma del caudal nominal de todo lo que riega esta zona (aspersores, goteros, microaspersores) en litros por hora (gal/h en unidades imperiales). Tómala de la ficha de los emisores o de tu proyecto de riego: no hace falta medirla. Es lo que la zona se construyó para suministrar, y es obligatoria: sin ella no hay forma de convertir un volumen en una duración de riego. Lo que la zona suministra de verdad se mide aparte, a partir de los riegos reales, y la diferencia entre las dos merece atención.",
+              "flow_meter_sensor": "Sirven los dos, y NeverDry los distingue por la unidad de medida. Un total acumulado (L, gal, m³) se lee antes y después del riego y la diferencia es el volumen suministrado: es el más preciso de los dos, porque no depende de cada cuánto informa la válvula. Un caudal instantáneo (L/min, L/h, m³/h, gal/min, gal/h) se integra en cambio a lo largo del riego, así que la frecuencia con la que la válvula informa de su caudal decide lo bueno que es el número. Obligatorio cuando el modo de suministro es el de caudalímetro.",
+              "volume_entity": "Entidad numérica de la válvula inteligente que acepta un volumen objetivo en litros. Obligatoria cuando el modo de suministro deja la dosificación a la válvula.",
               "system_type": "Fija la eficiencia de la zona (goteo 0,92, microaspersores 0,80, pop-up 0,68, manual 0,55). Elige Personalizado para indicar la tuya abajo.",
-              "efficiency": "Se usa solo cuando el tipo de instalación está en Personalizado. Con cualquier otro tipo este campo se ignora y el formulario te lo dice."
+              "efficiency": "Se usa solo cuando el tipo de instalación está en Personalizado. Con cualquier otro tipo este campo se ignora y el formulario te lo dice.",
+              "delivery_timeout": "Tiempo máximo de espera de un suministro medido o dosificado por la válvula antes de forzar su cierre (límite de seguridad)."
             }
           },
           "scheduling": {
@@ -235,6 +242,10 @@
               "irrigation_mode": "Modo de riego",
               "irrigation_time": "Hora de riego",
               "threshold": "Umbral de riego"
+            },
+            "data_description": {
+              "irrigation_time": "Hora del día a la que NeverDry comprueba el déficit y riega si supera el umbral. Déjalo vacío para desactivar la programación automática",
+              "threshold": "Nivel de déficit que activa el riego automático de esta zona"
             }
           }
         }
@@ -274,6 +285,7 @@
               "wilting_point": "Punto de marchitez"
             },
             "data_description": {
+              "area_m2": "Superficie de esta zona de riego en metros cuadrados",
               "plant_family": "Fija la curva estacional del Kc para lo que crece aquí. Elige Personalizado para indicar un Kc fijo abajo.",
               "kc": "Se usa solo cuando la familia de plantas está en Personalizado. Con cualquier otra familia vale la curva estacional y este campo se ignora.",
               "exposure": "Cuánto sol y viento recibe esta zona comparada con un sitio abierto. Multiplica el Kc, así la zona conserva su curva estacional en lugar de quedarse fija en un solo valor. Elige Personalizada para indicar tu propio factor abajo.",
@@ -299,8 +311,14 @@
               "delivery_timeout": "Tiempo máximo de seguridad"
             },
             "data_description": {
+              "valve": "La entidad interruptor que controla la válvula de riego de esta zona. Déjalo vacío para el modo de solo seguimiento (sin válvula)",
+              "delivery_mode": "Cómo suministra el agua tu válvula. Caudal estimado: válvula simple on/off, la duración se calcula a partir del caudal. Caudalímetro: válvula con sensor de caudal, se cierra al alcanzar el volumen objetivo. Volumen preestablecido: válvula inteligente que acepta un volumen objetivo y se cierra por sí sola.",
+              "flow_rate_lpm": "La suma del caudal nominal de todo lo que riega esta zona (aspersores, goteros, microaspersores) en litros por hora (gal/h en unidades imperiales). Tómala de la ficha de los emisores o de tu proyecto de riego: no hace falta medirla. Es lo que la zona se construyó para suministrar, y es obligatoria: sin ella no hay forma de convertir un volumen en una duración de riego. Lo que la zona suministra de verdad se mide aparte, a partir de los riegos reales, y la diferencia entre las dos merece atención.",
+              "flow_meter_sensor": "Sirven los dos, y NeverDry los distingue por la unidad de medida. Un total acumulado (L, gal, m³) se lee antes y después del riego y la diferencia es el volumen suministrado: es el más preciso de los dos, porque no depende de cada cuánto informa la válvula. Un caudal instantáneo (L/min, L/h, m³/h, gal/min, gal/h) se integra en cambio a lo largo del riego, así que la frecuencia con la que la válvula informa de su caudal decide lo bueno que es el número. Obligatorio cuando el modo de suministro es el de caudalímetro.",
+              "volume_entity": "Entidad numérica de la válvula inteligente que acepta un volumen objetivo en litros. Obligatoria cuando el modo de suministro deja la dosificación a la válvula.",
               "system_type": "Fija la eficiencia de la zona (goteo 0,92, microaspersores 0,80, pop-up 0,68, manual 0,55). Elige Personalizado para indicar la tuya abajo.",
-              "efficiency": "Se usa solo cuando el tipo de instalación está en Personalizado. Con cualquier otro tipo este campo se ignora y el formulario te lo dice."
+              "efficiency": "Se usa solo cuando el tipo de instalación está en Personalizado. Con cualquier otro tipo este campo se ignora y el formulario te lo dice.",
+              "delivery_timeout": "Tiempo máximo de espera de un suministro medido o dosificado por la válvula antes de forzar su cierre (límite de seguridad)."
             }
           },
           "scheduling": {
@@ -310,6 +328,10 @@
               "irrigation_mode": "Modo de riego",
               "irrigation_time": "Hora de riego",
               "threshold": "Umbral de riego"
+            },
+            "data_description": {
+              "irrigation_time": "Hora del día a la que NeverDry comprueba el déficit y riega si supera el umbral. Déjalo vacío para desactivar la programación automática",
+              "threshold": "Nivel de déficit que activa el riego automático de esta zona"
             }
           }
         }

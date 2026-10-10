@@ -83,8 +83,8 @@
             "data_description": {
               "valve": "The switch entity that controls this zone's irrigation valve. Leave empty for monitoring mode (no valve)",
               "delivery_mode": "How your valve delivers water. Estimated flow: simple on/off valve, duration calculated from flow rate. Flow meter: valve with a flow sensor, closes at target volume. Volume preset: smart valve that accepts a volume target and closes itself.",
-              "flow_rate_lpm": "The sum of the rated output of everything this zone waters — sprinklers, drippers, micro-sprayers — in liters per hour (gal/h in imperial). Take it from the emitters' rating or your irrigation plan; you do not need to measure it. It is what the zone was built to deliver, and it is required: without it there is no way to turn a volume into a watering duration. What the zone actually delivers is measured separately from real sessions, and the gap between the two is worth watching.",
-              "flow_meter_sensor": "Either kind works, and NeverDry tells them apart by the unit of measurement. A cumulative counter (L, gal, m³) is read before and after the run and the difference is the volume delivered — the more accurate of the two, because it does not depend on reporting frequency. An instantaneous flow rate (L/min, L/h, m³/h, gal/min, gal/h) is integrated over the run instead, so how often your valve reports its flow sets how good the number is. Required when the delivery mode is the one with a flow meter.",
+              "flow_rate_lpm": "The sum of the rated output of everything this zone waters (sprinklers, drippers, micro-sprayers) in liters per hour (gal/h in imperial). Take it from the emitters' rating or your irrigation plan; you do not need to measure it. It is what the zone was built to deliver, and it is required: without it there is no way to turn a volume into a watering duration. What the zone actually delivers is measured separately from real sessions, and the gap between the two is worth watching.",
+              "flow_meter_sensor": "Either kind works, and NeverDry tells them apart by the unit of measurement. A cumulative counter (L, gal, m³) is read before and after the run and the difference is the volume delivered: the more accurate of the two, because it does not depend on reporting frequency. An instantaneous flow rate (L/min, L/h, m³/h, gal/min, gal/h) is integrated over the run instead, so how often your valve reports its flow sets how good the number is. Required when the delivery mode is the one with a flow meter.",
               "volume_entity": "Number entity on the smart valve that accepts a volume target in liters. Required when the delivery mode leaves the dosing to the valve.",
               "system_type": "Sets the zone's efficiency (drip 0.92, micro-sprinklers 0.80, pop-up 0.68, manual 0.55). Pick Custom to enter your own below.",
               "efficiency": "Used only when the system type is Custom. With any other type this field is ignored and the form will tell you so.",
@@ -199,6 +199,7 @@
               "wilting_point": "Wilting point"
             },
             "data_description": {
+              "area_m2": "Surface area of this irrigation zone in square meters",
               "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
               "kc": "Used only when the plant family is Custom. With any other family the seasonal curve applies and this field is ignored.",
               "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value. Pick Custom to enter your own factor below.",
@@ -224,8 +225,14 @@
               "delivery_timeout": "Safety timeout"
             },
             "data_description": {
+              "valve": "The switch entity that controls this zone's irrigation valve. Leave empty for monitoring mode (no valve)",
+              "delivery_mode": "How your valve delivers water. Estimated flow: simple on/off valve, duration calculated from flow rate. Flow meter: valve with a flow sensor, closes at target volume. Volume preset: smart valve that accepts a volume target and closes itself.",
+              "flow_rate_lpm": "The sum of the rated output of everything this zone waters (sprinklers, drippers, micro-sprayers) in liters per hour (gal/h in imperial). Take it from the emitters' rating or your irrigation plan; you do not need to measure it. It is what the zone was built to deliver, and it is required: without it there is no way to turn a volume into a watering duration. What the zone actually delivers is measured separately from real sessions, and the gap between the two is worth watching.",
+              "flow_meter_sensor": "Either kind works, and NeverDry tells them apart by the unit of measurement. A cumulative counter (L, gal, m³) is read before and after the run and the difference is the volume delivered: the more accurate of the two, because it does not depend on reporting frequency. An instantaneous flow rate (L/min, L/h, m³/h, gal/min, gal/h) is integrated over the run instead, so how often your valve reports its flow sets how good the number is. Required when the delivery mode is the one with a flow meter.",
+              "volume_entity": "Number entity on the smart valve that accepts a volume target in liters. Required when the delivery mode leaves the dosing to the valve.",
               "system_type": "Sets the zone's efficiency (drip 0.92, micro-sprinklers 0.80, pop-up 0.68, manual 0.55). Pick Custom to enter your own below.",
-              "efficiency": "Used only when the system type is Custom. With any other type this field is ignored and the form will tell you so."
+              "efficiency": "Used only when the system type is Custom. With any other type this field is ignored and the form will tell you so.",
+              "delivery_timeout": "Maximum time to wait for a measured or self-dosed delivery before forcing the valve closed (safety limit)."
             }
           },
           "scheduling": {
@@ -235,6 +242,10 @@
               "irrigation_mode": "Irrigation mode",
               "irrigation_time": "Daily irrigation time",
               "threshold": "Irrigation threshold"
+            },
+            "data_description": {
+              "irrigation_time": "Time of day when NeverDry checks the deficit and irrigates if above threshold. Leave empty to disable automatic scheduling",
+              "threshold": "Deficit level that triggers automatic irrigation for this zone"
             }
           }
         }
@@ -274,6 +285,7 @@
               "wilting_point": "Wilting point"
             },
             "data_description": {
+              "area_m2": "Surface area of this irrigation zone in square meters",
               "plant_family": "Sets the seasonal Kc curve for what grows here. Pick Custom to enter one fixed Kc below.",
               "kc": "Used only when the plant family is Custom. With any other family the seasonal curve applies and this field is ignored.",
               "exposure": "How much sun and wind this zone gets compared to an open site. Multiplies the Kc, so the zone keeps its seasonal curve instead of being frozen at one fixed value. Pick Custom to enter your own factor below.",
@@ -299,8 +311,14 @@
               "delivery_timeout": "Safety timeout"
             },
             "data_description": {
+              "valve": "The switch entity that controls this zone's irrigation valve. Leave empty for monitoring mode (no valve)",
+              "delivery_mode": "How your valve delivers water. Estimated flow: simple on/off valve, duration calculated from flow rate. Flow meter: valve with a flow sensor, closes at target volume. Volume preset: smart valve that accepts a volume target and closes itself.",
+              "flow_rate_lpm": "The sum of the rated output of everything this zone waters (sprinklers, drippers, micro-sprayers) in liters per hour (gal/h in imperial). Take it from the emitters' rating or your irrigation plan; you do not need to measure it. It is what the zone was built to deliver, and it is required: without it there is no way to turn a volume into a watering duration. What the zone actually delivers is measured separately from real sessions, and the gap between the two is worth watching.",
+              "flow_meter_sensor": "Either kind works, and NeverDry tells them apart by the unit of measurement. A cumulative counter (L, gal, m³) is read before and after the run and the difference is the volume delivered: the more accurate of the two, because it does not depend on reporting frequency. An instantaneous flow rate (L/min, L/h, m³/h, gal/min, gal/h) is integrated over the run instead, so how often your valve reports its flow sets how good the number is. Required when the delivery mode is the one with a flow meter.",
+              "volume_entity": "Number entity on the smart valve that accepts a volume target in liters. Required when the delivery mode leaves the dosing to the valve.",
               "system_type": "Sets the zone's efficiency (drip 0.92, micro-sprinklers 0.80, pop-up 0.68, manual 0.55). Pick Custom to enter your own below.",
-              "efficiency": "Used only when the system type is Custom. With any other type this field is ignored and the form will tell you so."
+              "efficiency": "Used only when the system type is Custom. With any other type this field is ignored and the form will tell you so.",
+              "delivery_timeout": "Maximum time to wait for a measured or self-dosed delivery before forcing the valve closed (safety limit)."
             }
           },
           "scheduling": {
@@ -310,6 +328,10 @@
               "irrigation_mode": "Irrigation mode",
               "irrigation_time": "Daily irrigation time",
               "threshold": "Irrigation threshold"
+            },
+            "data_description": {
+              "irrigation_time": "Time of day when NeverDry checks the deficit and irrigates if above threshold. Leave empty to disable automatic scheduling",
+              "threshold": "Deficit level that triggers automatic irrigation for this zone"
             }
           }
         }

@@ -342,7 +342,7 @@ Two limits are worth knowing before you wire something unusual:
 - **The entity must be the valve itself**, not a scene, script, or a group of
   several valves. NeverDry watches the entity it commanded to confirm the valve
   actually moved, and a script confirms nothing about water.
-| **Guard flow rate (L/min)** | For `estimated_flow` | Measured valve flow rate. Required for `estimated_flow`; strongly recommended for `flow_meter` and `volume_preset` too — it drives the expected-duration estimate, and that estimate is what bounds a delivery — without it the only bound is the safety timeout, an hour by default, regardless of how long the zone was ever going to take (it will become required in a future release). Measure with a bucket and stopwatch. |
+| **Guard flow rate (L/h, gal/h in imperial)** | For `estimated_flow` | Measured valve flow rate, in litres per hour: the form asks for L/h, not L/min. Required for `estimated_flow`; strongly recommended for `flow_meter` and `volume_preset` too. It drives the expected-duration estimate, and that estimate is what bounds a delivery: without it the only bound is the safety timeout, an hour by default, regardless of how long the zone was ever going to take (it will become required in a future release). Measure with a bucket and stopwatch. |
 | **Threshold (mm)** | No | Deficit threshold for Mode A triggering (default: 20.0 mm) |
 
 **System type defaults:**

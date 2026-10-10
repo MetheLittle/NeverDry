@@ -455,7 +455,7 @@ For an external `on → off` transition:
 **`_external_session_monitor(entity_id, zone_name)`** is the auto-close brain. Started from the open detection, it must terminate the manual session at the **minimum** of:
 
 1. **Volume target reached.** When the zone has a `flow_meter_sensor`, the monitor polls every `FLOW_METER_POLL_INTERVAL_S` seconds. For cumulative sensors it tracks `current - initial`; for rate sensors it integrates `rate × dt` (units L/min, L/h, m³/h handled explicitly). It exits as soon as `delivered >= volume_target`.
-2. **Estimated duration elapsed.** Without a flow meter but with a configured `flow_rate` (L/min), the monitor sleeps for `min(volume_liters / flow_rate × 60, delivery_timeout)`.
+2. **Estimated duration elapsed.** Without a flow meter but with a configured `flow_rate` (stored in L/min; the form takes L/h), the monitor sleeps for `min(volume_liters / flow_rate × 60, delivery_timeout)`.
 3. **Safety timeout.** `delivery_timeout` is always honoured as the upper bound. No measurement, no estimate, no target → fall back to a pure sleep.
 
 After waking up, the monitor checks the switch is still `"on"` and sends `switch.turn_off`. The resulting `on → off` state change is picked up by `_on_valve_state_change`, which finalises the session. If the user closes the valve first the monitor task is cancelled and never sends the service call.
@@ -497,7 +497,7 @@ Services are registered in `IrrigationController.register_services()`.
 | `efficiency` | No | Override efficiency [0.1–1.0] |
 | `plant_family` | No | Plant family → sets seasonal Kc profile |
 | `kc` | No | Override Kc [0.1–2.0] |
-| `flow_rate_lpm` | For `estimated_flow` | Guard flow rate [L/min]. Required for `estimated_flow`; recommended for `flow_meter`/`volume_preset`, where it drives the expected-duration estimate and the safety-timeout scaling (deprecation warning in the zone checker; becomes required at v1.0) |
+| `flow_rate_lpm` | For `estimated_flow` | Guard flow rate, stored in L/min; the form takes and shows L/h (gal/h in imperial). Required for `estimated_flow`; recommended for `flow_meter`/`volume_preset`, where it drives the expected-duration estimate and the safety-timeout scaling (deprecation warning in the zone checker; becomes required at v1.0) |
 | `threshold` | No | Mode A trigger threshold [mm] (default 20) |
 | `delivery_mode` | No | Delivery method: `estimated_flow` (timer), `flow_meter` (sensor-monitored), `volume_preset` (smart valve with volume dosing) |
 | `flow_meter_sensor` | No | Flow measurement sensor entity (required if `delivery_mode=flow_meter`) |

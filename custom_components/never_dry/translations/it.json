@@ -199,6 +199,7 @@
               "wilting_point": "Punto di appassimento"
             },
             "data_description": {
+              "area_m2": "Superficie di questa zona di irrigazione in metri quadrati",
               "plant_family": "Imposta la curva stagionale del Kc per ciò che cresce qui. Scegli Personalizzato per inserire un Kc fisso qui sotto.",
               "kc": "Usato solo quando la famiglia di piante è impostata su Personalizzato. Con qualsiasi altra famiglia vale la curva stagionale e questo campo viene ignorato.",
               "exposure": "Quanto sole e vento riceve questa zona rispetto a un sito aperto. Moltiplica il Kc, così la zona mantiene la curva stagionale invece di essere bloccata su un valore fisso. Scegli Personalizzato per inserire il tuo fattore qui sotto.",
@@ -224,8 +225,14 @@
               "delivery_timeout": "Timeout di sicurezza"
             },
             "data_description": {
+              "valve": "L'entità interruttore (switch) che controlla la valvola di irrigazione di questa zona. Lascia vuoto per la modalità di solo monitoraggio (nessuna valvola)",
+              "delivery_mode": "Modalità di erogazione dell'acqua della valvola. Portata stimata (estimated flow): semplice valvola on/off, durata calcolata in base alla portata. Flussometro (flow meter): valvola con sensore di flusso, si chiude al raggiungimento del volume target. Volume preimpostato (volume preset): valvola intelligente che accetta un volume target e si chiude autonomamente.",
+              "flow_rate_lpm": "La somma delle portate nominali di tutto ciò che irriga questa zona (irrigatori, gocciolatori, nebulizzatori) in litri all'ora (gal/h in imperiale). Prendila dalla scheda degli erogatori o dal progetto dell'impianto: non serve misurarla. È ciò che la zona è stata costruita per erogare, ed è obbligatoria: senza non è possibile tradurre un volume in una durata di irrigazione. Quanto la zona eroga davvero viene misurato a parte dalle sessioni reali, e lo scarto fra le due merita attenzione.",
+              "flow_meter_sensor": "Vanno bene entrambi, e NeverDry li distingue dall'unità di misura. Un contatore cumulativo (L, gal, m³) viene letto prima e dopo la corsa e la differenza è il volume erogato: è il più accurato dei due, perché non dipende da quanto spesso la valvola parla. Una portata istantanea (L/min, L/h, m³/h, gal/min, gal/h) viene invece integrata nel tempo, quindi la frequenza con cui la valvola riporta il flusso decide quanto è buono il numero. Richiesto quando la modalità di erogazione è quella con flussometro.",
+              "volume_entity": "Entità numerica sulla valvola intelligente che accetta un target di volume in litri. Richiesto quando la modalità di erogazione affida il dosaggio alla valvola.",
               "system_type": "Imposta l'efficienza della zona (goccia 0.92, micro-irrigatori 0.80, pop-up 0.68, manuale 0.55). Scegli Personalizzato per inserire la tua qui sotto.",
-              "efficiency": "Usato solo quando il tipo di impianto è Personalizzato. Con qualsiasi altro tipo questo campo viene ignorato e il form te lo segnala."
+              "efficiency": "Usato solo quando il tipo di impianto è Personalizzato. Con qualsiasi altro tipo questo campo viene ignorato e il form te lo segnala.",
+              "delivery_timeout": "Tempo massimo di attesa per un'erogazione misurata o dosata dalla valvola prima di forzarne la chiusura (limite di sicurezza)."
             }
           },
           "scheduling": {
@@ -235,6 +242,10 @@
               "irrigation_mode": "Modalità di irrigazione",
               "irrigation_time": "Orario di irrigazione",
               "threshold": "Soglia di irrigazione"
+            },
+            "data_description": {
+              "irrigation_time": "Ora del giorno in cui NeverDry verifica il deficit e irriga se supera la soglia. Lascia vuoto per disabilitare la programmazione automatica",
+              "threshold": "Livello di deficit che attiva l'irrigazione automatica per questa zona"
             }
           }
         }
@@ -274,6 +285,7 @@
               "wilting_point": "Punto di appassimento"
             },
             "data_description": {
+              "area_m2": "Superficie di questa zona di irrigazione in metri quadrati",
               "plant_family": "Imposta la curva stagionale del Kc per ciò che cresce qui. Scegli Personalizzato per inserire un Kc fisso qui sotto.",
               "kc": "Usato solo quando la famiglia di piante è impostata su Personalizzato. Con qualsiasi altra famiglia vale la curva stagionale e questo campo viene ignorato.",
               "exposure": "Quanto sole e vento riceve questa zona rispetto a un sito aperto. Moltiplica il Kc, così la zona mantiene la curva stagionale invece di essere bloccata su un valore fisso. Scegli Personalizzato per inserire il tuo fattore qui sotto.",
@@ -299,8 +311,14 @@
               "delivery_timeout": "Timeout di sicurezza"
             },
             "data_description": {
+              "valve": "L'entità interruttore (switch) che controlla la valvola di irrigazione di questa zona. Lascia vuoto per la modalità di solo monitoraggio (nessuna valvola)",
+              "delivery_mode": "Modalità di erogazione dell'acqua della valvola. Portata stimata (estimated flow): semplice valvola on/off, durata calcolata in base alla portata. Flussometro (flow meter): valvola con sensore di flusso, si chiude al raggiungimento del volume target. Volume preimpostato (volume preset): valvola intelligente che accetta un volume target e si chiude autonomamente.",
+              "flow_rate_lpm": "La somma delle portate nominali di tutto ciò che irriga questa zona (irrigatori, gocciolatori, nebulizzatori) in litri all'ora (gal/h in imperiale). Prendila dalla scheda degli erogatori o dal progetto dell'impianto: non serve misurarla. È ciò che la zona è stata costruita per erogare, ed è obbligatoria: senza non è possibile tradurre un volume in una durata di irrigazione. Quanto la zona eroga davvero viene misurato a parte dalle sessioni reali, e lo scarto fra le due merita attenzione.",
+              "flow_meter_sensor": "Vanno bene entrambi, e NeverDry li distingue dall'unità di misura. Un contatore cumulativo (L, gal, m³) viene letto prima e dopo la corsa e la differenza è il volume erogato: è il più accurato dei due, perché non dipende da quanto spesso la valvola parla. Una portata istantanea (L/min, L/h, m³/h, gal/min, gal/h) viene invece integrata nel tempo, quindi la frequenza con cui la valvola riporta il flusso decide quanto è buono il numero. Richiesto quando la modalità di erogazione è quella con flussometro.",
+              "volume_entity": "Entità numerica sulla valvola intelligente che accetta un target di volume in litri. Richiesto quando la modalità di erogazione affida il dosaggio alla valvola.",
               "system_type": "Imposta l'efficienza della zona (goccia 0.92, micro-irrigatori 0.80, pop-up 0.68, manuale 0.55). Scegli Personalizzato per inserire la tua qui sotto.",
-              "efficiency": "Usato solo quando il tipo di impianto è Personalizzato. Con qualsiasi altro tipo questo campo viene ignorato e il form te lo segnala."
+              "efficiency": "Usato solo quando il tipo di impianto è Personalizzato. Con qualsiasi altro tipo questo campo viene ignorato e il form te lo segnala.",
+              "delivery_timeout": "Tempo massimo di attesa per un'erogazione misurata o dosata dalla valvola prima di forzarne la chiusura (limite di sicurezza)."
             }
           },
           "scheduling": {
@@ -310,6 +328,10 @@
               "irrigation_mode": "Modalità di irrigazione",
               "irrigation_time": "Orario di irrigazione",
               "threshold": "Soglia di irrigazione"
+            },
+            "data_description": {
+              "irrigation_time": "Ora del giorno in cui NeverDry verifica il deficit e irriga se supera la soglia. Lascia vuoto per disabilitare la programmazione automatica",
+              "threshold": "Livello di deficit che attiva l'irrigazione automatica per questa zona"
             }
           }
         }
