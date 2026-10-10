@@ -533,7 +533,11 @@ function tf(hass, key, params) {
 
 /** The dropdown's short name for an ET method id — "hargreaves" → "Hargreaves-Samani". */
 function methodLabel(hass, methodId) {
-  return t(hass, `method_${methodId}`);
+  const key = `method_${methodId}`;
+  const label = t(hass, key);
+  // t() answers with the key itself when no dictionary has it: a method this
+  // card version does not know reads as its id, not as "method_<id>".
+  return label === key ? String(methodId) : label;
 }
 
 /**

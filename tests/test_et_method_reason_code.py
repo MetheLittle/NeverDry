@@ -14,7 +14,15 @@ translated name — translating it is the card's job now, checked in
 `tests/test_card_reason_i18n.py`.
 """
 
-from never_dry.const import CONF_ET_METHOD, CONF_RAIN_SENSOR, CONF_TEMP_SENSOR
+from datetime import datetime
+
+from never_dry.const import (
+    CONF_ET_METHOD,
+    CONF_HUMIDITY_SENSOR,
+    CONF_RAIN_SENSOR,
+    CONF_TEMP_SENSOR,
+    CONF_WIND_SPEED_SENSOR,
+)
 from never_dry.sensor import DrynessIndexSensor, WaterBalanceMethodSensor
 
 BARE_SITE = {CONF_TEMP_SENSOR: "sensor.t", CONF_RAIN_SENSOR: "sensor.r"}
@@ -67,10 +75,20 @@ class TestWarmingUpCode:
         assert inputs["warming_up_because"]  # English fallback still present
 
     def test_the_sensor_unreadable_variant(self, hass_mock):
-        # Mirrors the branch in _build_penman_reading where humidity or wind is
-        # missing this tick: _last_inputs gets the sensor_unreadable override.
-        hub = DrynessIndexSensor(hass_mock, BARE_SITE)
-        base = hub._warming_up_inputs(temp_c=20.0)
-        override = {**base, "warming_up_code": "sensor_unreadable", "warming_up_params": {}}
-        assert override["warming_up_code"] == "sensor_unreadable"
-        assert override["warming_up_params"] == {}
+        # Drives the real branch in _build_penman_reading: the day's window is
+        # full, so only the unreadable humidity can send it to the fallback. A
+        # test that built the override itself would pass with the code removed.
+        site = {
+            **BARE_SITE,
+            CONF_ET_METHOD: "penman_monteith",
+            CONF_HUMIDITY_SENSOR: "sensor.h",
+            CONF_WIND_SPEED_SENSOR: "sensor.w",
+        }
+        hub = DrynessIndexSensor(hass_mock, site)
+        for hour in range(24):
+            hub._diurnal.observe(hour, 12.0 + hour % 12)
+        hass_mock.states.get = lambda entity_id: None
+        hub._build_penman_reading(dt_h=1.0, temp_c=20.0, rain_mm=0.0, now=datetime(2026, 7, 1, 12, 0))
+        assert hub._last_inputs["warming_up_code"] == "sensor_unreadable"
+        assert hub._last_inputs["warming_up_params"] == {}
+        assert hub._last_inputs["warming_up_because"]  # English fallback still present
