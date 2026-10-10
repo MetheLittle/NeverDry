@@ -16,6 +16,7 @@ fails here instead of in a tester's garden.
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -79,6 +80,43 @@ class TestTheTwoFormsAskTheSameQuestions:
         """A stale entry would silently excuse a field that later goes missing."""
         edit = _declared_fields("async_step_edit_zone_detail")
         assert not set(ADD_ONLY_BY_DESIGN) & edit
+
+
+# ── The same drift in the text under each box (GH #318) ──
+#
+# A zone's field descriptions were written for first-run setup and never copied
+# to the options steps: nine of them, in every language, including the one that
+# says the flow rate is in litres per hour. Someone adding or editing a zone
+# saw an "L/h" label and no explanation, and the README said L/min.
+
+_TRANSLATIONS = _SOURCE.parent / "translations"
+_CATALOGUES = [_SOURCE.parent / "strings.json", *sorted(_TRANSLATIONS.glob("*.json"))]
+_OPTION_ZONE_STEPS = ("add_zone", "edit_zone_detail")
+
+
+def _descriptions(catalogue: dict, *path: str) -> dict[str, set[str]]:
+    step = catalogue
+    for key in path:
+        step = step[key]
+    return {name: set(section.get("data_description", {})) for name, section in step["sections"].items()}
+
+
+class TestEveryZoneFormExplainsTheSameFields:
+    def test_there_is_something_to_compare(self):
+        assert len(_CATALOGUES) >= 5
+
+    @pytest.mark.parametrize("catalogue_path", _CATALOGUES, ids=lambda p: p.name)
+    @pytest.mark.parametrize("step", _OPTION_ZONE_STEPS)
+    def test_options_steps_describe_what_setup_describes(self, catalogue_path, step):
+        catalogue = json.loads(catalogue_path.read_text(encoding="utf-8"))
+        setup = _descriptions(catalogue, "config", "step", "zone")
+        options = _descriptions(catalogue, "options", "step", step)
+        missing = {
+            section: sorted(keys - options.get(section, set()))
+            for section, keys in setup.items()
+            if keys - options.get(section, set())
+        }
+        assert not missing, f"{catalogue_path.name}: {step} lacks descriptions that setup has: {missing}"
 
 
 # ── The case that was reported, driven through the step ──

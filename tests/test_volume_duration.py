@@ -374,22 +374,33 @@ class TestIrrigationFeedback:
 
 
 class TestFlowRateGuard:
-    """Warning when flow_rate_lpm is configured in L/h by mistake."""
+    """Warning when the design flow rate is unusually high for a garden zone."""
 
     def test_high_flow_rate_logs_warning(self, di_sensor, caplog):
-        """flow_rate_lpm > 30 should emit a WARNING with the L/h equivalent."""
+        """Above 1800 L/h the warning names the figure in L/h, the unit the user typed."""
         import logging
 
         with caplog.at_level(logging.WARNING, logger="custom_components.never_dry"):
             _make_zone(di_sensor, flow_rate=200.0)
 
-        assert any("12000" in r.message and "3.33" in r.message for r in caplog.records)
+        warnings = [r.message for r in caplog.records if "design flow rate" in r.message]
+        assert len(warnings) == 1
+        assert "12000 L/h" in warnings[0]
+
+    def test_the_warning_never_says_to_divide(self, di_sensor, caplog):
+        """The form converts L/h itself: dividing a correct entry by 60 breaks it (GH #318)."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="custom_components.never_dry"):
+            _make_zone(di_sensor, flow_rate=200.0)
+
+        assert not any("divide" in r.message.lower() for r in caplog.records)
 
     def test_normal_flow_rate_no_warning(self, di_sensor, caplog):
-        """flow_rate_lpm <= 30 should not emit any flow_rate warning."""
+        """At or below 1800 L/h there is no flow rate warning."""
         import logging
 
         with caplog.at_level(logging.WARNING, logger="custom_components.never_dry"):
             _make_zone(di_sensor, flow_rate=10.0)
 
-        assert not any("L/h" in r.message and "flow_rate" in r.message for r in caplog.records)
+        assert not any("design flow rate" in r.message for r in caplog.records)

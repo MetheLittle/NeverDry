@@ -113,8 +113,8 @@ If a valve stops responding, NeverDry keeps trying — six attempts, with a grow
 | `sensor.<zone>_yearly_water` | L | Cumulative water delivered this year |
 | `sensor.<zone>_rain` | mm | Cumulative rain accounted for the zone |
 | `sensor.<zone>_kc` | — | Current crop coefficient (seasonal) |
-| `sensor.<zone>_flow_rate` | L/min | Design flow rate — what the zone was built to deliver |
-| `sensor.<zone>_measured_flow_rate` | L/min | What the last supervised valve test measured, kept as a series so a slow decline reads as clogging emitters |
+| `sensor.<zone>_flow_rate` | L/h | Design flow rate: what the zone was built to deliver |
+| `sensor.<zone>_measured_flow_rate` | L/h | What the last supervised valve test measured, kept as a series so a slow decline reads as clogging emitters |
 | `sensor.<zone>_water_meter_resolution` | L | Smallest increment this zone's meter has ever reported — the limit of detection behind any measured figure |
 | `sensor.<zone>_threshold` | mm | Configured trigger threshold |
 | `sensor.<zone>_area` | m² | Configured irrigated area |
@@ -123,13 +123,13 @@ If a valve stops responding, NeverDry keeps trying — six attempts, with a grow
 | `sensor.<zone>_irrigation_time` | — | Daily irrigation time (scheduled mode) |
 | `sensor.<zone>_valve` | — | Mirror of the physical valve state (`open`/`closed`) |
 | `sensor.<zone>_battery` | % | Mirror of the valve battery sensor |
-| `sensor.<zone>_flow_meter` | L/min | Mirror of the flow meter |
+| `sensor.<zone>_flow_meter` | as the meter | Mirror of the flow meter, in the unit the meter itself reports |
 | `button.<zone>_irrigate` | — | Start an irrigation session now |
 | `button.<zone>_mark_irrigated` | — | Reset the deficit without opening the valve |
 | `button.<zone>_stop` | — | Stop the zone's irrigation immediately |
 | `button.<zone>_reset_valve` | — | Unlock a valve that NeverDry blocked after repeated failures |
 
-All sensors that carry a physical unit declare the proper HA `device_class` (e.g. `precipitation`, `volume_storage`, `volume_flow_rate`). Home Assistant automatically converts the displayed unit to your system preference — go to **Settings → System → General → Unit system** to switch between metric and imperial. Deficit values appear in mm or inches; volumes in litres or gallons; flow rate in L/min or gal/min; ET rate in mm/h or in/h.
+All sensors that carry a physical unit declare the proper HA `device_class` (e.g. `precipitation`, `volume_storage`, `volume_flow_rate`). Home Assistant automatically converts the displayed unit to your system preference: go to **Settings → System → General → Unit system** to switch between metric and imperial. Deficit values appear in mm or inches; volumes in litres or gallons; flow rate in L/h or gal/h; ET rate in mm/h or in/h.
 
 ## Dashboard — Zone Card
 
@@ -265,7 +265,7 @@ NeverDry is configured entirely through the UI — no YAML required.
 | Custom Kc | No | — | Override Kc [0.1–2.0] — use [NeverDry Planner](https://never-dry.github.io/neverdry-planner/) to estimate it |
 | Site exposure | No | Full sun, open | Sun/wind exposure preset — multiplies the Kc [0.60–1.20] |
 | Custom microclimate factor | Advanced only | — | Explicit exposure factor [0.1–1.5], used when exposure is *Advanced* |
-| Guard flow rate | For timer mode | — | Valve flow rate [L/min]. Required for timer-based zones; recommended for flow-meter and volume-dosing zones too, where it drives the expected duration and the safety-timeout scaling |
+| Guard flow rate | For timer mode | - | Valve flow rate [L/h, gal/h in imperial]. Required for timer-based zones; recommended for flow-meter and volume-dosing zones too, where it drives the expected duration and the safety-timeout scaling |
 | Threshold | No | 20.0 | Mode A trigger [mm] |
 | Battery sensor | No | — | Valve battery sensor — mirrored in the zone device card |
 | Flow meter sensor | No | — | Either a cumulative volume counter or an instantaneous flow rate — both work, and NeverDry tells them apart by the unit. See [valves tested](docs/valve-compatibility.md) for what your model exposes. Mirrored in the zone device card |

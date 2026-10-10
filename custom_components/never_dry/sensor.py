@@ -1823,15 +1823,17 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._valve = zone_config.get(CONF_ZONE_VALVE)
         self._system_type = zone_config.get(CONF_ZONE_SYSTEM_TYPE)
         self._flow_rate = zone_config.get(CONF_ZONE_FLOW_RATE, 0.0)
+        # The form asks for L/h and converts, so the only advice that is safe to
+        # give is to check the figure against the zone. Telling the user to
+        # divide by 60 dates from when the form asked for L/min: followed today,
+        # it turns a correct entry into one sixty times too small (GH #318).
         if self._flow_rate > UNUSUAL_FLOW_MAX_LPM:
             _LOGGER.warning(
-                "Zone '%s': flow_rate_lpm=%.1f L/min (= %.0f L/h) looks unrealistically high "
-                "for garden irrigation. If you configured it in L/h, divide by 60 (e.g. %.0f L/h → %.2f L/min).",
+                "Zone '%s': design flow rate %.0f L/h is above %.0f L/h, unusual for a garden zone. "
+                "It is right for a large lawn; otherwise check the zone's flow rate, which the form takes in L/h.",
                 zone_config.get(CONF_ZONE_NAME, "?"),
-                self._flow_rate,
                 self._flow_rate * 60,
-                self._flow_rate,
-                self._flow_rate / 60,
+                UNUSUAL_FLOW_MAX_LPM * 60,
             )
         self._threshold = zone_config.get(CONF_ZONE_THRESHOLD, DEFAULT_THRESHOLD)
         self._delivery_mode = zone_config.get(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE)

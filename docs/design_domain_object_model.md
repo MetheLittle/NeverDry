@@ -1,8 +1,8 @@
 # Design — Domain Object Model
 
 **Status:** Accepted (ADR), 2026-08-16
-**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object; 2026-08-01 RFC to dissolve `System` into `Environment` + capability-matched models)
-**Related:** GH #74 (actuator abstraction discussion), GH #94 (`valve.*` support), GH #95 (master valve/pump), [Water-Balance Reference Model](design_water_balance_reference_model.md) (where the deficit lives), [Domain Model Anomalies](design_domain_model_anomalies.md) (code-verified audit against this model)
+**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object; 2026-08-01 RFC to dissolve `System` into `Environment` + capability-matched models; 2026-10-10 a valve coordinator proposed for the electrical limit of a controller board, GH #320; 2026-10-10 the master's start order, linger and per-zone opt-out, GH #95; 2026-10-10 entries by place and a named water network shared across entries, discussion #239)
+**Related:** GH #74 (actuator abstraction discussion), GH #94 (`valve.*` support), GH #95 (master valve/pump), GH #320 (station limit of a 24 VAC controller), [Water-Balance Reference Model](design_water_balance_reference_model.md) (where the deficit lives), [Domain Model Anomalies](design_domain_model_anomalies.md) (code-verified audit against this model)
 
 ## Purpose
 
@@ -25,6 +25,18 @@ as the codebase evolves. For the current module/data-flow architecture see
 ZoneDriver and MasterDriver are two specializations of a common **Driver** base, which owns
 what they share: the entity adapter, ON/OFF command with state confirmation, adaptive
 latency/timeout, and the safety layers (watchdog, close on error/stop/restart).
+
+Two more objects are **proposed, not written**, and land together with the scheduler work:
+
+- the **WaterNetwork**, the hydraulic line zones draw from, named once on the instance and shared
+  by every entry that names it: it holds the hydraulic limit, the master and the turn-taking
+  between entries ([its section](#waternetwork-proposed));
+- the **ValveCoordinator**, which holds the electrical limit of a controller board, how many
+  solenoids its transformer can hold open at once ([its section](#valvecoordinator-proposed)).
+
+Why they are separate objects, and why neither is the scheduler, is in the design decisions
+[Electrical parallel is not hydraulic parallel](#electrical-parallel-is-not-hydraulic-parallel-a-coordinator-not-the-scheduler)
+and [Entries by place, water networks by name](#entries-by-place-water-networks-by-name).
 
 ## The water-balance model (the *how much*)
 
@@ -97,11 +109,12 @@ backend allows (see the design decision below).
 
 ![UML class diagram of the NeverDry domain model](assets/domain_model_uml.svg)
 
-*Rendered diagram (`assets/domain_model_uml.svg`) — blue is the liters contract going
-down, green is the truth flowing back. The Mermaid source below is the normative
-definition; keep the two in sync.* ⚠️ **The SVG predates the 2026-08-09 revision** and
-still shows `System` rather than `Environment`, without `Placement` or the `Delivery`
-protocol. Re-render it before this document is next published.*
+*Rendered diagram (`assets/domain_model_uml.svg`), generated from the Mermaid source below,
+which is the normative definition. After changing the source, regenerate the SVG rather than
+editing it by hand:
+`mmdc -i <source>.mmd -o docs/assets/domain_model_uml.svg -c <config> -b white`, with the
+config `{"theme": "neutral", "class": {"htmlLabels": false}}` so the labels are plain SVG text.
+Classes marked `<<proposed>>` are not written yet.*
 
 ```mermaid
 classDiagram
@@ -135,6 +148,7 @@ classDiagram
         +d_max : own reservoir
         +threshold_mm
         +cycle_soak : CycleSoakRule
+        +uses_master : optional, default yes
         +deficit : Deficit, starts at 0
         +counters : WaterCounters
         +effective_kc(base_kc)
@@ -167,7 +181,8 @@ classDiagram
         +evaluate_scheduled(zone, is_running) Decision
         +evaluate_reactive(zone, is_running, is_throttled) Decision
         +next_eligible(zones, is_running) Zone
-        ~deferred~ time_windows, queue, interleave_during_soak
+        deferred: time_windows, queue, interleave_during_soak
+        proposed: behaviour by entry type
     }
 
     class Decision {
@@ -196,8 +211,28 @@ classDiagram
     }
 
     class MasterDriver {
-        +off_delay_s
+        +start_delay_s : 1 s after the first zone opens, optional
+        +off_delay_s : 5 s after the last confirmed close, optional
         +follow(any_zone_driver_active)
+    }
+
+    class WaterNetwork {
+        <<proposed>>
+        +name : optional, none = private to its entry
+        +hydraulic_limit : optional, max flow or max lines
+        +master : MasterDriver, optional
+        +admit(zone) bool
+        +next_turn(waiting entries) entry
+    }
+
+    class ValveCoordinator {
+        <<proposed>>
+        +name : optional, none = virtual
+        +max_active_zones : declared net of the master
+        +zone_drivers : ZoneDriver set
+        +start(zones) started count
+        +on_outside_open(driver) warn, timer runs suspect
+        default: one virtual coordinator, limit 1
     }
 
     class ManualActuator {
@@ -271,7 +306,6 @@ classDiagram
     WaterBalanceModel <|-- VWCSystemModel
     VWCSystemModel <|-- VWCPerZoneModel
     Environment "1" o-- "*" Zone : feeds ET+rain to
-    Environment "1" o-- "0..1" MasterDriver : declares
     Environment ..> WaterBalanceModel : gates by capability match
     Zone "1" --> "1" WaterBalanceModel : advances deficit via
     WaterBalanceModel ..> Deficit : returns
@@ -286,6 +320,10 @@ classDiagram
     Scheduler --> Zone : decides when
     Scheduler ..> Decision : returns
     MasterDriver ..> ZoneDriver : ON while any is active
+    Scheduler "*" ..> "1" WaterNetwork : asks for a line
+    WaterNetwork "1" o-- "0..1" MasterDriver : head of the line
+    Scheduler "1" ..> "*" ValveCoordinator : asks to start zones, told how many started
+    ValveCoordinator "1" o-- "*" ZoneDriver : opens up to its limit
 ```
 
 `Zone` depends on `Delivery`, the structural protocol, rather than on `DeliveryResult` itself.
@@ -303,6 +341,11 @@ a `DeliveryResult`; the `Scheduler` never touches drivers — it only decides *w
 (and, with cycle & soak, may interleave another eligible zone during a soak pause);
 `MasterDriver` reacts to the aggregate driver activity, it takes no decisions. The liveness
 `ping()` lives in the abstract `Driver`, so both specializations inherit it.
+
+The proposed `ValveCoordinator` sits between the two: the `Scheduler` asks it to start zones
+and is told how many it started, so the scheduler still never touches a driver, and the
+coordinator owns the `ZoneDriver`s it may open. The `MasterDriver` is not connected to it: the
+master is hydraulic, and the coordinator's limit is electrical.
 
 ## The classes in detail
 
@@ -372,6 +415,7 @@ them, which is what makes the rules testable without a controller.
 | Member | Kind | Meaning |
 |---|---|---|
 | `concurrency` | attr | `SERIAL` (today's behaviour) or `PARALLEL`. Naming it turns an emergent property — both handlers happen to bail when something is running — into a stated policy |
+| `entry_type` | attr | **Proposed.** Outdoor, greenhouse or indoor; fixed when the entry is created. The scheduler's behaviour follows it: freeze interlock outdoors, a request to water by hand indoors, neither rain nor the outdoor freeze gate in a greenhouse. See [Entries by place, water networks by name](#entries-by-place-water-networks-by-name) |
 | `min_service_interval_s` | attr | Rate limit between service calls with the same key |
 | `evaluate_scheduled(zone, is_running) → Decision` | method | The daily top-up. Deliberately does **not** consult the threshold: gating a schedule on the reactive threshold turns every scheduled run into a reactive one (AI-183). Only a zone already full is skipped |
 | `evaluate_reactive(zone, is_running, is_throttled) → Decision` | method | Mode A: water once the deficit crosses the zone's threshold |
@@ -418,8 +462,61 @@ activity, takes no decisions, has no notion of liters.
 
 | Member | Kind | Meaning |
 |---|---|---|
-| `off_delay_s` | attr | Linger delay after the last active zone |
-| `follow(any_zone_driver_active)` | method | ON while any ZoneDriver is active, OFF (after the linger) when none is |
+| `start_delay_s` | attr | When the master starts relative to the first zone valve. **Default: 1 s after the first zone valve is confirmed open.** Optional and signed: negative starts it before the zone |
+| `off_delay_s` | attr | Linger after the last zone of the sequence is **confirmed** closed. **Default: 5 s.** Optional |
+| `follow(any_zone_driver_active)` | method | ON while any ZoneDriver is active, OFF (after the linger) when none is. Across a serial sequence the scheduler keeps it ON through the gap between zones (see the design decision below) |
+
+The written code still has `off_delay_s = 10` and no start delay; both change to the values
+above when the master is wired, together with the scheduler.
+
+### WaterNetwork (proposed)
+
+**Proposed, not written. It lands with the scheduler work.** The hydraulic line zones draw from,
+and the point where entries that share it converge. Without it, two entries on one main would
+each have to ask the other what it is running, a protocol between peers with nobody holding the
+truth; with it, each scheduler asks one object, and the schedulers never talk to each other.
+
+| Member | Kind | Meaning |
+|---|---|---|
+| `name` | attr | Optional. **No name: a network private to its entry**, the default, and today's behaviour. The same name on several entries means one shared line. The name is chosen from a list of the networks already declared on the instance, or created, so a typing slip cannot split one network in two |
+| `hydraulic_limit` | attr | Optional, and one of two: a **usable maximum flow** (the form suggests about 80% of the pump's plate; the software applies no margin of its own), compared with the **design** flow rates of the zones running on it, never the measured ones; or a **maximum number of lines**. Absent, parallel is free on the hydraulic side |
+| `master` | attr | The master valve or pump at the head of the line, if any: one per network, so two entries sharing a pump never command it twice. It stays on while any entry on the network has a zone running or next in its sequence |
+| `admit(zone) → bool` | method | Whether the line can take one more zone now, against its limit |
+| `next_turn(waiting entries) → entry` | method | Turn-taking between entries that have zones waiting: **one zone at a time, in turn**, so no entry waits through another's whole sequence. Within an entry, order stays its scheduler's |
+
+Serial and parallel remain the entry's setting; the network decides only whether there is water
+for one more line, and whose turn it is.
+
+### ValveCoordinator (proposed)
+
+**Proposed, not written. It lands with the scheduler work, together with its wiring.** The
+electrical side of "how many at once": the only object that knows how many zone solenoids
+its controller board can hold open. A 24 VAC controller has one transformer, one common wire
+and a set of station terminals, and the transformer is sized for a fixed number of solenoids
+(on most residential controllers, one station plus the master). Raised in GH #320.
+
+| Member | Kind | Meaning |
+|---|---|---|
+| `max_active_zones` | attr | Zone valves the board may hold open at once, **declared by the user net of the master**: on a board rated for one station plus master, the limit is 1. The coordinator never counts the master, so neither it nor the scheduler needs to know how the board is wired |
+| `name` | attr | Optional. Without one, the zone uses the entry's virtual coordinator. A name is chosen from the boards already declared on the instance, or created, so one board can drive zones of several entries (a garden and a greenhouse on one controller) |
+| `zone_drivers` | attr | The `ZoneDriver`s wired to this board, from whichever entry they belong to |
+| `start(zones) → started` | method | Opens as many of the requested zones as the limit allows and reports **how many it started**. It does not queue: the scheduler knows the answer and keeps the rest waiting |
+| `on_outside_open(driver)` | method | A valve opened by hand or by another automation is only observed, never refused or closed: NeverDry does not own the relays. An overlap on one board warns, naming both valves, and in timer mode marks both runs as suspect, since neither delivery can be trusted |
+
+**The default is virtual.** With no coordinator configured, one implicit coordinator holds every
+zone valve with a limit of 1: the behaviour of today, one valve at a time, stated instead of
+emerging from the handlers.
+
+**Composition, not a third `Driver`.** `Driver` means one actuator and one entity: adapter,
+confirmed commands, adaptive timeout, watchdog and liveness probe all assume a real switch.
+The coordinator has no entity of its own; it owns several `ZoneDriver`s. Making it a `Driver`
+subclass would give it a watchdog and a latency over an entity that does not exist, the same
+reason `ManualActuator` is not a `Driver` either.
+
+**The hard interlock stays in the hardware.** Firmware that owns the relays enforces the limit
+on every open, including a manual one (ESPHome: `interlock:` on GPIO switches). The coordinator
+keeps NeverDry's own commands inside the limit and makes an outside overlap visible; it does
+not replace the interlock.
 
 ### DeliveryResult
 
@@ -467,6 +564,28 @@ Its *execution* however is a Driver: modeling it as a Driver specialization mean
 layers (never leave the pump running on error/stop/restart) are written once in the base and
 inherited — instead of duplicating watchdog and error handling inside "system" as a special
 case.
+
+**What the user configures: the entity, and nothing else.** *Decided 2026-10-10 on GH #95,
+from @MrEcosse's working setup and @safepay's review.* Everything else has a default that is
+safe for both kinds of master, so the kind is never asked:
+
+- **Start order: 1 s after the first zone valve is confirmed open.** A pump-start relay needs
+  exactly this, or it runs against a closed line. A master valve tolerates it, since a zone line
+  without pressure for one second harms nothing. The opposite default, master first, would be
+  right for valves and harmful for pumps, so it is the one that stays optional.
+- **Kept on for the whole sequence.** While the scheduler has another zone to run in the same
+  sequence, the master stays on through the gap between zones, however long the inter-zone delay
+  is. The linger applies only after the last zone, and counts from its **confirmed** close, not
+  from the command.
+- **Linger: 5 s**, the figure from the field.
+- **Every zone uses it.** A zone that does not (drip from the mains beside a lawn on a tank pump)
+  says so with an optional per-zone flag.
+
+Optional, for whoever wants to look under the bonnet: a signed start offset, the linger, the
+per-zone flag. The master belongs to the **water network** it heads, not to an entry: two entries
+sharing a named network share one master, and a second pump is a second network. It is **not**
+counted in a controller board's electrical limit: it stays hydraulic, and that limit is declared
+net of it (the `ValveCoordinator`).
 
 ### Cycle & soak: a Zone rule
 
@@ -555,6 +674,102 @@ therefore a **Scheduler policy**:
 The queue/scheduler implementation stays deferred until real demand for parallel zones shows
 up (as agreed in GH #74), but the model reserves the concept now so cycle & soak (a Zone
 rule) and concurrency (a Scheduler policy) don't get entangled when either lands.
+
+This policy is the **hydraulic** half of concurrency only. The electrical half, how many
+solenoids a board can hold open, is not the scheduler's: see the next decision.
+
+### Electrical parallel is not hydraulic parallel: a coordinator, not the scheduler
+
+*From GH #320 (2026-09-27) and the decision taken on it on 2026-10-10.* Two zones running at once
+must pass two independent limits, and they belong to different objects:
+
+| Limit | Question | Who knows it | Owner |
+|---|---|---|---|
+| **Hydraulic** | Does the water allow two zones at once? | The person who sees the plumbing, and the pump's plate when there is one | `WaterNetwork`: an optional limit, either a usable maximum flow or a maximum number of lines; the `SERIAL`/`PARALLEL` setting stays the scheduler's |
+| **Electrical** | Can the board hold two solenoids open at once? | Printed on the transformer and on the solenoid datasheet | `ValveCoordinator`: `max_active_zones`, declared net of the master |
+
+The two are never merged into one number, because they fail differently. A hydraulic overlap
+gives two weak runs and two wrong flow rates; an electrical one sags the voltage, and valves
+buzz, fail to open or drop out mid-run, with the run still reported as delivered in timer mode.
+
+The path of a decision: the scheduler decides which zones should run now, asks the water network
+whether the line can take them and whose turn it is, and asks the coordinator to start them; the
+coordinator starts as many as its electrical limit allows and answers how many; the scheduler
+keeps the rest waiting. **A run goes parallel
+only when both say yes**, so permission given for the plumbing never crosses the transformer.
+
+The **master** valve or pump stays on the hydraulic side. It follows zone activity as it does
+today and is not counted by the coordinator; the user declares the coordinator's limit net of
+it. Tying the master to the electrical count would make both the coordinator and the scheduler
+know how each board is wired.
+
+With no coordinator configured, the default virtual coordinator (limit 1) keeps today's
+behaviour, so an installation that declares nothing changes nothing.
+
+**Not written yet.** The coordinator, the water network and the wiring
+between them land together with the scheduler work. Until then the only action is
+documentation: a relay board on one transformer should have its interlock set in firmware.
+
+### Entries by place, water networks by name
+
+*Decided 2026-10-10, from discussion #239 and GH #320.* "One valve at a time" turned out to be
+three questions, and each has its own object:
+
+| Object | Question | Level |
+|---|---|---|
+| `Scheduler` | **When**, and in what order, as the place requires | One per entry |
+| `WaterNetwork` | **Is there water** for one more line, and whose turn is it? | One per name, on the instance |
+| `ValveCoordinator` | **Is there power** for one more solenoid? | One per board, on the instance |
+
+A zone starts only when the network and its coordinator both say yes.
+
+**An entry is a place.** Outdoor, greenhouse or indoor, each entry with its own climate sensors
+and its own scheduler, whose behaviour follows the type: the freeze interlock outdoors, a request
+to water by hand indoors, neither rain nor the outdoor freeze gate in a greenhouse. The climate is
+therefore not duplicated: each place has its own.
+
+**A network is a name.** No name keeps the network private to the entry, which is the default and
+today's behaviour. The same name on two entries makes them share one line: a greenhouse on the
+garden's mains names the garden's network, and the two schedulers take turns through it. A
+greenhouse on its own tank names nothing, or a network of its own.
+
+**Simple by default: every new field is optional.** Entry type, water network, board, hydraulic
+limit and master all have a default that is today's behaviour, and a simple garden is configured
+without seeing any of them. Two installations are the test this design must pass:
+
+- **A terrace with seven pots** on drippers: one entry, seven zones, nothing else asked.
+- **Four independent zones on one hydraulic line**, one outdoor entry: nothing else asked either.
+
+If either of them meets a question about networks, boards or types, the form is wrong, not the
+user.
+
+- The **first entry** on an instance asks nothing new: it is outdoor, which is what almost every
+  installation has. The type sits in a collapsed section of the first form, for the rare
+  installation that is only house plants.
+- **Adding an entry** from the second on opens a menu: outdoor, greenhouse, indoor. Whoever adds a
+  second entry is already doing something beyond the simple case.
+- **Network and board** are two optional fields in a collapsed section. Empty, the entry has its
+  own network and the virtual coordinator, exactly as today.
+- The **type is fixed** at creation, since the scheduler and the climate sensors depend on it.
+  Changing it means creating a new entry, and the form says so.
+
+**Existing entries become outdoor.** Zones whose placement is greenhouse or indoor inside them keep
+working as now; splitting them into entries of their own is a choice, useful only where networks
+or climates genuinely differ.
+
+| Installation | Entries | Network | Boards |
+|---|---|---|---|
+| A terrace with seven pots | 1 outdoor | none named | none (virtual) |
+| Four zones on one line | 1 outdoor | none named | none (virtual) |
+| Two Netro controllers on one main | 1 outdoor | none named | 2 named, limit 1 each |
+| Garden and greenhouse on one main | 1 outdoor + 1 greenhouse | one name, on both | as wired |
+| Garden on the mains, greenhouse on a tank | 1 outdoor + 1 greenhouse | none, or two names | as wired |
+| House plants | 1 indoor | none: no valves | none |
+
+The validation of the hydraulic limit runs from both sides: a zone is checked against the
+network and the coordinator it names, and changing a network's limit or a coordinator checks
+again every zone that uses it, so the order of configuration does not matter. The full
+reasoning is in the scheduler note (`design/scheduler.md`, sections 8.7 and 8.8).
 
 ### Driver liveness: an active availability ping, not just passive state
 
