@@ -193,6 +193,15 @@ not the argument.
   meter had stopped answering.
 
 ### Fixed
+- **The model card explains its choice in your language**
+  ([#313](https://github.com/never-dry/NeverDry/issues/313)). The line under the
+  method's name, why this method was chosen, and the warming-up notice reached the
+  card as English sentences built in Python, so a Spanish, German or Italian
+  install read them in English, with the method's internal name quoted in it. The
+  integration now sends a stable code and the raw values, and the card writes the
+  sentence from its own dictionary, the same way it writes every other label. The
+  English sentence is still sent for one release, so an older card keeps showing
+  something readable. Contributed by @laurash96, who also wrote the Spanish.
 - **A zone edited to Custom soil can be saved again**
   ([#234](https://github.com/never-dry/NeverDry/issues/234)). Custom soil asks for
   both ends of the reservoir, the field capacity and the wilting point, and the
