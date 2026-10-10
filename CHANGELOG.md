@@ -193,6 +193,25 @@ not the argument.
   meter had stopped answering.
 
 ### Fixed
+- **A zone edited to Custom soil can be saved again**
+  ([#234](https://github.com/never-dry/NeverDry/issues/234)). Custom soil asks for
+  both ends of the reservoir, the field capacity and the wilting point, and the
+  check that enforces it is shared by the two zone forms. The add form had the
+  wilting point box; the edit form never got it. Switching an existing zone to
+  Custom therefore asked for a number there was nowhere to type, and the zone could
+  not be saved at all. The box is now in the edit form, showing the stored value,
+  and a test compares the two forms field by field so the next field added to one
+  cannot be forgotten in the other.
+- **The flow rate reads in one unit wherever you meet it**
+  ([#318](https://github.com/never-dry/NeverDry/issues/318)). The zone form asks
+  for the design flow rate in litres per hour (gallons per hour on an imperial
+  instance), but the explanation under the box existed only in first-run setup:
+  adding or editing a zone later showed the L/h label with nothing beneath it,
+  nine field descriptions missing in every language, while the README said L/min.
+  The descriptions are now in all three zone forms, the README and manuals state
+  the unit the form takes, and the startup warning for an unusually high flow
+  rate names that unit instead of suggesting a conversion. A test keeps the three
+  forms' descriptions in step.
 - **Mark irrigated redraws everything it changed**
   ([#216](https://github.com/never-dry/NeverDry/issues/216)). Pressing it reset
   the volume at once while the time and the deficit stood still until the next
