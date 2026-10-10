@@ -27,8 +27,11 @@ environments, outdoor and greenhouse, and the shared pump declined) and §8.4.7
 
 **Added 2026-10-10**, and not yet reflected in section 14: section 8.5 (the
 electrical limit of a controller board, GH #320, held by a valve coordinator
-rather than by the scheduler) and section 8.6 (the master stays on for the
-whole sequence, GH #95).
+rather than by the scheduler), section 8.6 (the master stays on for the
+whole sequence, GH #95), section 8.7 (an optional hydraulic limit, declared
+from design figures, which revises the refusal in section 8 without undoing
+the removal) and section 8.8 (entries by place, water networks by name, which
+closes Q9 and revises section 8.4.6).
 
 Nothing is binding while the note is `Draft`: a working answer is still a
 proposal.
@@ -298,7 +301,8 @@ main. Admitting a zone to run concurrently requires two conditions, evaluated
 **at the moment of admission** rather than once at startup:
 
 1. the policy permits overlap;
-2. `max_concurrent_zones` is not saturated.
+2. the water network the zone draws from, if it declares a limit, can take one
+   more line (sections 8.7 and 8.8).
 
 Both are hydraulic. Passing them makes a run *admissible*, not started: the
 electrical limit of the board is a separate yes, and it is not the scheduler's
@@ -441,6 +445,9 @@ The entry boundary does have a failure of its own, and it is worth naming
 rather than discovering: two entries pointed at valves on the *same* main is a
 configuration nobody is stopped from making, and the system would treat as
 independent two things the plumbing does not.
+
+**2026-10-10: superseded by section 8.8.** The thing zones share is now a named
+water network, which can span entries; the declared group is no longer needed.
 
 ### 8.3 A queue waits for a closed valve, not for a timer
 
@@ -842,6 +849,10 @@ deficit is what says which - not a flag on the session.
 
 #### 8.4.6 Two environments, fixed, and the zone already knows which
 
+**2026-10-10: revised by section 8.8.** Places became entry types (outdoor,
+greenhouse, indoor), and a pump shared between places is coordinated through a
+named water network. The reasoning below is kept as the record of why.
+
 §8.4.2 calls its six decisions site-level, and with a greenhouse in the
 installation that word covers two different things.
 
@@ -967,15 +978,18 @@ out mid-run, with the run still reported as delivered in timer mode.
 That limit is the opposite of the supply figure section 8 refuses to ask for. It
 is known, printed on the transformer and on the solenoid datasheet, so asking
 for it is not asking for a guess. But it is still **not a scheduler setting**,
-and folding it into `max_concurrent_zones` would merge two limits that fail
-differently and are known by different means.
+and folding it into the scheduler's hydraulic limit (section 8.7) would merge
+two limits that fail differently and are known by different means.
 
 So concurrency has two owners:
 
-- **The scheduler** keeps the hydraulic half: the policy and
-  `max_concurrent_zones`, both declared by the person who sees the plumbing.
+- **The hydraulic half** is the scheduler's policy and the water network's
+  optional limit (sections 8.7 and 8.8), both declared by the person who sees
+  the plumbing.
 - **A valve coordinator** holds the electrical half: the zones wired to one
   board and `max_active_zones`, how many of them that board may hold open.
+  A coordinator is optional and named on the instance, so one board can drive
+  zones of several entries (section 8.8).
 
 The scheduler asks the coordinator to start the zones it has admitted; the
 coordinator starts as many as its limit allows and **answers how many it
@@ -1012,7 +1026,9 @@ exists to prevent.
 
 The fix belongs here, not in the linger. **The scheduler knows the sequence**,
 so it keeps the master on while another zone of the same sequence is still to
-run, whatever the gap. The linger then has one job only: the pause after the
+run, whatever the gap. The master belongs to the water network it heads
+(section 8.8): when two entries share a network, it stays on while either has a
+zone running or next in line. The linger then has one job only: the pause after the
 last zone, counted from that zone's **confirmed** close, for the same reason a
 queue waits for a closed valve and not for a timer (section 8.3).
 
@@ -1022,6 +1038,119 @@ harmless for a master valve), its 5 s linger and the zones it serves (all of
 them) are defaults; a signed start offset, the linger and a per-zone "does not
 use the master" flag are optional. The full decision is in
 `../design_domain_object_model.md`, under the master valve/pump.
+
+### 8.7 The hydraulic limit: optional, declared, one of two
+
+*From discussion #239 (@safepay, 2026-09-27 and 2026-09-28); decided 2026-10-10.*
+Section 8 refuses to ask for the supply, because in an ordinary garden nobody
+knows it and a guess would look like a measurement. That stands for whoever does
+not know. It does not stand for whoever does: @safepay's pump is rated at
+60 L/min, and the figure is on its plate.
+
+So the scheduler follows the user's settings, and the water network the zones
+draw from (section 8.8) may hold a limit, offered and never required:
+
+- **Serial** runs zones one after another, as today.
+- **Parallel** runs them together. With no limit declared, parallel is free on
+  the hydraulic side, and only the coordinators' electrical limits apply.
+- **The limit is one of two, not both**: a **maximum flow** (L/min, gal/min on
+  an imperial instance), or a **maximum number of lines** running at once. With
+  a maximum flow, a zone joins the running ones only while the sum of their
+  **design** flow rates stays within it.
+
+**What this does not undo.** The removal recorded in section 8 is about the
+*measured* rate, which is an effect of scheduling and cannot decide it. The limit
+here is compared against design flow rates only: both sides are declarations,
+known before anything runs.
+
+**The field asks for the usable figure, not the plate.** Its description suggests
+entering about 80% of the rated capacity. The software keeps no margin of its own:
+storing the plate and applying a constant to it would collect a raw figure used
+once, where the user can give the one that is used.
+
+**Validation runs from both sides.** The limit and the zones can be configured in
+either order, limits first or zones first, so one validation function checks the
+pair and every form that touches either side calls it:
+
+| What changes | What is checked again |
+|---|---|
+| A zone, added or edited | its design flow rate against the maximum flow of its network, if one is declared; the network and the coordinator it names exist |
+| A network's maximum flow, set or lowered | every zone on that network, from every entry; any whose design flow rate exceeds it is named |
+| A coordinator, added, edited or removed | the zones assigned to it; a removed coordinator's zones return to the virtual default, and the form says so |
+
+A zone above the maximum flow earns a warning with a confirmation, not a refusal:
+it is most often a unit error (GH #318), and occasionally a zone that will only
+ever run alone. A static test checks that every step editing a zone, the limit or
+a coordinator calls the shared function, since two forms with two copies of one
+rule is how a field went missing from the zone edit form (GH #234).
+
+### 8.8 Entries by place, water networks by name
+
+*Decided 2026-10-10, from discussion #239 and GH #320.* "One valve at a time" has
+turned out to be three questions, and each has its own object:
+
+| Object | Question | Level |
+|---|---|---|
+| **Scheduler** | *When*, and in what order, as the place requires | One per entry |
+| **Water network** | *Is there water* for one more line, and whose turn is it? | One per name, on the instance |
+| **Valve coordinator** | *Is there power* for one more solenoid? (section 8.5) | One per board, on the instance |
+
+A zone starts only when its network and its coordinator both say yes. The
+schedulers never talk to each other.
+
+**An entry is a place**: outdoor, greenhouse or indoor, with its own climate
+sensors and its own scheduler. **The scheduler depends on the entry's type**: an
+outdoor entry carries the freeze interlock (section 9.2); an indoor entry has no
+valve to open, so a due zone becomes a request to water by hand, an action
+addressed to a person rather than a command to a valve; a greenhouse entry runs
+its valves without rain and without the outdoor freeze gate. The climate is not
+duplicated by this: each place has its own.
+
+**A network is a name.** No name keeps the network private to the entry. The same
+name on two entries makes them share one line, and the network becomes the point
+where they converge: it knows which zones are running on it from either entry,
+holds the hydraulic limit (section 8.7) and the master (section 8.6), and decides
+whose turn it is. Turns go **one zone at a time**, between the entries that have a
+zone waiting, so no entry waits through another's whole sequence; within an
+entry, the order stays its scheduler's. The name is picked from the networks
+already declared on the instance, or created, so a typing slip cannot split one
+line in two.
+
+This is what section 8.4.6 declined, and the reason it gave no longer holds.
+Coordinating a shared pump across two places was refused because it meant one
+part of NeverDry checking what another had already taken, with no object to hold
+that state. The water network is that object.
+
+**Simple by default: every new field is optional.** Entry type, network, board,
+hydraulic limit and master all default to today's behaviour. Two installations
+are the test, and neither may meet a question about any of them:
+
+- a terrace with seven pots on drippers: one entry, seven zones;
+- four independent zones on one hydraulic line: one outdoor entry.
+
+How that holds in the forms:
+
+- The **first entry** on an instance asks nothing new: it is outdoor. The type
+  sits in a collapsed section of the first form, for the installation that is
+  only house plants.
+- **Adding an entry** from the second on opens a menu: outdoor, greenhouse,
+  indoor.
+- **Network and board** are two optional fields in a collapsed section. Empty
+  means a private network and the virtual coordinator, exactly as today.
+- The **type is fixed** at creation, because the scheduler and the climate
+  sensors depend on it; changing it means a new entry, and the form says so.
+- **Existing entries become outdoor.** Zones whose placement is greenhouse or
+  indoor inside them keep working as now; moving them to entries of their own is
+  a choice, not a migration.
+
+| Installation | Entries | Network | Boards |
+|---|---|---|---|
+| A terrace with seven pots | 1 outdoor | none named | none (virtual) |
+| Four zones on one line | 1 outdoor | none named | none (virtual) |
+| Two Netro controllers on one main | 1 outdoor | none named | 2 named, limit 1 each |
+| Garden and greenhouse on one main | 1 outdoor + 1 greenhouse | one name, on both | as wired |
+| Garden on the mains, greenhouse on a tank | 1 outdoor + 1 greenhouse | none, or two names | as wired |
+| House plants | 1 indoor | none: no valves | none |
 
 ## 9. The irrigability envelope
 
@@ -1615,7 +1744,7 @@ Note that A and C both keep the vocabulary at one word, *window*, which is worth
 something on its own: §10.1 exists because two words for two nearly-identical
 things sent a user to configure eleven of the wrong one.
 
-**Q9 - Where does "one valve at a time" live? - Open.** *(Raised 2026-09-26
+**Q9 - Where does "one valve at a time" live? - Closed 2026-10-10 (section 8.8).** *(Raised 2026-09-26
 by GH #239 and GH #270, plus a position taken inside this project.)*
 
 §8.2 sets out three candidate boundaries: the config entry, the zone, or a
@@ -1660,6 +1789,12 @@ subject of this question. The electrical one has its own owner, a valve
 coordinator per board, with a virtual default of one valve at a time, so it no
 longer needs a boundary to be chosen here. What is left for Q9 is only where
 *hydraulic* permission to overlap is declared.
+
+**2026-10-10: closed by section 8.8.** The boundary is neither the entry nor the
+zone but the **water network**, a named object that entries share when their
+zones share a line. An entry is a place, with its own scheduler; a board is a
+named coordinator. The failure the entry boundary allowed, two entries on one
+main, is now expressed by naming the same network on both.
 
 ## 15. Consequences for the domain model
 
