@@ -25,6 +25,10 @@ rain closing the runs, and why both belong here), §8.4.6 (two fixed
 environments, outdoor and greenhouse, and the shared pump declined) and §8.4.7
 (the automation a user built instead, read as a specification).
 
+**Added 2026-10-10**, and not yet reflected in section 14: section 8.5 (the
+electrical limit of a controller board, GH #320, held by a valve coordinator
+rather than by the scheduler).
+
 Nothing is binding while the note is `Draft`: a working answer is still a
 proposal.
 Lifecycle: `Draft → Proposed (open for comment, "RFC") → Accepted ("ADR")`.
@@ -294,6 +298,10 @@ main. Admitting a zone to run concurrently requires two conditions, evaluated
 
 1. the policy permits overlap;
 2. `max_concurrent_zones` is not saturated.
+
+Both are hydraulic. Passing them makes a run *admissible*, not started: the
+electrical limit of the board is a separate yes, and it is not the scheduler's
+to give (section 8.5).
 
 **There was a third, and removing it is the substantive change here.** It read:
 *the flow demanded by the active runs plus the candidate fits within the
@@ -946,6 +954,53 @@ The Custom layout added for GH #269 has a checkbox per section, buttons among
 them - so the request arrived after the answer, which is the good direction for
 once.
 
+### 8.5 The electrical limit is not the scheduler's
+
+*From GH #320 (@safepay, 2026-09-27); decided 2026-10-10.* A 24 VAC controller
+is one transformer, one common wire and a set of station terminals, and the
+transformer is sized for a fixed number of solenoids held open at once: on most
+residential controllers, one station plus the master. Overlap past that number
+is not two weak runs, it is a voltage sag: valves that buzz, fail to open or drop
+out mid-run, with the run still reported as delivered in timer mode.
+
+That limit is the opposite of the supply figure section 8 refuses to ask for. It
+is known, printed on the transformer and on the solenoid datasheet, so asking
+for it is not asking for a guess. But it is still **not a scheduler setting**,
+and folding it into `max_concurrent_zones` would merge two limits that fail
+differently and are known by different means.
+
+So concurrency has two owners:
+
+- **The scheduler** keeps the hydraulic half: the policy and
+  `max_concurrent_zones`, both declared by the person who sees the plumbing.
+- **A valve coordinator** holds the electrical half: the zones wired to one
+  board and `max_active_zones`, how many of them that board may hold open.
+
+The scheduler asks the coordinator to start the zones it has admitted; the
+coordinator starts as many as its limit allows and **answers how many it
+started**; the scheduler keeps the rest waiting. The queue therefore stays on
+the scheduler's side (section 10), and the coordinator never remembers anything
+beyond what is open now. A run goes parallel only when both say yes, so
+permission given for the plumbing never crosses the transformer.
+
+Three choices keep each side from having to know too much:
+
+- **The master is not counted.** It stays hydraulic and keeps following zone
+  activity. The user declares the coordinator's limit net of it: a board rated
+  for one station plus master has a limit of 1.
+- **The default coordinator is virtual.** An installation that configures none
+  gets one implicit coordinator holding every valve with a limit of 1: today's
+  behaviour, stated instead of emerging from the handlers.
+- **An outside open is observed, never refused.** NeverDry does not own the
+  relays. A valve opened by hand or by another automation while another one on
+  the same board is open warns, naming both, and in timer mode marks both runs as
+  suspect. The hard interlock belongs in the firmware (ESPHome: `interlock:` on
+  GPIO switches), where the owner controls it.
+
+The coordinator is described in `../design_domain_object_model.md` as a
+proposed object. It is not written, and it lands with the scheduler work,
+together with the wiring between the two.
+
 ## 9. The irrigability envelope
 
 This is the reframing the rest of the note depends on. The scheduler stops
@@ -1577,6 +1632,13 @@ overlap - never to forbid it. Permission is a declaration, and a declaration
 can sit on the entry. If that holds, the entry is enough on its own, and
 anything wider waits for the installation that cannot be expressed that way.
 
+**2026-10-10: the electrical limit narrows it further** (section 8.5, GH #320).
+"One valve at a time" turns out to be two rules. The hydraulic one is the
+subject of this question. The electrical one has its own owner, a valve
+coordinator per board, with a virtual default of one valve at a time, so it no
+longer needs a boundary to be chosen here. What is left for Q9 is only where
+*hydraulic* permission to overlap is declared.
+
 ## 15. Consequences for the domain model
 
 If this note is accepted, `../design_domain_object_model.md` needs revising in
@@ -1602,6 +1664,10 @@ these places — recorded here so the two documents do not drift:
 - **`### Scheduler`, member table.** Add the `overrun` policy (Q2) beside
   `concurrency`, and note that `Decision` now has three outcomes rather than
   two (§3) — the current row describes it as "water or skip".
+
+- **The valve coordinator** (section 8.5). Already added to the domain model as
+  a proposed object, with a design decision separating electrical from hydraulic
+  parallel; it moves from proposed to written when the scheduler work lands.
 
 There is also a stray table row (`interleave_during_soak()`) orphaned below the
 Scheduler section's closing paragraph, detached from the table it belongs to.

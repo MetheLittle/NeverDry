@@ -1,8 +1,8 @@
 # Design — Domain Object Model
 
 **Status:** Accepted (ADR), 2026-08-16
-**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object; 2026-08-01 RFC to dissolve `System` into `Environment` + capability-matched models)
-**Related:** GH #74 (actuator abstraction discussion), GH #94 (`valve.*` support), GH #95 (master valve/pump), [Water-Balance Reference Model](design_water_balance_reference_model.md) (where the deficit lives), [Domain Model Anomalies](design_domain_model_anomalies.md) (code-verified audit against this model)
+**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object; 2026-08-01 RFC to dissolve `System` into `Environment` + capability-matched models; 2026-10-10 a valve coordinator proposed for the electrical limit of a controller board, GH #320)
+**Related:** GH #74 (actuator abstraction discussion), GH #94 (`valve.*` support), GH #95 (master valve/pump), GH #320 (station limit of a 24 VAC controller), [Water-Balance Reference Model](design_water_balance_reference_model.md) (where the deficit lives), [Domain Model Anomalies](design_domain_model_anomalies.md) (code-verified audit against this model)
 
 ## Purpose
 
@@ -25,6 +25,12 @@ as the codebase evolves. For the current module/data-flow architecture see
 ZoneDriver and MasterDriver are two specializations of a common **Driver** base, which owns
 what they share: the entity adapter, ON/OFF command with state confirmation, adaptive
 latency/timeout, and the safety layers (watchdog, close on error/stop/restart).
+
+A sixth object is **proposed, not written**: the **ValveCoordinator**, which holds the
+electrical limit of a controller board (how many solenoids its transformer can hold open at
+once). It is described in [its own section](#valvecoordinator-proposed) and in the design
+decision [Electrical parallel is not hydraulic parallel](#electrical-parallel-is-not-hydraulic-parallel-a-coordinator-not-the-scheduler),
+and it lands together with the scheduler work, not before.
 
 ## The water-balance model (the *how much*)
 
@@ -97,11 +103,12 @@ backend allows (see the design decision below).
 
 ![UML class diagram of the NeverDry domain model](assets/domain_model_uml.svg)
 
-*Rendered diagram (`assets/domain_model_uml.svg`) — blue is the liters contract going
-down, green is the truth flowing back. The Mermaid source below is the normative
-definition; keep the two in sync.* ⚠️ **The SVG predates the 2026-08-09 revision** and
-still shows `System` rather than `Environment`, without `Placement` or the `Delivery`
-protocol. Re-render it before this document is next published.*
+*Rendered diagram (`assets/domain_model_uml.svg`), generated from the Mermaid source below,
+which is the normative definition. After changing the source, regenerate the SVG rather than
+editing it by hand:
+`mmdc -i <source>.mmd -o docs/assets/domain_model_uml.svg -c <config> -b white`, with the
+config `{"theme": "neutral", "class": {"htmlLabels": false}}` so the labels are plain SVG text.
+Classes marked `<<proposed>>` are not written yet.*
 
 ```mermaid
 classDiagram
@@ -167,7 +174,8 @@ classDiagram
         +evaluate_scheduled(zone, is_running) Decision
         +evaluate_reactive(zone, is_running, is_throttled) Decision
         +next_eligible(zones, is_running) Zone
-        ~deferred~ time_windows, queue, interleave_during_soak
+        deferred: time_windows, queue, interleave_during_soak
+        proposed: max_concurrent_zones : hydraulic
     }
 
     class Decision {
@@ -198,6 +206,15 @@ classDiagram
     class MasterDriver {
         +off_delay_s
         +follow(any_zone_driver_active)
+    }
+
+    class ValveCoordinator {
+        <<proposed>>
+        +max_active_zones : declared net of the master
+        +zone_drivers : ZoneDriver set
+        +start(zones) started count
+        +on_outside_open(driver) warn, timer runs suspect
+        default: one virtual coordinator, limit 1
     }
 
     class ManualActuator {
@@ -286,6 +303,8 @@ classDiagram
     Scheduler --> Zone : decides when
     Scheduler ..> Decision : returns
     MasterDriver ..> ZoneDriver : ON while any is active
+    Scheduler ..> ValveCoordinator : asks to start zones, told how many started
+    ValveCoordinator "1" o-- "*" ZoneDriver : opens up to its limit
 ```
 
 `Zone` depends on `Delivery`, the structural protocol, rather than on `DeliveryResult` itself.
@@ -303,6 +322,11 @@ a `DeliveryResult`; the `Scheduler` never touches drivers — it only decides *w
 (and, with cycle & soak, may interleave another eligible zone during a soak pause);
 `MasterDriver` reacts to the aggregate driver activity, it takes no decisions. The liveness
 `ping()` lives in the abstract `Driver`, so both specializations inherit it.
+
+The proposed `ValveCoordinator` sits between the two: the `Scheduler` asks it to start zones
+and is told how many it started, so the scheduler still never touches a driver, and the
+coordinator owns the `ZoneDriver`s it may open. The `MasterDriver` is not connected to it: the
+master is hydraulic, and the coordinator's limit is electrical.
 
 ## The classes in detail
 
@@ -420,6 +444,36 @@ activity, takes no decisions, has no notion of liters.
 |---|---|---|
 | `off_delay_s` | attr | Linger delay after the last active zone |
 | `follow(any_zone_driver_active)` | method | ON while any ZoneDriver is active, OFF (after the linger) when none is |
+
+### ValveCoordinator (proposed)
+
+**Proposed, not written. It lands with the scheduler work, together with its wiring.** The
+electrical side of "how many at once": the only object that knows how many zone solenoids
+its controller board can hold open. A 24 VAC controller has one transformer, one common wire
+and a set of station terminals, and the transformer is sized for a fixed number of solenoids
+(on most residential controllers, one station plus the master). Raised in GH #320.
+
+| Member | Kind | Meaning |
+|---|---|---|
+| `max_active_zones` | attr | Zone valves the board may hold open at once, **declared by the user net of the master**: on a board rated for one station plus master, the limit is 1. The coordinator never counts the master, so neither it nor the scheduler needs to know how the board is wired |
+| `zone_drivers` | attr | The `ZoneDriver`s wired to this board |
+| `start(zones) → started` | method | Opens as many of the requested zones as the limit allows and reports **how many it started**. It does not queue: the scheduler knows the answer and keeps the rest waiting |
+| `on_outside_open(driver)` | method | A valve opened by hand or by another automation is only observed, never refused or closed: NeverDry does not own the relays. An overlap on one board warns, naming both valves, and in timer mode marks both runs as suspect, since neither delivery can be trusted |
+
+**The default is virtual.** With no coordinator configured, one implicit coordinator holds every
+zone valve with a limit of 1: the behaviour of today, one valve at a time, stated instead of
+emerging from the handlers.
+
+**Composition, not a third `Driver`.** `Driver` means one actuator and one entity: adapter,
+confirmed commands, adaptive timeout, watchdog and liveness probe all assume a real switch.
+The coordinator has no entity of its own; it owns several `ZoneDriver`s. Making it a `Driver`
+subclass would give it a watchdog and a latency over an entity that does not exist, the same
+reason `ManualActuator` is not a `Driver` either.
+
+**The hard interlock stays in the hardware.** Firmware that owns the relays enforces the limit
+on every open, including a manual one (ESPHome: `interlock:` on GPIO switches). The coordinator
+keeps NeverDry's own commands inside the limit and makes an outside overlap visible; it does
+not replace the interlock.
 
 ### DeliveryResult
 
@@ -555,6 +609,40 @@ therefore a **Scheduler policy**:
 The queue/scheduler implementation stays deferred until real demand for parallel zones shows
 up (as agreed in GH #74), but the model reserves the concept now so cycle & soak (a Zone
 rule) and concurrency (a Scheduler policy) don't get entangled when either lands.
+
+This policy is the **hydraulic** half of concurrency only. The electrical half, how many
+solenoids a board can hold open, is not the scheduler's: see the next decision.
+
+### Electrical parallel is not hydraulic parallel: a coordinator, not the scheduler
+
+*From GH #320 (2026-09-27) and the decision taken on it on 2026-10-10.* Two zones running at once
+must pass two independent limits, and they belong to different objects:
+
+| Limit | Question | Who knows it | Owner |
+|---|---|---|---|
+| **Hydraulic** | Does the water allow two zones at once? | The person who sees the plumbing; there is no supply figure to check it against | `Scheduler`: the `SERIAL`/`PARALLEL` policy and a user-declared `max_concurrent_zones` |
+| **Electrical** | Can the board hold two solenoids open at once? | Printed on the transformer and on the solenoid datasheet | `ValveCoordinator`: `max_active_zones`, declared net of the master |
+
+The two are never merged into one number, because they fail differently. A hydraulic overlap
+gives two weak runs and two wrong flow rates; an electrical one sags the voltage, and valves
+buzz, fail to open or drop out mid-run, with the run still reported as delivered in timer mode.
+
+The path of a decision: the scheduler decides which zones should run now, within its hydraulic
+limit, and asks the coordinator to start them; the coordinator starts as many as its electrical
+limit allows and answers how many; the scheduler keeps the rest waiting. **A run goes parallel
+only when both say yes**, so permission given for the plumbing never crosses the transformer.
+
+The **master** valve or pump stays on the hydraulic side. It follows zone activity as it does
+today and is not counted by the coordinator; the user declares the coordinator's limit net of
+it. Tying the master to the electrical count would make both the coordinator and the scheduler
+know how each board is wired.
+
+With no coordinator configured, the default virtual coordinator (limit 1) keeps today's
+behaviour, so an installation that declares nothing changes nothing.
+
+**Not written yet.** The coordinator, the scheduler's `max_concurrent_zones` and the wiring
+between them land together with the scheduler work. Until then the only action is
+documentation: a relay board on one transformer should have its interlock set in firmware.
 
 ### Driver liveness: an active availability ping, not just passive state
 
