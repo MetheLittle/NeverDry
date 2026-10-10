@@ -119,58 +119,63 @@
 
 <section class="features">
     <div class="container">
-        <h2>Funcionalidades</h2>
+        <h2>O que o NeverDry faz por si</h2>
         <p class="vision-lead" style="text-align: center; max-width: 46em; margin: 0 auto 1.6em; font-size: 1.1em; line-height: 1.5;">Regar bem exige agronomia, hidr&aacute;ulica e um pouco de engenharia eletrot&eacute;cnica. O NeverDry trata de tudo por si e s&oacute; lhe pergunta o que pode ver: as suas plantas, as suas v&aacute;lvulas, o seu jardim.</p>
         <div class="feature-grid">
             <div class="feature-card">
                 <div class="icon">🌡️</div>
-                <h3>Modelo ET Cient&iacute;fico</h3>
-                <p>Balan&ccedil;o h&iacute;drico FAO-56 simplificado. Estima a evapotranspira&ccedil;&atilde;o a partir da temperatura com dois par&acirc;metros calibr&aacute;veis.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🌱</div>
-                <h3>10 Fam&iacute;lias de Plantas</h3>
-                <p>Coeficiente de cultura (Kc) por zona com varia&ccedil;&atilde;o sazonal. Relva, hortali&ccedil;as, suculentas, &aacute;rvores de fruto e mais. Adapta&ccedil;&atilde;o autom&aacute;tica ao hemisf&eacute;rio.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🚿</div>
-                <h3>Controlo Direto de V&aacute;lvulas</h3>
-                <p>Abre e fecha v&aacute;lvulas automaticamente. Irriga&ccedil;&atilde;o multi-zona sequencial com paragem de emerg&ecirc;ncia.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">📊</div>
-                <h3>D&eacute;fice por Zona</h3>
-                <p>Cada zona rastreia o seu pr&oacute;prio d&eacute;fice h&iacute;drico do solo. Plantas diferentes secam a ritmos diferentes - como deve ser.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🌧️</div>
-                <h3>Sens&iacute;vel &agrave; Chuva</h3>
-                <p>Salta automaticamente a rega em dias chuvosos. O d&eacute;fice diminui a cada evento de chuva.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">⚙️</div>
-                <h3>Configura&ccedil;&atilde;o por Interface</h3>
-                <p>Configura&ccedil;&atilde;o completa pela interface do Home Assistant. Sem necessidade de editar YAML.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🔄</div>
-                <h3>Atualiza&ccedil;&otilde;es Transparentes</h3>
-                <p>Releases automatizadas via GitHub Actions. A migra&ccedil;&atilde;o de configura&ccedil;&atilde;o preserva as defini&ccedil;&otilde;es entre vers&otilde;es. Atualiza&ccedil;&atilde;o com um clique no HACS.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🖐️</div>
-                <h3>V&aacute;lvula manual reconhecida</h3>
-                <p>Abra a v&aacute;lvula pelo bot&atilde;o f&iacute;sico, app Zigbee ou HA - o NeverDry segue a sess&atilde;o, atualiza o d&eacute;fice e fecha automaticamente no m&iacute;nimo entre &aacute;gua necess&aacute;ria e timeout de seguran&ccedil;a.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">💧</div>
-                <h3>Todos os gatilhos cobertos</h3>
-                <p>Rega pelo agendador, bot&atilde;o Lovelace, automa&ccedil;&otilde;es, bot&atilde;o da v&aacute;lvula, ou registe &laquo;reguei com a mangueira&raquo; - o NeverDry mant&eacute;m o d&eacute;fice exato em todos os quatro casos.</p>
+                <h3>Sabe quando o seu jardim tem sede</h3>
+                <p>Acompanha a evapora&ccedil;&atilde;o e a chuva dia a dia. Quando o d&eacute;fice de &aacute;gua no solo ultrapassa o seu limiar, o NeverDry abre a v&aacute;lvula exatamente o tempo necess&aacute;rio - sem temporizadores fixos, sem adivinhar.</p>
             </div>
             <div class="feature-card">
                 <div class="icon">🛡️</div>
-                <h3>Seguran&ccedil;a multicamada</h3>
-                <p>Tr&ecirc;s camadas de seguran&ccedil;a independentes evitam que a v&aacute;lvula fique aberta: watchdog de software (tarefa asyncio), intertravamento de hardware (entidade Zigbee ou MQTT) e limite de tempo de entrega. Se uma camada falhar, a seguinte atua.</p>
+                <h3>A v&aacute;lvula fecha sempre</h3>
+                <p>Se uma v&aacute;lvula deixar de responder, o NeverDry continua a tentar - seis tentativas, com uma pausa cada vez maior entre elas - e s&oacute; ent&atilde;o bloqueia essa zona e mostra um aviso no seu painel. Tr&ecirc;s mecanismos de seguran&ccedil;a independentes garantem que a &aacute;gua n&atilde;o corre indefinidamente.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌱</div>
+                <h3>Cada planta tem o seu pr&oacute;prio calend&aacute;rio</h3>
+                <p>Relva, roseiras, citrinos, suculentas - 10 perfis de plantas com varia&ccedil;&atilde;o sazonal. Em julho, a sua relva bebe mais do que a sua lavanda alguma vez beber&aacute;. O NeverDry trata disso automaticamente.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📊</div>
+                <h3>As zonas s&atilde;o independentes</h3>
+                <p>O canteiro de roseiras e a relva secam a ritmos diferentes. Cada zona acompanha o seu pr&oacute;prio d&eacute;fice de &aacute;gua no solo - acabou-se o mesmo programa para tudo.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌧️</div>
+                <h3>N&atilde;o rega depois da chuva</h3>
+                <p>O NeverDry regista exatamente quanta chuva caiu e subtrai-a automaticamente ao d&eacute;fice. Nunca mais regar no dia a seguir a uma tempestade.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🖐️</div>
+                <h3>Pegou na mangueira? Diga ao NeverDry</h3>
+                <p>Abra a v&aacute;lvula &agrave; m&atilde;o, use o bot&atilde;o f&iacute;sico ou regue &agrave; mangueira - "Mark irrigated" mant&eacute;m o d&eacute;fice correto, seja qual for a forma como regou.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">💧</div>
+                <h3>Regue a partir de qualquer lado</h3>
+                <p>Bot&atilde;o do painel, automatiza&ccedil;&atilde;o, programador, v&aacute;lvula f&iacute;sica - o NeverDry regista sempre o que aconteceu e atualiza o d&eacute;fice em conformidade.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">⚙️</div>
+                <h3>Configura&ccedil;&atilde;o pela interface</h3>
+                <p>Sem ficheiros YAML. Configure zonas, plantas, v&aacute;lvulas e limiares diretamente na interface do Home Assistant.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🔄</div>
+                <h3>Atualize com um clique</h3>
+                <p>O HACS avisa quando h&aacute; uma nova vers&atilde;o. Um clique, reinicia o HA - as suas defini&ccedil;&otilde;es e o seu hist&oacute;rico ficam sempre preservados.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📡</div>
+                <h3>Funciona tamb&eacute;m sem v&aacute;lvulas</h3>
+                <p>Sem hardware? O NeverDry envia-lhe uma notifica&ccedil;&atilde;o quando &eacute; preciso regar e com quanta &aacute;gua. Um modo de monitoriza&ccedil;&atilde;o sem qualquer hardware.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌍</div>
+                <h3>M&eacute;trico e imperial</h3>
+                <p>Todos os sensores declaram a classe de dispositivo correta do Home Assistant - d&eacute;fice em mm ou polegadas, volumes em litros ou gal&otilde;es, caudal em L/h ou gal/h. As unidades seguem automaticamente a prefer&ecirc;ncia do seu HA.</p>
             </div>
         </div>
     </div>
@@ -249,6 +254,16 @@
     </div>
 </section>
 
+<!-- Get Help -->
+<section class="support" style="background: #f8f8f8;">
+    <h2>Ajuda</h2>
+    <p style="margin-bottom: 1.5em;">D&uacute;vidas sobre a configura&ccedil;&atilde;o ou o funcionamento? Junte-se &agrave; conversa.</p>
+    <div style="display: flex; gap: 1em; justify-content: center; flex-wrap: wrap;">
+        <a class="kofi-btn" style="background: #24292e;" href="https://github.com/never-dry/NeverDry/issues">🐛 GitHub Issues</a>
+        <a class="kofi-btn" style="background: #03a9f4;" href="https://community.home-assistant.io/t/neverdry-smart-irrigation-that-calculates-when-and-how-long-to-water-fao-56-water-balance-hacs/1013835">💬 HA Community</a>
+    </div>
+</section>
+
 <!-- The companion project -->
 <section class="how-it-works" style="background: #fff;">
     <div class="container" style="max-width: 760px;">
@@ -296,7 +311,7 @@
     </div>
 </section>
 
-<section style="background: var(--accent-light); padding: 16px 20px; text-align: center; font-size: 0.85em; color: #555;">
+<section data-translation-notice style="background: var(--accent-light); padding: 16px 20px; text-align: center; font-size: 0.85em; color: #555;">
     <div class="container">
         Esta tradu&ccedil;&atilde;o foi gerada automaticamente. Qualquer contribui&ccedil;&atilde;o para melhor&aacute;-la &eacute; bem-vinda -
         <a href="https://github.com/never-dry/NeverDry/issues" style="color: var(--accent);">abra uma issue</a> ou envie um pull request.
