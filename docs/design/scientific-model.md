@@ -175,7 +175,8 @@ V = D · A · η⁻¹          [L]
 t_irr = V / Q            [min]
 ```
 
-`A` = area [m²], `η` = distribution efficiency, `Q` = flow rate [L/min].
+`A` = area [m²], `η` = distribution efficiency, `Q` = flow rate [L/min], the unit it is stored
+in; the form takes and shows it in L/h (gal/h in imperial).
 
 | System type | Typical η |
 |---|---|
