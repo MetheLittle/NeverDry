@@ -2761,13 +2761,13 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             # exists to avoid, only in the other direction.
             self._timeout_caps_job_warned = True
             _LOGGER.warning(
-                "Zone '%s' needs about %ds to deliver %.1fL at %.2f L/min, but its safety"
+                "Zone '%s' needs about %ds to deliver %.1fL at %.1f L/h, but its safety"
                 " timeout is %ds — irrigation will stop short. Raise the safety timeout, or"
                 " check that the configured flow rate matches the real one",
                 self._zone_name,
                 expected_s,
                 self.volume_liters,
-                self._flow_rate,
+                self._flow_rate * 60,
                 self._delivery_timeout,
             )
         return min(self._delivery_timeout, bound_s)

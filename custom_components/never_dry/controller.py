@@ -1088,12 +1088,12 @@ class IrrigationController:
         estimate = rate * elapsed_s / 60.0
         _LOGGER.warning(
             "Zone '%s': flow sensor measured 0 L after %.0fs with the valve open —"
-            " crediting estimated %.1fL from the effective flow rate (%.2f L/min) so"
+            " crediting estimated %.1fL from the effective flow rate (%.1f L/h) so"
             " the deficit is settled",
             zone.zone_name,
             elapsed_s,
             estimate,
-            rate,
+            rate * 60,
         )
         self._hass.async_create_task(
             self._notify_meter_silent(
@@ -1879,10 +1879,10 @@ class IrrigationController:
         elif (rate := zone.effective_flow_lpm) > 0 and elapsed_s > 0:
             delivered_liters = rate * elapsed_s / 60.0
             _LOGGER.info(
-                "Manual irrigation estimated: zone='%s', %.1fL from flow rate %.2f L/min x %.0fs",
+                "Manual irrigation estimated: zone='%s', %.1fL from flow rate %.1f L/h x %.0fs",
                 zone_name,
                 delivered_liters,
-                rate,
+                rate * 60,
                 elapsed_s,
             )
         else:
