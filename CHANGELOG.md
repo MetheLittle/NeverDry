@@ -193,6 +193,15 @@ not the argument.
   meter had stopped answering.
 
 ### Fixed
+- **Flow rates in the log read as the form shows them**
+  ([#340](https://github.com/never-dry/NeverDry/pull/340)). The form takes and
+  shows flow rates in L/h, but three log messages printed the stored value in
+  L/min: the credit estimated when a flow sensor reads zero, the estimate for a
+  manual irrigation, and the warning that the safety timeout will stop a run
+  short. Compared with the form, the log read a figure sixty times smaller than
+  the one typed. They now print L/h. The German form also names the imperial
+  units, gal/h for the design flow rate and gal, gal/min and gal/h for a flow
+  meter, as the English one does.
 - **The model card explains its choice in your language**
   ([#313](https://github.com/never-dry/NeverDry/issues/313)). The line under the
   method's name, why this method was chosen, and the warming-up notice reached the
