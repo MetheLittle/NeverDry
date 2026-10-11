@@ -40,9 +40,9 @@ A timer knows one thing: the clock. NeverDry works across several domains at onc
 | Domain | What NeverDry knows for you | What it asks you | Optional, under the bonnet |
 |---|---|---|---|
 | **Agronomy** | Evapotranspiration, crop coefficient, the soil's water reserve, the deficit, useful rain | Which plants, and where they stand | Manual crop coefficient, custom soil, soil moisture probe, evapotranspiration method |
-| **Hydraulics** | Volume from flow and time, serial or parallel runs, the master valve or pump and its linger, shared water lines | The valve, and its flow rate (or how long you usually water) | A named water network, a flow or line limit, a master, a water meter |
+| **Hydraulics** | Volume from flow and time, serial or parallel runs, the master valve or pump and its linger, shared water lines | The valve, and its flow rate (or how long you usually water) | A water network the zones draw from, a flow or line limit, a master, a water meter |
 | **Electrical** (a little) | How many solenoids a board can hold open, confirmed commands, a valve stuck open | Nothing | A named board and its limit |
-| **Climate and place** | Outdoor, greenhouse or indoor; frost; sun exposure | Where the garden is | Entry type, exposure, additional sensors |
+| **Climate and place** | Outdoor, greenhouse or indoor; frost; sun exposure | Where the garden is | A second environment (a greenhouse with its own sensors), exposure, additional sensors |
 | **Reliability** | Watchdog, learned latency, reachability, valve self-test | Nothing | Thresholds and timings |
 
 The third column is the whole configuration of a simple garden. A terrace with seven pots, or four zones on one water line, is set up from that column alone and never meets the fourth.

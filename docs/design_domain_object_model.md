@@ -1,7 +1,7 @@
 # Design — Domain Object Model
 
 **Status:** Accepted (ADR), 2026-08-16
-**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object; 2026-08-01 RFC to dissolve `System` into `Environment` + capability-matched models; 2026-10-10 a valve coordinator proposed for the electrical limit of a controller board, GH #320; 2026-10-10 the master's start order, linger and per-zone opt-out, GH #95; 2026-10-10 entries by place and a named water network shared across entries, discussion #239)
+**Date:** 2026-07-05 (updated 2026-07-06 with review feedback from GH #74; 2026-07-23 aligned with the water-balance reference model; 2026-07-26 the water-balance model made a first-class object; 2026-08-01 RFC to dissolve `System` into `Environment` + capability-matched models; 2026-10-10 a valve coordinator proposed for the electrical limit of a controller board, GH #320; 2026-10-10 the master's start order, linger and per-zone opt-out, GH #95; 2026-10-10 entries by place and a named water network shared across entries, discussion #239; 2026-10-10 the water network becomes an entry of its own, each zone names the network it draws from, and the per-zone master opt-out is retired; 2026-10-11 entry types are Environment and water network, place and hand-watering move to the zone)
 **Related:** GH #74 (actuator abstraction discussion), GH #94 (`valve.*` support), GH #95 (master valve/pump), GH #320 (station limit of a 24 VAC controller), [Water-Balance Reference Model](design_water_balance_reference_model.md) (where the deficit lives), [Domain Model Anomalies](design_domain_model_anomalies.md) (code-verified audit against this model)
 
 ## Purpose
@@ -28,15 +28,16 @@ latency/timeout, and the safety layers (watchdog, close on error/stop/restart).
 
 Two more objects are **proposed, not written**, and land together with the scheduler work:
 
-- the **WaterNetwork**, the hydraulic line zones draw from, named once on the instance and shared
-  by every entry that names it: it holds the hydraulic limit, the master and the turn-taking
-  between entries ([its section](#waternetwork-proposed));
+- the **WaterNetwork**, the hydraulic line zones draw from: an entry of its own, declared once on
+  the instance, that each zone names; it holds the hydraulic limit, the master and the
+  turn-taking between entries. Without one, each Environment entry has an implicit network of its own,
+  one line with no master and no limit ([its section](#waternetwork-proposed));
 - the **ValveCoordinator**, which holds the electrical limit of a controller board, how many
   solenoids its transformer can hold open at once ([its section](#valvecoordinator-proposed)).
 
 Why they are separate objects, and why neither is the scheduler, is in the design decisions
 [Electrical parallel is not hydraulic parallel](#electrical-parallel-is-not-hydraulic-parallel-a-coordinator-not-the-scheduler)
-and [Entries by place, water networks by name](#entries-by-place-water-networks-by-name).
+and [Environments and water networks: the two entry types](#environments-and-water-networks-the-two-entry-types).
 
 ## The water-balance model (the *how much*)
 
@@ -145,10 +146,11 @@ classDiagram
         +plant_family / manual_kc
         +exposure / microclimate_factor
         +placement : Placement
+        +actuation : VALVE or BY_HAND, default VALVE
         +d_max : own reservoir
         +threshold_mm
         +cycle_soak : CycleSoakRule
-        +uses_master : optional, default yes
+        +network : WaterNetwork, default the entry's implicit one
         +deficit : Deficit, starts at 0
         +counters : WaterCounters
         +effective_kc(base_kc)
@@ -182,7 +184,7 @@ classDiagram
         +evaluate_reactive(zone, is_running, is_throttled) Decision
         +next_eligible(zones, is_running) Zone
         deferred: time_windows, queue, interleave_during_soak
-        proposed: behaviour by entry type
+        proposed: freeze gate, by-hand requests
     }
 
     class Decision {
@@ -218,11 +220,12 @@ classDiagram
 
     class WaterNetwork {
         <<proposed>>
-        +name : optional, none = private to its entry
+        +name : its own entry, on the instance
         +hydraulic_limit : optional, max flow or max lines
         +master : MasterDriver, optional
         +admit(zone) bool
         +next_turn(waiting entries) entry
+        default: implicit, one per Environment entry
     }
 
     class ValveCoordinator {
@@ -311,16 +314,17 @@ classDiagram
     WaterBalanceModel ..> Deficit : returns
     Zone ..> Deficit : holds, settles
     Zone *-- Placement : sits at
-    Zone "1" --> "1" ZoneDriver : requests liters
+    Zone "1" --> "0..1" ZoneDriver : requests liters (VALVE)
     ZoneDriver ..> DeliveryResult : returns
-    Zone ..> ManualActuator : requests (manual how)
+    Zone ..> ManualActuator : requests (BY_HAND)
     ManualActuator ..> DeliveryResult : returns (declared)
     DeliveryResult ..|> Delivery : satisfies structurally
     Zone ..> Delivery : settles deficit with
     Scheduler --> Zone : decides when
     Scheduler ..> Decision : returns
     MasterDriver ..> ZoneDriver : ON while any is active
-    Scheduler "*" ..> "1" WaterNetwork : asks for a line
+    Zone "*" --> "1" WaterNetwork : draws from
+    Scheduler ..> WaterNetwork : asks for a line, through the zone
     WaterNetwork "1" o-- "0..1" MasterDriver : head of the line
     Scheduler "1" ..> "*" ValveCoordinator : asks to start zones, told how many started
     ValveCoordinator "1" o-- "*" ZoneDriver : opens up to its limit
@@ -388,9 +392,11 @@ reported truth.
 | `plant_family`, `manual_kc` | attr | What grows here — the seasonal curve, or an explicit override |
 | `exposure`, `microclimate_factor` | attr | Sun and wind relative to an open site (GH #146) |
 | `placement: Placement` | attr | Where the zone sits. `receives_rain` is true only outdoors; `driven_by_outdoor_et` also covers a patio |
+| `actuation` | attr | **Proposed.** How the zone is watered: `VALVE` (default, today's behaviour) through its `ZoneDriver`, or `BY_HAND` through the [`ManualActuator`](#manual-actuation-a-valve-less-how-for-hand-watered-plants): a due zone becomes a request to a person, settled by **Mark irrigated**. Independent of `placement`: a pot in the greenhouse or a bed outdoors can be watered by hand, a house plant on a drip line by a valve. A `BY_HAND` zone names no network and no board, and the freeze gate does not apply to it |
 | `d_max` | attr | **This soil's** reservoir. Only the clamping mechanism is shared across models |
 | `threshold_mm` | attr | Deficit that triggers irrigation |
 | `cycle_soak: CycleSoakRule` | attr | Dose/pause — a Zone rule, not a Scheduler policy |
+| `network: WaterNetwork` | attr | **Proposed.** The line this zone draws water from, picked from the networks declared on the instance. Empty: the implicit network of its entry, one line with no master and no limit, which is today's behaviour. The zone form shows the network's master read-only, so the zone says what it depends on without holding a copy of it |
 | `deficit: Deficit` | attr | Its own deficit, carrying its reference frame. A new zone starts at 0 (D4) |
 | `counters: WaterCounters` | attr | last / session / total / yearly delivered litres |
 | `effective_kc(base_kc)` | method | Applies site exposure. The seasonal curve is deliberately *not* recomputed here — copying its plant table in would create the second source of truth anomaly E1 is about |
@@ -415,7 +421,7 @@ them, which is what makes the rules testable without a controller.
 | Member | Kind | Meaning |
 |---|---|---|
 | `concurrency` | attr | `SERIAL` (today's behaviour) or `PARALLEL`. Naming it turns an emergent property — both handlers happen to bail when something is running — into a stated policy |
-| `entry_type` | attr | **Proposed.** Outdoor, greenhouse or indoor; fixed when the entry is created. The scheduler's behaviour follows it: freeze interlock outdoors, a request to water by hand indoors, neither rain nor the outdoor freeze gate in a greenhouse. See [Entries by place, water networks by name](#entries-by-place-water-networks-by-name) |
+| freeze gate, by-hand requests | behaviour | **Proposed.** One scheduler per Environment entry, with no type of its own: its behaviour follows the facts it already has. The freeze interlock reads **its Environment's** temperature, so a greenhouse with its own sensors gates on the greenhouse air; it applies to `VALVE` zones whose placement is not `INDOOR`. A due `BY_HAND` zone becomes a request to a person rather than a command to a valve. See [Environments and water networks: the two entry types](#environments-and-water-networks-the-two-entry-types) |
 | `min_service_interval_s` | attr | Rate limit between service calls with the same key |
 | `evaluate_scheduled(zone, is_running) → Decision` | method | The daily top-up. Deliberately does **not** consult the threshold: gating a schedule on the reactive threshold turns every scheduled run into a reactive one (AI-183). Only a zone already full is skipped |
 | `evaluate_reactive(zone, is_running, is_throttled) → Decision` | method | Mode A: water once the deficit crosses the zone's threshold |
@@ -450,7 +456,7 @@ truth.
 | Member | Kind | Meaning |
 |---|---|---|
 | `delivery_mode` | attr | `native_volume` when the device doses in liters, otherwise `time × flow` (seconds via flow rate) |
-| `flow_rate_lpm` | attr | Nominal guard flow rate (L/min) |
+| `flow_rate_lpm` | attr | Nominal guard flow rate, stored in L/min; the form takes and shows L/h (gal/h in imperial) |
 | `flow_telemetry` | attr | Flow telemetry, when available (optional) |
 | `zero_flow_guard` | attr | Guard against zero-flow sessions |
 | `deliver(liters) → DeliveryResult` | method | Actuates the request and reports delivered liters with their degree of truth |
@@ -476,16 +482,30 @@ and the point where entries that share it converge. Without it, two entries on o
 each have to ask the other what it is running, a protocol between peers with nobody holding the
 truth; with it, each scheduler asks one object, and the schedulers never talk to each other.
 
+**A network is an entry of its own**, one of the two types offered when an entry is added, beside
+the Environment. It is declared once, with its own device and its own options form,
+and **each zone names the network it draws from**. The scheduler reaches the network through the
+zone: it never holds one itself.
+
 | Member | Kind | Meaning |
 |---|---|---|
-| `name` | attr | Optional. **No name: a network private to its entry**, the default, and today's behaviour. The same name on several entries means one shared line. The name is chosen from a list of the networks already declared on the instance, or created, so a typing slip cannot split one network in two |
-| `hydraulic_limit` | attr | Optional, and one of two: a **usable maximum flow** (the form suggests about 80% of the pump's plate; the software applies no margin of its own), compared with the **design** flow rates of the zones running on it, never the measured ones; or a **maximum number of lines**. Absent, parallel is free on the hydraulic side |
-| `master` | attr | The master valve or pump at the head of the line, if any: one per network, so two entries sharing a pump never command it twice. It stays on while any entry on the network has a zone running or next in its sequence |
+| `name` | attr | The network entry's title. Zones pick it from a list of the networks declared on the instance, so a typing slip cannot split one line in two |
+| `hydraulic_limit` | attr | Optional, and one of two: a **usable maximum flow** in L/h (gal/h in imperial), the unit of the zones' flow rates (the form suggests about 80% of the pump's plate; the software applies no margin of its own), compared with the **design** flow rates of the zones running on it, never the measured ones; or a **maximum number of lines**. Absent, parallel is free on the hydraulic side |
+| `master` | attr | The master valve or pump at the head of the line, if any: one per network, declared once, so two entries sharing a pump never command it twice. Every zone on the network uses it; a zone that does not is on another network. It stays on while any entry on the network has a zone running or next in its sequence |
 | `admit(zone) → bool` | method | Whether the line can take one more zone now, against its limit |
 | `next_turn(waiting entries) → entry` | method | Turn-taking between entries that have zones waiting: **one zone at a time, in turn**, so no entry waits through another's whole sequence. Within an entry, order stays its scheduler's |
 
 Serial and parallel remain the entry's setting; the network decides only whether there is water
 for one more line, and whose turn it is.
+
+**The defaults**, each the safe one and each today's behaviour where today has one:
+
+| Case | What happens |
+|---|---|
+| No network entry declared | Each Environment entry has an **implicit network**: one line, no master, no limit. The terrace and the four zones on one line are configured without meeting a network at all |
+| A zone that names no network | It draws from its entry's implicit network |
+| A network entry removed while zones name it | Those zones return to their entry's implicit network, and the form says so, naming them, before the removal is confirmed |
+| A network named by a zone is not loaded, or failed to set up | The zone **does not start** until the network answers. Opening a zone without knowing whether a pump must be started is worse than waiting; the zone reports why it is waiting |
 
 ### ValveCoordinator (proposed)
 
@@ -578,12 +598,17 @@ safe for both kinds of master, so the kind is never asked:
   is. The linger applies only after the last zone, and counts from its **confirmed** close, not
   from the command.
 - **Linger: 5 s**, the figure from the field.
-- **Every zone uses it.** A zone that does not (drip from the mains beside a lawn on a tank pump)
-  says so with an optional per-zone flag.
+- **Every zone on the network uses it.** A zone that does not (drip from the mains beside a lawn
+  on a tank pump) draws from a different source, so it names a different network, one with no
+  master. *Revised 2026-10-10:* an optional per-zone "does not use the master" flag stood here
+  while the network was a name on the entry and two sources inside one entry had no other way to
+  be told apart. With zones naming their network, the flag described a second network under
+  another name, and it is retired.
 
-Optional, for whoever wants to look under the bonnet: a signed start offset, the linger, the
-per-zone flag. The master belongs to the **water network** it heads, not to an entry: two entries
-sharing a named network share one master, and a second pump is a second network. It is **not**
+Optional, for whoever wants to look under the bonnet: a signed start offset and the linger. The
+master belongs to the **water network** it heads, not to an entry and not to a zone: it is
+declared once on the network, two entries whose zones draw from one network share one master,
+and a second pump is a second network. It is **not**
 counted in a controller board's electrical limit: it stays hydraulic, and that limit is declared
 net of it (the `ValveCoordinator`).
 
@@ -648,9 +673,11 @@ is simply the extreme case of "a backend that measures late".
 water-balance model, **not** `ETModel`. The two axes (`Driver` family × `WaterBalanceModel`
 family) compose freely — a house plant is just one corner of that grid.
 
+**Settled 2026-10-11:** the manual *how* is chosen per zone by `Zone.actuation` (`VALVE` or
+`BY_HAND`), independent of `Zone.placement`, which says where the zone sits. Neither is a type of
+the entry.
+
 **To explore (open questions, not decided):**
-- A **placement attribute** on the Zone — `indoor` / `outdoor` / `greenhouse` — that could
-  select sensible defaults (which water-balance model, exposure, whether ET applies at all).
 - A **pot-based characterization** for house-plant zones: today a zone's water is `area × root
   depth`; a potted plant is bounded instead by **pot volume**, and its evapotranspiring surface
   is better described by **plant height / canopy diameter** than by ground area. This likely
@@ -710,66 +737,100 @@ behaviour, so an installation that declares nothing changes nothing.
 between them land together with the scheduler work. Until then the only action is
 documentation: a relay board on one transformer should have its interlock set in firmware.
 
-### Entries by place, water networks by name
+### Environments and water networks: the two entry types
 
-*Decided 2026-10-10, from discussion #239 and GH #320.* "One valve at a time" turned out to be
-three questions, and each has its own object:
+*Decided 2026-10-10, from discussion #239 and GH #320; revised the same day: the network became
+an entry of its own, named by each zone; revised 2026-10-11: entries are not typed by place.*
+"One valve at a time" turned out to be three questions, and each has its own object:
 
 | Object | Question | Level |
 |---|---|---|
-| `Scheduler` | **When**, and in what order, as the place requires | One per entry |
-| `WaterNetwork` | **Is there water** for one more line, and whose turn is it? | One per name, on the instance |
+| `Scheduler` | **When**, and in what order, for the zones of one Environment | One per Environment entry |
+| `WaterNetwork` | **Is there water** for one more line, and whose turn is it? | One per network entry, on the instance; one implicit per Environment entry when none is named |
 | `ValveCoordinator` | **Is there power** for one more solenoid? | One per board, on the instance |
 
-A zone starts only when the network and its coordinator both say yes.
+A zone starts only when its network and its coordinator both say yes.
 
-**An entry is a place.** Outdoor, greenhouse or indoor, each entry with its own climate sensors
-and its own scheduler, whose behaviour follows the type: the freeze interlock outdoors, a request
-to water by hand indoors, neither rain nor the outdoor freeze gate in a greenhouse. The climate is
-therefore not duplicated: each place has its own.
+**There are two entry types: Environment and water network.** An Environment entry is a climate:
+its sensors, its latitude, its scheduler and the zones that sky falls on. A garden is one; a
+greenhouse with its own sensors is a second. A water network entry holds a name, the master if
+there is one, and the hydraulic limit if one is declared. The zone is always the sub-element of an
+Environment, never an entry type.
 
-**A network is a name.** No name keeps the network private to the entry, which is the default and
-today's behaviour. The same name on two entries makes them share one line: a greenhouse on the
-garden's mains names the garden's network, and the two schedulers take turns through it. A
-greenhouse on its own tank names nothing, or a network of its own.
+**Place and hand-watering are facts of the zone, not types of the entry.** The first form of this
+decision typed entries as outdoor, greenhouse or indoor and hung three behaviours on the type. Each
+turned out to belong elsewhere:
 
-**Simple by default: every new field is optional.** Entry type, water network, board, hydraulic
-limit and master all have a default that is today's behaviour, and a simple garden is configured
-without seeing any of them. Two installations are the test this design must pass:
+| Behaviour once tied to the entry type | What it really is | Where it lives |
+|---|---|---|
+| No rain in a greenhouse or indoors | Where the zone sits | `Zone.placement` |
+| A request to water by hand indoors | How the zone is watered | `Zone.actuation`: `VALVE` or `BY_HAND` |
+| The freeze gate outdoors, not in a greenhouse | What the air around the valves reads | The Environment's temperature sensor |
+
+The type by place confused where a plant is with how it is managed: a pot in the greenhouse
+watered by hand, or a bed outdoors watered with a can, had no type to go in. House plants can sit
+in the garden's Environment as `INDOOR`, `BY_HAND` zones; a second Environment is needed only
+where the climate genuinely differs.
+
+**A network is an entry of its own, and each zone names one.** It is configured once, and every
+zone that draws from it picks it from a list. The scheduler of an Environment reaches the network
+through its zones. A greenhouse on the garden's mains has its zones name the garden's network,
+and the two schedulers take turns through it; a greenhouse on its own tank names nothing, or a
+network of its own.
+
+**Why the zone and not the entry.** The first form of this decision put the network on the
+entry, as a name typed the same on every entry that shared a line. That held one source per
+entry, and failed on two sources inside one: drip from the mains beside a lawn on a tank pump. It
+needed a per-zone flag, "does not use the master", which was a second network described under
+another name. With the zone naming its network, the two sources are two networks in one entry,
+the flag goes, and the master is declared in exactly one place.
+
+**Why not a copy per entry.** Declaring the master on every entry that uses it reads as more
+explicit, and it lets two entries on one line name two different masters for one pump, command
+it twice, and each ask the other whether it is still in use before switching it off. The network
+entry holds it once; each zone shows it read-only, which is the explicitness without the copy.
+
+**Simple by default: every new field is optional.** Water network, board, hydraulic limit,
+master and actuation all have a default that is today's behaviour, and a simple garden is
+configured without seeing any of them. Two installations are the test this design must pass:
 
 - **A terrace with seven pots** on drippers: one entry, seven zones, nothing else asked.
-- **Four independent zones on one hydraulic line**, one outdoor entry: nothing else asked either.
+- **Four independent zones on one hydraulic line**, one Environment entry: nothing else asked
+  either.
 
 If either of them meets a question about networks, boards or types, the form is wrong, not the
 user.
 
-- The **first entry** on an instance asks nothing new: it is outdoor, which is what almost every
-  installation has. The type sits in a collapsed section of the first form, for the rare
-  installation that is only house plants.
-- **Adding an entry** from the second on opens a menu: outdoor, greenhouse, indoor. Whoever adds a
-  second entry is already doing something beyond the simple case.
-- **Network and board** are two optional fields in a collapsed section. Empty, the entry has its
-  own network and the virtual coordinator, exactly as today.
-- The **type is fixed** at creation, since the scheduler and the climate sensors depend on it.
-  Changing it means creating a new entry, and the form says so.
+- The **first entry** on an instance asks nothing new: it is an Environment, as every
+  installation today is.
+- **Adding an entry** from the second on opens a menu of two: **Environment** and **water
+  network**. Whoever adds a second entry is already doing something beyond the simple case.
+- **The zone form** gains three optional fields in a collapsed section: the **network**, listing
+  the network entries on the instance (empty: the entry's implicit network, exactly as today), the
+  **board** (empty: the virtual coordinator), and **watered by hand** (off: a valve, as today).
+  With watered by hand on, the valve, network and board fields do not apply.
 
-**Existing entries become outdoor.** Zones whose placement is greenhouse or indoor inside them keep
-working as now; splitting them into entries of their own is a choice, useful only where networks
-or climates genuinely differ.
+**Existing entries are Environments**, and nothing changes in them. Zones whose placement is
+greenhouse or indoor keep working as now; moving them to an Environment of their own is a choice,
+useful only where the climate genuinely differs.
 
 | Installation | Entries | Network | Boards |
 |---|---|---|---|
-| A terrace with seven pots | 1 outdoor | none named | none (virtual) |
-| Four zones on one line | 1 outdoor | none named | none (virtual) |
-| Two Netro controllers on one main | 1 outdoor | none named | 2 named, limit 1 each |
-| Garden and greenhouse on one main | 1 outdoor + 1 greenhouse | one name, on both | as wired |
-| Garden on the mains, greenhouse on a tank | 1 outdoor + 1 greenhouse | none, or two names | as wired |
-| House plants | 1 indoor | none: no valves | none |
+| A terrace with seven pots | 1 Environment | none: implicit | none (virtual) |
+| Four zones on one line | 1 Environment | none: implicit | none (virtual) |
+| Four zones on one line, with a pump | 1 Environment + 1 network | the network, named by the four zones | none (virtual) |
+| Two Netro controllers on one main | 1 Environment | none: implicit | 2 named, limit 1 each |
+| Garden and greenhouse with its own sensors, on one main | 2 Environments + 1 network | the network, named by the zones of both | as wired |
+| Garden on the mains, greenhouse with its own sensors on a tank | 2 Environments | none, or a network for the tank | as wired |
+| Drip from the mains beside a lawn on a tank pump | 1 Environment + 1 network | the lawn names the pump's network; the drip names none | none (virtual) |
+| House plants beside the garden | the garden's Environment | none: watered by hand | none |
 
-The validation of the hydraulic limit runs from both sides: a zone is checked against the
-network and the coordinator it names, and changing a network's limit or a coordinator checks
-again every zone that uses it, so the order of configuration does not matter. The full
-reasoning is in the scheduler note (`design/scheduler.md`, sections 8.7 and 8.8).
+The defaults (no network declared, a zone naming none, a network removed, a network not loaded)
+are listed with the [WaterNetwork](#waternetwork-proposed). The validation of the hydraulic limit
+runs from both sides: a zone is checked against the network and the coordinator it names, and
+changing a network's limit or a coordinator checks again every zone that uses it, so the order of
+configuration does not matter. The full reasoning is in the scheduler note
+(`design/scheduler.md`, sections 8.7 and 8.8).
 
 ### Driver liveness: an active availability ping, not just passive state
 
