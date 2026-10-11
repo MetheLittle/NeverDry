@@ -44,6 +44,8 @@ LANG_ENTRY = re.compile(r"\{\s*code:\s*'([^']+)',\s*name:\s*'([^']*)'\s*\}")
 PLACEHOLDER = re.compile(r"\{\{[A-Z_]+\}\}")
 TEXT_ELEMENT = re.compile(r"<(h1|h2|h3|p)\b[^>]*>(.*?)</\1>", re.S)
 TAGS = re.compile(r"<[^>]+>")
+SECTION = re.compile(r"<section\b([^>]*)>(.*?)</section>", re.S)
+HEADING = re.compile(r"<h[23]\b[^>]*>(.*?)</h[23]>", re.S)
 # Shorter than this, an identical string is more often a name than an omission.
 MIN_TRANSLATABLE = 25
 
@@ -243,7 +245,7 @@ def visible_texts(html: str) -> list[str]:
     """The headings and paragraphs a reader actually sees, stripped of markup."""
     found = []
     for match in TEXT_ELEMENT.finditer(html):
-        text = re.sub(r"\\s+", " ", TAGS.sub("", match.group(2))).strip()
+        text = re.sub(r"\s+", " ", TAGS.sub("", match.group(2))).strip()
         if len(text) >= MIN_TRANSLATABLE:
             found.append(text)
     return found
@@ -278,6 +280,57 @@ def check_untranslated_text(languages: dict[str, str], report: Report) -> None:
                 report.fail(page, f'still in English: "{shared[:60]}..."')
 
 
+def skeleton(html: str) -> list[tuple[str, int, int, int]]:
+    """Each section as (first heading, h2 count, h3 count, feature cards), in page order.
+
+    The counts are what a translation cannot change without changing the content:
+    a card added in English, or a section that exists only there, shows up as a
+    row that differs. Sections marked ``data-en-only`` (English on purpose) and
+    ``data-translation-notice`` (only a translation has one) are left out.
+    """
+    rows = []
+    for match in SECTION.finditer(html):
+        if "data-en-only" in match.group(1) or "data-translation-notice" in match.group(1):
+            continue
+        body = match.group(2)
+        heading = HEADING.search(body)
+        title = re.sub(r"\s+", " ", TAGS.sub("", heading.group(1))).strip() if heading else ""
+        rows.append((title, body.count("<h2"), body.count("<h3"), body.count('class="feature-card"')))
+    return rows
+
+
+def check_structure(languages: dict[str, str], report: Report) -> None:
+    """Refuse a translated page whose sections no longer match the English ones.
+
+    check_untranslated_text sees English prose left inside a translation. It is
+    blind to the opposite case, content the English page gained that the
+    translation never received: there is nothing English on the translated page
+    to match. That is how the features section was rewritten in English in June
+    2026 and stayed in its old form in eight languages for four months, until a
+    translator noticed the two pages did not say the same thing.
+    """
+    english = skeleton((PAGES / "index.html").read_text(encoding="utf-8"))
+    for code in sorted(languages):
+        if code == "en":
+            continue
+        page = PAGES / code / "index.html"
+        if not page.exists():
+            continue
+        text = page.read_text(encoding="utf-8")
+        if is_redirect(text):
+            continue
+        translated = skeleton(text)
+        if len(translated) != len(english):
+            report.fail(page, f"has {len(translated)} sections, the English page has {len(english)}")
+            continue
+        for position, (ours, theirs) in enumerate(zip(english, translated, strict=True), start=1):
+            if ours[1:] != theirs[1:]:
+                report.fail(
+                    page,
+                    f'section {position} ("{ours[0]}" in English) has h2/h3/cards {theirs[1:]}, English has {ours[1:]}',
+                )
+
+
 def main() -> int:
     report = Report()
     languages = declared_languages()
@@ -287,6 +340,7 @@ def main() -> int:
         check_page(page, page.read_text(encoding="utf-8"), languages, report)
 
     check_untranslated_text(languages, report)
+    check_structure(languages, report)
     check_sitemap(languages, report)
     check_shipped_files(report)
 

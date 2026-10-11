@@ -153,7 +153,7 @@
             <div class="feature-card">
                 <div class="icon">🖐️</div>
                 <h3>Grabbed the hose? Just tell NeverDry</h3>
-                <p>Open the valve manually, use the physical button, or water by hand - "Mark as irrigated" keeps the deficit accurate no matter how you watered.</p>
+                <p>Open the valve manually, use the physical button, or water by hand - "Mark irrigated" keeps the deficit accurate no matter how you watered.</p>
             </div>
             <div class="feature-card">
                 <div class="icon">💧</div>
@@ -178,7 +178,7 @@
             <div class="feature-card">
                 <div class="icon">🌍</div>
                 <h3>Metric &amp; imperial</h3>
-                <p>All sensors declare the correct Home Assistant device class - deficit in mm or inches, volumes in litres or gallons, flow rate in L/min or gal/min. Units follow your HA system preference automatically.</p>
+                <p>All sensors declare the correct Home Assistant device class - deficit in mm or inches, volumes in litres or gallons, flow rate in L/h or gal/h. Units follow your HA system preference automatically.</p>
             </div>
         </div>
     </div>
@@ -266,17 +266,44 @@
     </div>
 </section>
 
-<!-- What's new -->
-<section class="how-it-works">
+<!-- What's new: English only on purpose, it summarises English release notes -->
+<section class="how-it-works" data-en-only>
     <div class="container">
-        <h2>What's new in v0.10.9</h2>
-        <p style="margin-bottom: 1.2em; opacity: 0.8;">Released 2026-07-05</p>
+        <h2>What's new in v0.11.2</h2>
+        <p style="margin-bottom: 1.2em; opacity: 0.8;">Released 2026-08-29</p>
         <ul style="max-width: 680px; margin: 0 auto; text-align: left; line-height: 2;">
-            <li><strong>Zone Card fixed on HA 2026.2+</strong> - Home Assistant renamed an internal Lovelace attribute, so the card resource was never registered and "Custom element doesn't exist: never-dry-zone-card" was back. Now detected correctly on all HA versions, with clear log messages if registration falls back.</li>
-            <li><strong>Deficit settles on delivery timeout</strong> - if the flow sensor reads zero while the valve is actually watering, the delivered volume is now estimated from the configured flow rate, so the deficit no longer stays stuck (and irrigation no longer repeats endlessly).</li>
-            <li><strong>Config sanity guards</strong> - unusual zone values (area below 5 m², flow rate below 10 L/h or above 1800 L/h - usually a L/min vs L/h mix-up) now ask for confirmation before saving, and a new "Check configured zones" menu entry audits existing zones.</li>
+            <li><strong>Setup can always be finished</strong> - a zone form that was refused used to empty every field and show nothing, so the installation could not be completed. The reason is now always shown at the top of the form, and the form comes back filled in with what you typed.</li>
+            <li><strong>One rule for every way into a zone</strong> - first-run setup, "add zone" and "edit zone" now check a zone the same way, so a zone that cannot water is refused wherever you save it. If an existing zone lacks the flow rate its delivery mode needs, the next edit asks for it.</li>
+            <li><strong>The form speaks your language</strong> - errors and labels no longer show internal names such as <code>estimated_flow</code>, and declining "save anyway" no longer undoes your edit.</li>
         </ul>
-        <p style="margin-top: 1.5em; font-size: 0.9em; opacity: 0.7;"><a href="https://github.com/never-dry/NeverDry/releases/tag/v0.10.9">Full release notes on GitHub →</a></p>
+        <p style="margin-top: 1.5em; font-size: 0.9em; opacity: 0.7;"><a href="https://github.com/never-dry/NeverDry/releases/tag/v0.11.2">Full release notes on GitHub →</a></p>
+        <details style="max-width: 680px; margin: 1.5em auto 0; text-align: left; opacity: 0.7; font-size: 0.9em;">
+            <summary style="cursor: pointer;">v0.11.1 - 2026-08-25</summary>
+            <ul style="line-height: 2; margin-top: 0.5em;">
+                <li><strong>The card tells you when a valve does not answer</strong> - an amber warning separates a radio problem (check the link and the batteries) from a valve that answered but delivered no water.</li>
+                <li><strong>Site exposure per zone</strong> - a shaded, windy or paving-adjacent zone keeps its seasonal crop curve, scaled by a microclimate factor. The first code contributed from outside the project.</li>
+                <li><strong>Reset buttons for the yearly totals</strong> - clear the yearly rain or the yearly irrigated water without waiting for 1 January.</li>
+                <li><strong>Percentage soil probes work</strong> - a probe reading 45 instead of 0.45 no longer pins the deficit at zero; most consumer probes work without a helper.</li>
+                <li><strong>No more silent faults</strong> - yearly rain now counts with a soil-moisture probe, an override typed by mistake can be cleared, and editing settings no longer leaves an old copy of the integration running underneath.</li>
+            </ul>
+        </details>
+        <details style="max-width: 680px; margin: 1.5em auto 0; text-align: left; opacity: 0.7; font-size: 0.9em;">
+            <summary style="cursor: pointer;">v0.11.0 - 2026-07-26</summary>
+            <ul style="line-height: 2; margin-top: 0.5em;">
+                <li><strong>Rain counted once</strong> - accumulator and rolling-24h rain sensors no longer over-count or invent rain, and the rain baseline survives restarts.</li>
+                <li><strong>A deficit for every zone</strong> - each zone keeps its own deficit, with a yearly "Irrigated" total that feeds the Energy dashboard.</li>
+                <li><strong>Soil-moisture probe mode</strong> - with a probe configured, the deficit comes from the soil instead of the weather estimate.</li>
+                <li><strong>Manual watering accounted for</strong> - closing a valve by hand counts the water delivered instead of resetting the deficit.</li>
+            </ul>
+        </details>
+        <details style="max-width: 680px; margin: 1.5em auto 0; text-align: left; opacity: 0.7; font-size: 0.9em;">
+            <summary style="cursor: pointer;">v0.10.9 - 2026-07-05</summary>
+            <ul style="line-height: 2; margin-top: 0.5em;">
+                <li><strong>Zone Card fixed on HA 2026.2+</strong> - Home Assistant renamed an internal Lovelace attribute, so the card resource was never registered and "Custom element doesn't exist: never-dry-zone-card" was back. Now detected correctly on all HA versions, with clear log messages if registration falls back.</li>
+                <li><strong>Deficit settles on delivery timeout</strong> - if the flow sensor reads zero while the valve is actually watering, the delivered volume is now estimated from the configured flow rate, so the deficit no longer stays stuck (and irrigation no longer repeats endlessly).</li>
+                <li><strong>Config sanity guards</strong> - unusual zone values (area below 5 m², flow rate below 10 L/h or above 1800 L/h - usually a L/min vs L/h mix-up) now ask for confirmation before saving, and a new "Check configured zones" menu entry audits existing zones.</li>
+            </ul>
+        </details>
         <details style="max-width: 680px; margin: 1.5em auto 0; text-align: left; opacity: 0.7; font-size: 0.9em;">
             <summary style="cursor: pointer;">v0.10.8 - 2026-07-04</summary>
             <ul style="line-height: 2; margin-top: 0.5em;">
