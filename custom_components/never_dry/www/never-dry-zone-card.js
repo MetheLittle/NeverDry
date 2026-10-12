@@ -289,12 +289,12 @@ const I18N = {
     method_penman_monteith: "Penman-Monteith",
     reasonExplicit: "Explizit ausgewählt",
     reasonFallback:
-      "{method} wurde ausgewählt, kann auf dieser Installation aber nicht laufen; die beste unterstützte Methode wird verwendet",
+      "{method} wurde ausgewählt, wird auf dieser Installation aber nicht unterstützt; das beste Modell für die verfügbaren Sensoren wird verwendet",
     reasonFlatRange:
-      "Automatisch: Der Temperatursensor zeigt eine Tagesschwankung von nur {range} °C, was zu flach für echtes Wetter ist — deshalb wurden die Methoden ausgeschlossen, die die Tagesschwankung auswerten. Wenn der Sensor tatsächlich im Freien ist und {hargreaves} gewünscht wird, kann es explizit ausgewählt werden.",
-    reasonAuto: "Automatisch: die beste Methode, die die angegebenen Sensoren unterstützen",
-    warmingDailyRange: "Die Tagesschwankung benötigt {hours} Stunden an Messwerten",
-    warmingSensorUnreadable: "Ein erforderlicher Sensor konnte in diesem Zyklus nicht gelesen werden",
+      "Automatisch: Der Temperatursensor zeigt eine Tagesschwankung von nur {range} °C. Dieser Wert ist zu gering für reale Wetterdaten, daher werden Modelle, die diese tägliche Temperaturschwankung verwenden, ausgeschlossen. Wenn der Sensor sich tatsächlich im Freien befindet und {hargreaves} verwendet werden soll, dann explizit auswählen.",
+    reasonAuto: "Automatisch: Das beste Modell für die verfügbaren Sensoren",
+    warmingDailyRange: "Die tägliche Temperaturschwankung benötigt Messwerte über einen Zeitraum von {hours} Stunden.",
+    warmingSensorUnreadable: "Ein erforderlicher Sensor konnte zum abgefragten Zeitpunkt nicht gelesen werden.",
     measured_temperature_c: "Temperatur",
     measured_humidity_pct: "Relative Luftfeuchtigkeit",
     measured_wind_raw: "Windgeschwindigkeit (roh)",

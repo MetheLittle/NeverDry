@@ -83,7 +83,7 @@
             "data_description": {
               "valve": "Schalter-Entität die das Bewässerungsventil für diese Zone steuert. Leer lassen für Beobachtungs-Modus (kein Ventil)",
               "delivery_mode": "Wie das Ventil Wasser liefert. Geschätzter Durchfluss: Einfaches Ein-/Aus-Ventil, Dauer wird berechnet anhand der Durchflussmenge. Durchflussmesser: Ventil mit Durchfluss-Sensor, schließt beim erreichten Zielvolumen. Volumen-Vorgabe: Smartes Ventil mit Volumenziel, schließt sich dann selbst.",
-              "flow_rate_lpm": "Die Summe aller Verbrauchswerte der in dieser Zone verwendeten Emitter - Sprinkler, Tropfer und Mikro-Sprüher - Angabe in Litern pro Stunde (gal/h bei imperialen Einheiten). Dieser Wert kann den Herstellerangaben des Emitters oder dem Bewässerungsplan entnommen werden; eine eigene Messung ist nicht nötig. Dieser Wert entspricht der zu liefernden Gesamt-Wassermenge für diese Bewässerungszone und ist zwingend erforderlich, da ohne diesen keine Bewässerungsdauer berechnet werden kann. Die tatsächliche Wassermenge der Zone wird im laufenden Betrieb gemessen; die Abweichung zwischen den beiden Werten sollte beobachtet werden.",
+              "flow_rate_lpm": "Die Summe aller Verbrauchswerte der in dieser Zone verwendeten Emitter (Sprinkler, Tropfer und Mikro-Sprüher) in Litern pro Stunde (bzw. gal/h bei imperial). Dieser Wert kann den Herstellerangaben des Emitters oder dem Bewässerungsplan entnommen werden; eine eigene Messung ist nicht nötig. Dieser Wert entspricht der zu liefernden Gesamt-Wassermenge für diese Bewässerungszone und ist zwingend erforderlich, da ohne diesen keine Bewässerungsdauer berechnet werden kann. Die tatsächliche Wassermenge der Zone wird im laufenden Betrieb gemessen; die Abweichung zwischen den beiden Werten sollte beobachtet werden.",
               "flow_meter_sensor": "Beide Varianten sind geeignet. NeverDry unterscheidet sie anhand der Maßeinheit. Ein Summenzähler (L, gal, m³) wird vor und nach der Bewässerung gelesen; die Differenz ergibt das gelieferte Volumen. Dies ist die genauere der beiden Methoden, da sie nicht von der Übermittlungsfrequenz abhängt. Alternativ wird die aktuelle Durchflussrate (L/min, L/h, m³/h, gal/min, gal/h) über die Dauer der Bewässerung verwendet; hierbei bestimmt die Häufigkeit der Datenübermittlung durch das Ventil die Genauigkeit des Messwerts. Erforderlich wenn der Bewässerungs-Modus mit Durchflussmesser verwendet wird.",
               "volume_entity": "Zahlentität vom smarten Ventil, die ein Volumenziel in Litern bereit stellt. Erforderlich wenn der Bewässerungs-Modus das Volumen des Ventils verwendet",
               "system_type": "Legt die Effizienz der Zone fest (Tropfbewässerung 0,92, Mikro-Sprinkler 0,80, Versenkregner 0,68, manuell 0,55). Benutzerdefiniert wählen, um unten einen eigenen Wert einzugeben.",
@@ -227,7 +227,7 @@
             "data_description": {
               "valve": "Schalter-Entität die das Bewässerungsventil für diese Zone steuert. Leer lassen für Beobachtungs-Modus (kein Ventil)",
               "delivery_mode": "Wie das Ventil Wasser liefert. Geschätzter Durchfluss: Einfaches Ein-/Aus-Ventil, Dauer wird berechnet anhand der Durchflussmenge. Durchflussmesser: Ventil mit Durchfluss-Sensor, schließt beim erreichten Zielvolumen. Volumen-Vorgabe: Smartes Ventil mit Volumenziel, schließt sich dann selbst.",
-              "flow_rate_lpm": "Die Summe aller Verbrauchswerte der in dieser Zone verwendeten Emitter - Sprinkler, Tropfer und Mikro-Sprüher - Angabe in Litern pro Stunde (gal/h bei imperialen Einheiten). Dieser Wert kann den Herstellerangaben des Emitters oder dem Bewässerungsplan entnommen werden; eine eigene Messung ist nicht nötig. Dieser Wert entspricht der zu liefernden Gesamt-Wassermenge für diese Bewässerungszone und ist zwingend erforderlich, da ohne diesen keine Bewässerungsdauer berechnet werden kann. Die tatsächliche Wassermenge der Zone wird im laufenden Betrieb gemessen; die Abweichung zwischen den beiden Werten sollte beobachtet werden.",
+              "flow_rate_lpm": "Die Summe aller Verbrauchswerte der in dieser Zone verwendeten Emitter (Sprinkler, Tropfer und Mikro-Sprüher) in Litern pro Stunde (bzw. gal/h bei imperial). Dieser Wert kann den Herstellerangaben des Emitters oder dem Bewässerungsplan entnommen werden; eine eigene Messung ist nicht nötig. Dieser Wert entspricht der zu liefernden Gesamt-Wassermenge für diese Bewässerungszone und ist zwingend erforderlich, da ohne diesen keine Bewässerungsdauer berechnet werden kann. Die tatsächliche Wassermenge der Zone wird im laufenden Betrieb gemessen; die Abweichung zwischen den beiden Werten sollte beobachtet werden.",
               "flow_meter_sensor": "Beide Varianten sind geeignet. NeverDry unterscheidet sie anhand der Maßeinheit. Ein Summenzähler (L, gal, m³) wird vor und nach der Bewässerung gelesen; die Differenz ergibt das gelieferte Volumen. Dies ist die genauere der beiden Methoden, da sie nicht von der Übermittlungsfrequenz abhängt. Alternativ wird die aktuelle Durchflussrate (L/min, L/h, m³/h, gal/min, gal/h) über die Dauer der Bewässerung verwendet; hierbei bestimmt die Häufigkeit der Datenübermittlung durch das Ventil die Genauigkeit des Messwerts. Erforderlich wenn der Bewässerungs-Modus mit Durchflussmesser verwendet wird.",
               "volume_entity": "Zahlentität vom smarten Ventil, die ein Volumenziel in Litern bereit stellt. Erforderlich wenn der Bewässerungs-Modus das Volumen des Ventils verwendet",
               "system_type": "Legt die Effizienz der Zone fest (Tropfbewässerung 0,92, Mikro-Sprinkler 0,80, Versenkregner 0,68, manuell 0,55). Benutzerdefiniert wählen, um unten einen eigenen Wert einzugeben.",
@@ -313,7 +313,7 @@
             "data_description": {
               "valve": "Schalter-Entität die das Bewässerungsventil für diese Zone steuert. Leer lassen für Beobachtungs-Modus (kein Ventil)",
               "delivery_mode": "Wie das Ventil Wasser liefert. Geschätzter Durchfluss: Einfaches Ein-/Aus-Ventil, Dauer wird berechnet anhand der Durchflussmenge. Durchflussmesser: Ventil mit Durchfluss-Sensor, schließt beim erreichten Zielvolumen. Volumen-Vorgabe: Smartes Ventil mit Volumenziel, schließt sich dann selbst.",
-              "flow_rate_lpm": "Die Summe aller Verbrauchswerte der in dieser Zone verwendeten Emitter - Sprinkler, Tropfer und Mikro-Sprüher - Angabe in Litern pro Stunde (gal/h bei imperialen Einheiten). Dieser Wert kann den Herstellerangaben des Emitters oder dem Bewässerungsplan entnommen werden; eine eigene Messung ist nicht nötig. Dieser Wert entspricht der zu liefernden Gesamt-Wassermenge für diese Bewässerungszone und ist zwingend erforderlich, da ohne diesen keine Bewässerungsdauer berechnet werden kann. Die tatsächliche Wassermenge der Zone wird im laufenden Betrieb gemessen; die Abweichung zwischen den beiden Werten sollte beobachtet werden.",
+              "flow_rate_lpm": "Die Summe aller Verbrauchswerte der in dieser Zone verwendeten Emitter (Sprinkler, Tropfer und Mikro-Sprüher) in Litern pro Stunde (bzw. gal/h bei imperial). Dieser Wert kann den Herstellerangaben des Emitters oder dem Bewässerungsplan entnommen werden; eine eigene Messung ist nicht nötig. Dieser Wert entspricht der zu liefernden Gesamt-Wassermenge für diese Bewässerungszone und ist zwingend erforderlich, da ohne diesen keine Bewässerungsdauer berechnet werden kann. Die tatsächliche Wassermenge der Zone wird im laufenden Betrieb gemessen; die Abweichung zwischen den beiden Werten sollte beobachtet werden.",
               "flow_meter_sensor": "Beide Varianten sind geeignet. NeverDry unterscheidet sie anhand der Maßeinheit. Ein Summenzähler (L, gal, m³) wird vor und nach der Bewässerung gelesen; die Differenz ergibt das gelieferte Volumen. Dies ist die genauere der beiden Methoden, da sie nicht von der Übermittlungsfrequenz abhängt. Alternativ wird die aktuelle Durchflussrate (L/min, L/h, m³/h, gal/min, gal/h) über die Dauer der Bewässerung verwendet; hierbei bestimmt die Häufigkeit der Datenübermittlung durch das Ventil die Genauigkeit des Messwerts. Erforderlich wenn der Bewässerungs-Modus mit Durchflussmesser verwendet wird.",
               "volume_entity": "Zahlentität vom smarten Ventil, die ein Volumenziel in Litern bereit stellt. Erforderlich wenn der Bewässerungs-Modus das Volumen des Ventils verwendet",
               "system_type": "Legt die Effizienz der Zone fest (Tropfbewässerung 0,92, Mikro-Sprinkler 0,80, Versenkregner 0,68, manuell 0,55). Benutzerdefiniert wählen, um unten einen eigenen Wert einzugeben.",
@@ -360,7 +360,7 @@
       "zone_already_exists": "Eine Zone mit diesem Namen existiert bereits",
       "too_many_zones": "Maximale Zonenanzahl erreicht (50)",
       "zone_name_too_long": "Zonen-Name zu lang (max. 64 Zeichen)",
-      "field_capacity_required": "Wert für Feldkapazität eintragen: Die Bodenart steht auf benutzerdefiniert. Der Wert aus diesem Feld wird verwendet.",
+      "field_capacity_required": "Wert für Feldkapazität eintragen: Die Bodenart steht auf benutzerdefiniert. Dieser Wert muss angegeben werden.",
       "wilting_point_required": "Wert für den Welkepunkt eintragen: Die Bodenart steht auf benutzerdefiniert. Dieser Grenzenwert muss angegeben werden.",
       "wilting_point_above_capacity": "Der Welkepunkt muss unter der Feldkapazität liegen: Das für die Pflanzen nutzbare Wasser ist die Menge, die dazwischen liegt."
     },
@@ -393,12 +393,12 @@
     },
     "plant_family": {
       "options": {
-        "lawn": "Grünfläche / Rasen",
+        "lawn": "Rasen / Wiese",
         "vegetables": "Gemüse (saisonal)",
         "fruit_trees": "Obstbäume (laubabwerfend)",
         "ornamental_shrubs": "Ziersträucher",
         "herbs": "Kräuter (mediterran)",
-        "citrus": "Zitrusgewächse / Immergrüne Früchte",
+        "citrus": "Zitrusgewächse / Immergrüne",
         "roses": "Rosen",
         "succulents": "Sukkulenten / Kakti",
         "native_ground_cover": "Einheimische Bodendecker",
@@ -408,7 +408,7 @@
     },
     "delivery_mode": {
       "options": {
-        "estimated_flow": "Geschätzter Durchfluss: einfaches Ein/Aus, zeitgesteuert (Standard)",
+        "estimated_flow": "Geschätzter Durchfluss: Einfaches Ein/Aus - zeitgesteuert (Standard)",
         "flow_meter": "Ventil mit Durchfluss-Sensor",
         "volume_preset": "Smartes Ventil mit Volumenvorgabe"
       }
