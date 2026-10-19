@@ -14,6 +14,9 @@ from unittest.mock import MagicMock
 import pytest
 from never_dry import config_flow as cf
 from never_dry.const import (
+    CONF_ET_METHOD,
+    CONF_RAIN_SENSOR,
+    CONF_TEMP_SENSOR,
     CONF_ZONE_AREA,
     CONF_ZONE_DELIVERY_MODE,
     CONF_ZONE_EXPOSURE,
@@ -213,6 +216,54 @@ class TestRejectedInputSurvives:
 
         assert result["errors"]["base"] == "microclimate_factor_required"
         assert schema_calls[0][CONF_ZONE_EXPOSURE] == EXPOSURE_CUSTOM
+
+
+class TestSensorsStepSurvivesRejection:
+    """The step before the zone form loses input the same way, and must not.
+
+    Picking an ET method the declared sensors cannot support is the one way out
+    of the first step that is not forward. The error itself is visible — that
+    form has no sections — but the redraw used to arrive empty, so the two
+    mandatory sensor pickers had to be found again before the method could even
+    be corrected.
+    """
+
+    @pytest.fixture
+    def sensors_schema_calls(self, monkeypatch):
+        calls: list[dict | None] = []
+
+        def _schema(is_imperial, current=None):
+            calls.append(current)
+            return None
+
+        monkeypatch.setattr(cf, "_sensors_schema", _schema)
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_unsupported_method_keeps_the_declared_sensors(self, hass_mock, sensors_schema_calls):
+        flow = cf.NeverDryConfigFlow()
+        flow.hass = hass_mock
+        submitted = {
+            CONF_TEMP_SENSOR: "sensor.outdoor_temp",
+            CONF_RAIN_SENSOR: "sensor.rain",
+            # Penman-Monteith wants humidity, wind and radiation, none declared.
+            CONF_ET_METHOD: "penman_monteith",
+        }
+
+        result = await flow.async_step_user(submitted)
+
+        assert result["step_id"] == "user"
+        assert result["errors"][CONF_ET_METHOD] == "et_method_missing_sensors"
+        assert sensors_schema_calls == [submitted]
+
+    @pytest.mark.asyncio
+    async def test_first_render_seeds_nothing(self, hass_mock, sensors_schema_calls):
+        flow = cf.NeverDryConfigFlow()
+        flow.hass = hass_mock
+
+        await flow.async_step_user()
+
+        assert sensors_schema_calls == [None]
 
 
 _STORED_ZONE = {

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from pathlib import Path
 
 from never_dry import const
@@ -25,6 +26,12 @@ from never_dry import const
 _COMPONENT = Path(__file__).resolve().parent.parent / "custom_components" / "never_dry"
 _CONFIG_FLOW = _COMPONENT / "config_flow.py"
 _EN_JSON = _COMPONENT / "translations" / "en.json"
+_STRINGS = _COMPONENT / "strings.json"
+# The shipped languages are *discovered*, never listed. A hard-coded tuple is exactly how
+# a new translations/<lang>.json slips past every guard in this file on the day it lands:
+# the file is present, the tests are green, and nobody is looking at it.
+_LANG_DOCS = sorted(_COMPONENT.glob("translations/*.json"))
+_ALL_DOCS = [_STRINGS, *_LANG_DOCS]
 
 
 def _resolve_options(node: ast.AST, assignments: dict[str, ast.AST] | None = None) -> set[str] | None:
@@ -81,6 +88,11 @@ def _resolve_options(node: ast.AST, assignments: dict[str, ast.AST] | None = Non
                 resolved = getattr(const, sub.id)
                 if isinstance(resolved, dict):
                     return set(resolved.keys())
+                # options=list(ET_METHOD_OPTIONS): a flat sequence in const,
+                # wrapped because Home Assistant validates this field as a
+                # list and refuses the tuple it is stored as.
+                if isinstance(resolved, (list, tuple, set)):
+                    return set(resolved)
     # options=[SelectOptionDict(value=k, ...) for k, v in PLANT_FAMILIES.items()]
     if isinstance(node, ast.ListComp):
         for sub in ast.walk(node):
@@ -199,10 +211,6 @@ class TestResolveOptionsFromVariable:
 # ── Sectioned form fields: labels must be section-qualified ────────────────
 
 
-_STRINGS = _COMPONENT / "strings.json"
-_IT_JSON = _COMPONENT / "translations" / "it.json"
-
-
 def _section_membership() -> dict[str, set[str]]:
     """Map each ``section()`` key in ``config_flow.py`` to the fields it holds.
 
@@ -264,7 +272,7 @@ def test_sectioned_fields_are_labelled_under_their_section():
     assert membership, "no section() found in config_flow.py — this guard would pass vacuously"
 
     errors: list[str] = []
-    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+    for path in _ALL_DOCS:
         doc = json.loads(path.read_text())
         for scope in ("config", "options"):
             for step_id, step in doc.get(scope, {}).get("step", {}).items():
@@ -292,6 +300,56 @@ def test_sectioned_fields_are_labelled_under_their_section():
     assert not errors, "Sectioned-form label inconsistencies:\n  " + "\n  ".join(errors)
 
 
+def test_every_select_options_argument_is_a_list():
+    """Home Assistant validates ``options`` as a list, and a tuple is refused outright.
+
+    This has to be a static check because the suite stubs Home Assistant: the
+    selectors are mocks here, so nothing validates their config and a form that
+    cannot open in the real thing passes every test in this repository. It got
+    through exactly that way — ``options`` was handed the tuple the identifiers
+    are stored as in ``const``, and the options form raised on open while 1285
+    tests stayed green.
+
+    A local variable is followed to its assignment, because that is how most of
+    these are written. What is refused is a value that reaches ``options`` as a
+    tuple or a set, whether written there or imported from ``const``.
+    """
+    tree = ast.parse(_CONFIG_FLOW.read_text(encoding="utf-8"))
+    assignments = _collect_assignments(tree)
+    offenders: list[str] = []
+
+    def _is_list_shaped(node: ast.AST, depth: int = 0) -> bool:
+        if depth > 3:
+            return False
+        if isinstance(node, (ast.List, ast.ListComp)):
+            return True
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "list":
+            return True
+        if isinstance(node, ast.Name):
+            if hasattr(const, node.id):
+                return isinstance(getattr(const, node.id), list)
+            target = assignments.get(node.id)
+            return _is_list_shaped(target, depth + 1) if target is not None else False
+        return False
+
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "SelectSelectorConfig"
+        ):
+            continue
+        options = next((kw.value for kw in node.keywords if kw.arg == "options"), None)
+        if options is None:
+            continue
+        if not _is_list_shaped(options):
+            offenders.append(f"line {options.lineno}: options={ast.unparse(options)}")
+
+    assert not offenders, "SelectSelectorConfig options must be a list (HA refuses a tuple):\n  " + "\n  ".join(
+        offenders
+    )
+
+
 # ── Error codes must resolve in the flow that raises them ─────────────
 #
 # An error code is not text: Home Assistant looks it up under
@@ -304,9 +362,6 @@ def test_sectioned_fields_are_labelled_under_their_section():
 # step for a long time, so only ``config.error`` ever needed them. The moment
 # the same helper started serving the options steps too (GH #196), every code it
 # can raise had to resolve in both — and nothing was checking.
-
-_STRINGS = _COMPONENT / "strings.json"
-_IT_JSON = _COMPONENT / "translations" / "it.json"
 
 
 def _raised_error_codes() -> set[str]:
@@ -358,7 +413,7 @@ def test_every_raised_error_code_resolves_in_both_flows():
     assert codes, "no error codes found — the extractor has drifted from the source"
 
     missing: list[str] = []
-    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+    for path in _ALL_DOCS:
         data = json.loads(path.read_text())
         for root in ("config", "options"):
             declared = data.get(root, {}).get("error", {})
@@ -373,7 +428,7 @@ def test_the_two_flows_declare_the_same_error_catalogue():
     Divergence here is how a code ends up raisable somewhere it cannot be
     read, which is invisible until a user is standing in front of it.
     """
-    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+    for path in _ALL_DOCS:
         data = json.loads(path.read_text())
         config = set(data.get("config", {}).get("error", {}))
         options = set(data.get("options", {}).get("error", {}))
@@ -425,7 +480,7 @@ def _user_facing_strings(data: dict):
 
 def test_no_user_facing_string_names_an_internal_key():
     offenders: list[str] = []
-    for path in (_STRINGS, _EN_JSON, _IT_JSON):
+    for path in _ALL_DOCS:
         data = json.loads(path.read_text())
         keys = _internal_option_keys(data)
         assert keys, f"{path.name}: no translated options found — the extractor has drifted"
@@ -438,17 +493,205 @@ def test_no_user_facing_string_names_an_internal_key():
     )
 
 
+# A label naming a field, in English, fits well inside this. The longest one in the
+# source is 73 characters. Past it, in the file where the wording is authored, the
+# text has stopped being a name.
+_LABEL_LIMIT = 90
+
+# A translation is allowed to be longer than its English counterpart, because languages
+# are. What it may not be is a different *kind* of string. German runs the longest here
+# and its worst case is 1.29 times English, on exactly the same construction; the defect
+# this test exists for, a description pasted into the label slot, was about seven times
+# its English counterpart. Those are not the same phenomenon and one threshold cannot
+# separate them, which is why a translation has to fail both tests to be reported.
+_TRANSLATION_RATIO = 1.6
+
+
 def test_a_label_is_a_name_not_a_paragraph():
     """A label names the field; the explanation belongs in data_description.
 
     The Italian file had the whole design-flow-rate description pasted into the
-    label slot — 493 characters where the form expects two words — so the
-    field announced itself with a paragraph while every neighbour had a name.
+    label slot, 493 characters where the form expects two words, so the field
+    announced itself with a paragraph while every neighbour had a name.
+
+    The length alone cannot decide this. An absolute limit calibrated on English calls
+    a German label a paragraph for being German: the first contributed German file
+    tripped this test with a label that was the same construction as the English one,
+    word for word, only spelled in a language whose words are longer. So the source
+    files answer to the limit, and a translation answers to its own English counterpart
+    as well: it is reported only when it is both long in absolute terms and much longer
+    than the string it translates.
+    """
+    english = {where: text for where, text in _user_facing_strings(json.loads(_EN_JSON.read_text()))}
+
+    offenders: list[str] = []
+    for path in _ALL_DOCS:
+        data = json.loads(path.read_text())
+        is_source = path in (_STRINGS, _EN_JSON)
+        for where, text in _user_facing_strings(data):
+            if ".data." not in where or len(text) <= _LABEL_LIMIT:
+                continue
+            if is_source:
+                offenders.append(f"{path.name}: {where} is {len(text)} characters")
+                continue
+            counterpart = english.get(where)
+            if not counterpart:
+                offenders.append(f"{path.name}: {where} is {len(text)} characters and has no English counterpart")
+            elif len(text) > _TRANSLATION_RATIO * len(counterpart):
+                offenders.append(
+                    f"{path.name}: {where} is {len(text)} characters against {len(counterpart)} in English "
+                    f"({len(text) / len(counterpart):.1f}x): that is a description, not a label"
+                )
+    assert not offenders, "labels that are paragraphs:\n  " + "\n  ".join(offenders)
+
+
+# ── Every shipped language carries every key ──────────────────────────
+#
+# Home Assistant loads English first and then overlays the requested language with
+# ``component_cache.update(flat)`` (``homeassistant/helpers/translation.py``). ``update()``
+# replaces only the keys it carries, so a key missing from ``it.json`` does **not** print
+# raw — it prints the *English* text. The dialog still looks finished.
+#
+# That is what these two guard: not a broken form, a **half-translated one that nobody
+# reports** because nothing looks wrong. The raw key only ever surfaces when English is
+# missing it too, which is the case the sectioned-label guard above already covers.
+#
+# ``strings.json`` is the declared source of truth, and it is the file most at risk: Home
+# Assistant never reads it at runtime for a custom integration (``translation.py`` only ever
+# builds ``f"{language}.json"`` under ``translations/``), and the copy into
+# ``translations/en.json`` is manual because custom components have no build script. A file
+# nobody reads and no tool checks rots — and this one had, silently: three labels of
+# ``options.step.model_params`` absent and two of its strings left at the previous wording,
+# while the same step's ``en``/``it`` were current.
+
+
+def _leaf_paths(doc, prefix: str = "") -> dict[str, object]:
+    """Flatten a translation document into ``dotted.path -> leaf value``."""
+    flat: dict[str, object] = {}
+    if isinstance(doc, dict):
+        for key, value in doc.items():
+            flat.update(_leaf_paths(value, f"{prefix}.{key}" if prefix else key))
+    else:
+        flat[prefix] = doc
+    return flat
+
+
+def test_strings_json_and_en_json_are_the_same_document():
+    """The source of truth and the English shipped to users must not drift apart.
+
+    Keys **and** values. Nothing at runtime reconciles these two files, and no build step
+    generates one from the other, so the only thing that can keep ``strings.json`` honest
+    is this assertion. Without it the source quietly becomes a document describing a GUI
+    that no longer exists — which is the state it was found in.
+    """
+    source = _leaf_paths(json.loads(_STRINGS.read_text(encoding="utf-8")))
+    english = _leaf_paths(json.loads(_EN_JSON.read_text(encoding="utf-8")))
+
+    problems = [f"only in strings.json: {key}" for key in sorted(set(source) - set(english))]
+    problems += [f"only in en.json: {key}" for key in sorted(set(english) - set(source))]
+    problems += [
+        f"{key}: strings.json says {source[key]!r}, en.json says {english[key]!r}"
+        for key in sorted(set(source) & set(english))
+        if source[key] != english[key]
+    ]
+
+    assert not problems, "strings.json and translations/en.json have drifted:\n  " + "\n  ".join(problems)
+
+
+def test_every_language_matches_the_source_of_truth():
+    """Every ``translations/<lang>.json`` carries exactly the keys of ``strings.json``.
+
+    A missing key is English text served inside somebody else's language. A key in excess is
+    text written for a field that no longer exists — the residue of a rename, which is worth
+    catching because it is the half that a translator cannot see from their side.
+
+    Empty leaves are refused in the same pass: ``""`` satisfies key parity perfectly and
+    renders as nothing at all, so it is precisely how a half-finished translation would walk
+    through a key-set check.
+
+    Every deviation is collected and reported together, grouped by file: a translator has to
+    see the whole list at once, not discover it one failing run at a time.
+    """
+    assert _LANG_DOCS, "no translations/*.json found — this guard would pass vacuously"
+
+    expected = set(_leaf_paths(json.loads(_STRINGS.read_text(encoding="utf-8"))))
+    problems: list[str] = []
+
+    for path in _LANG_DOCS:
+        leaves = _leaf_paths(json.loads(path.read_text(encoding="utf-8")))
+        for key in sorted(expected - set(leaves)):
+            problems.append(f"{path.name}: missing {key} (the English text is served instead)")
+        for key in sorted(set(leaves) - expected):
+            problems.append(f"{path.name}: {key} is not in strings.json (stale after a rename?)")
+        for key in sorted(set(leaves) & expected):
+            value = leaves[key]
+            if not isinstance(value, str) or not value.strip():
+                problems.append(f"{path.name}: {key} is empty — it renders as nothing")
+
+    assert not problems, "translations out of step with strings.json:\n  " + "\n  ".join(problems)
+
+
+def test_no_placeholder_sits_inside_single_quotes():
+    """``'{zone}'`` is refused, the same way hassfest refuses it.
+
+    Quoting is punctuation, and punctuation is the part of a sentence a translator is
+    supposed to own: a placeholder wrapped in ASCII single quotes freezes an English
+    convention into every language that inherits the string. Home Assistant rejects the
+    shape outright, so this is not a matter of taste. Double quotes are left alone, which
+    is the line hassfest itself draws.
+
+    It is here rather than left to CI because hassfest runs on a pull request and this runs
+    in a second. Eleven notification bodies carried it for as long as they were literals in
+    the source, where no check could see them, and were caught only once they moved into the
+    catalogue. The next one should cost a test run, not a red pull request.
     """
     offenders: list[str] = []
-    for path in (_STRINGS, _EN_JSON, _IT_JSON):
-        data = json.loads(path.read_text())
-        for where, text in _user_facing_strings(data):
-            if ".data." in where and len(text) > 90:
-                offenders.append(f"{path.name}: {where} is {len(text)} characters")
-    assert not offenders, "labels that are paragraphs:\n  " + "\n  ".join(offenders)
+    for path in _ALL_DOCS:
+        document = json.loads(path.read_text(encoding="utf-8"))
+
+        def walk(node, where=""):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    yield from walk(value, f"{where}.{key}" if where else key)
+            elif isinstance(node, str) and re.search(r"'\{\w+\}'", node):
+                yield where
+
+        offenders += [f"{path.name}: {where}" for where in walk(document)]
+
+    assert not offenders, (
+        "placeholders wrapped in single quotes, which hassfest refuses and a translator "
+        "cannot punctuate their own way:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_a_translation_carries_the_same_placeholders_as_its_english():
+    """``{probe}`` must survive translation as ``{probe}``.
+
+    A placeholder is machinery, not vocabulary: Home Assistant substitutes by name, so a
+    translated one is never filled and the user reads the braces. The German file shipped
+    ``{Sonde}`` for ``{probe}`` and nobody could have noticed, because hassfest validates
+    only ``strings.json`` and ``translations/en.json`` for a custom integration and never
+    looks at the other languages at all.
+
+    That asymmetry is the point of putting the check here. Every shipped language is read,
+    and both directions are reported: a placeholder invented in a translation would be just
+    as unfillable as one that was renamed.
+    """
+    english = _leaf_paths(json.loads(_EN_JSON.read_text(encoding="utf-8")))
+    problems: list[str] = []
+
+    for path in _LANG_DOCS:
+        if path == _EN_JSON:
+            continue
+        for where, text in _leaf_paths(json.loads(path.read_text(encoding="utf-8"))).items():
+            source = english.get(where)
+            if not isinstance(source, str) or not isinstance(text, str):
+                continue
+            expected = set(re.findall(r"\{(\w+)\}", source))
+            got = set(re.findall(r"\{(\w+)\}", text))
+            for name in sorted(expected - got):
+                problems.append(f"{path.name}: {where} loses {{{name}}}, which will never be filled in")
+            for name in sorted(got - expected):
+                problems.append(f"{path.name}: {where} invents {{{name}}}, which nothing substitutes")
+
+    assert not problems, "placeholders altered in translation:\n  " + "\n  ".join(problems)

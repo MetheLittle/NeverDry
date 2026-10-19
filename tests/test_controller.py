@@ -18,6 +18,7 @@ from never_dry.const import (
     SYSTEM_TYPE_CUSTOM,
 )
 from never_dry.controller import IrrigationController
+from never_dry.valve_notifier import NotificationKind
 
 
 class TestControllerState:
@@ -80,14 +81,14 @@ class TestIrrigateSingleZone:
             di_sensor,
         )
 
-        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=_RecordingNotifier())
         ctrl._wait_with_stop_check = AsyncMock(side_effect=lambda d: d)
         di_sensor._deficit = 10.0
 
         await ctrl._irrigate_zones(["NoValve"])
 
         # No valve calls should have been made
-        hass_mock.services.async_call.assert_not_called()
+        assert ctrl._notifier.sent == []
 
     @pytest.mark.asyncio
     async def test_skips_zone_with_zero_duration(self, controller, di_sensor):
@@ -334,7 +335,7 @@ class TestMonitoringMode:
             di_sensor,
         )
         zone._zone_deficit = zone_deficit
-        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=_RecordingNotifier())
         return ctrl, zone
 
     def test_monitoring_mode_detected(self, hass_mock, di_sensor):
@@ -353,17 +354,23 @@ class TestMonitoringMode:
         async_track_time_interval.reset_mock()
         ctrl, _ = self._make_no_valve_controller(hass_mock, di_sensor)
         ctrl.register_services()
-        # 2 calls: anomaly check (all modes) + monitoring check (monitoring mode only)
+        # 2 calls: anomaly check (all modes) + monitoring check (monitoring mode only).
+        # No reachability watch: with no valves there is nothing to compare.
         assert async_track_time_interval.call_count == 2
+        watched = [c.args[1].__name__ for c in async_track_time_interval.call_args_list]
+        assert "_check_reachability" not in watched
 
-    def test_register_services_anomaly_only_with_valves(self, controller, hass_mock):
-        """With valves, register_services should start only the anomaly timer."""
+    def test_register_services_timers_with_valves(self, controller, hass_mock):
+        """With valves: the anomaly timer and the reachability watch, not monitoring."""
         from homeassistant.helpers.event import async_track_time_interval
 
         async_track_time_interval.reset_mock()
         controller.register_services()
-        # Only anomaly check, no monitoring check
-        async_track_time_interval.assert_called_once()
+        # anomaly check + reachability watch; monitoring belongs to no-valve setups
+        assert async_track_time_interval.call_count == 2
+        watched = [c.args[1].__name__ for c in async_track_time_interval.call_args_list]
+        assert "_check_reachability" in watched
+        assert "_check_and_notify" not in watched
 
     @pytest.mark.asyncio
     async def test_notify_when_deficit_above_threshold(self, hass_mock, di_sensor):
@@ -372,11 +379,13 @@ class TestMonitoringMode:
 
         await ctrl._check_and_notify()
 
-        hass_mock.services.async_call.assert_called_once()
-        call_args = hass_mock.services.async_call.call_args
-        assert call_args.args[0] == "persistent_notification"
-        assert call_args.args[1] == "create"
-        assert "25.0 mm" in call_args.args[2]["message"]
+        assert ctrl._notifier.kinds() == [NotificationKind.WATER_ME_NOW]
+        zone, _kind, context = ctrl._notifier.sent[0]
+        # No zone of its own: one notice about the installation, which has
+        # nothing to water with, rather than one per dry zone.
+        assert zone is None
+        assert "25 mm" in context["zones"], "whole millimetres, so no decimal separator to get wrong"
+        assert "Garden" in context["zones"]
 
     @pytest.mark.asyncio
     async def test_no_notify_when_deficit_below_threshold(self, hass_mock, di_sensor):
@@ -385,7 +394,7 @@ class TestMonitoringMode:
 
         await ctrl._check_and_notify()
 
-        hass_mock.services.async_call.assert_not_called()
+        assert ctrl._notifier.sent == []
 
     @pytest.mark.asyncio
     async def test_no_notify_when_deficit_zero(self, hass_mock, di_sensor):
@@ -394,7 +403,7 @@ class TestMonitoringMode:
 
         await ctrl._check_and_notify()
 
-        hass_mock.services.async_call.assert_not_called()
+        assert ctrl._notifier.sent == []
 
 
 class TestRateLimiting:
@@ -608,7 +617,8 @@ class TestManualValveDetection:
         )
         controller._on_valve_state_change(self._make_valve_event("switch.valve_orto", "on", "off"))
 
-        assert zone_orto._session_water_delivered == pytest.approx(40.0, abs=0.5)
+        assert zone_orto._last_volume_delivered == pytest.approx(40.0, abs=0.5)
+        assert zone_orto._session_water_delivered == 0.0, "the manual session ended with the close"
         assert zone_orto._total_water_delivered - total_before == pytest.approx(40.0, abs=0.5)
         assert zone_orto._yearly_water_delivered - yearly_before == pytest.approx(40.0, abs=0.5)
 
@@ -629,7 +639,7 @@ class TestManualValveDetection:
             di_sensor,
         )
         zone._zone_deficit = 12.0
-        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=_RecordingNotifier())
 
         ctrl._on_valve_state_change(self._make_valve_event("switch.valve_blind", "off", "on"))
         ts_start, deficit_pre = ctrl._manual_session_meta["switch.valve_blind"]
@@ -662,7 +672,7 @@ class TestManualValveDetection:
             di_sensor,
         )
         zone._zone_deficit = 10.0
-        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=_RecordingNotifier())
 
         # Cumulative meter stuck at the same reading: delivered = 0 L measured.
         meter_state = MagicMock(state="100.0", attributes={"unit_of_measurement": "L"})
@@ -724,7 +734,7 @@ class TestManualValveDetection:
         )
         zone._zone_deficit = 10.0  # mm
 
-        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=_RecordingNotifier())
 
         # Simulate flow meter reads: unit check, 100L at open, unit check + 110L at close
         # Unit is "L" (cumulative volume, not rate)
@@ -839,11 +849,14 @@ class TestExternalSessionMonitor:
         await controller._external_session_monitor("switch.valve_orto", "Orto")
 
         assert sleeps == [1]
+        # No explicit ``blocking``: the close now goes through the adapter, which
+        # relies on Home Assistant's own default rather than restating it. The
+        # domain and service are what matter — and they are what change for a
+        # ``valve.*`` entity.
         hass_mock.services.async_call.assert_called_with(
             "switch",
             "turn_off",
             {"entity_id": "switch.valve_orto"},
-            blocking=False,
         )
 
     @pytest.mark.asyncio
@@ -867,6 +880,44 @@ class TestExternalSessionMonitor:
 
         expected_s = int(zone_orto.volume_liters / zone_orto._flow_rate * 60)
         assert sleeps == [expected_s]
+
+
+class _RecordingNotifier:
+    """A notifier that records instead of notifying.
+
+    It registers on the call rather than inside the coroutine. Two of the three
+    sites schedule the notice with ``async_create_task``, and in a synchronous
+    test that task is created and never run, so a double that only recorded
+    once awaited would report nothing - and every test here would pass over a
+    product that had gone silent.
+    """
+
+    def __init__(self):
+        self.sent = []
+        self.cleared = []
+        self._active = set()
+
+    def notify(self, zone, kind, severity=None, context=None):
+        self.sent.append((zone, kind, dict(context or {})))
+        self._active.add((zone, kind))
+        return self._done()
+
+    def clear(self, zone, kind):
+        self.cleared.append((zone, kind))
+        self._active.discard((zone, kind))
+        return self._done()
+
+    def is_active(self, zone, kind):
+        return (zone, kind) in self._active
+
+    async def phrase(self, name):
+        return "- {zone}: deficit {deficit} mm, {liters} L ({minutes} min)"
+
+    async def _done(self):
+        return True
+
+    def kinds(self):
+        return [kind for _, kind, _ in self.sent]
 
 
 class TestBatteryMonitoring:
@@ -894,7 +945,7 @@ class TestBatteryMonitoring:
         if battery_sensor:
             zone_config["battery_sensor"] = battery_sensor
         zone = IrrigationZoneSensor(hass_mock, zone_config, di_sensor)
-        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=_RecordingNotifier())
         return ctrl, zone
 
     def test_low_battery_sends_notification(self, hass_mock, di_sensor):
@@ -902,14 +953,14 @@ class TestBatteryMonitoring:
         event = self._make_battery_event("sensor.valve_battery", 10)
         ctrl._on_battery_change(event)
 
-        assert "Garden" in ctrl._battery_alerted
+        assert ctrl._notifier.is_active("Garden", NotificationKind.BATTERY_LOW)
 
     def test_no_alert_above_threshold(self, hass_mock, di_sensor):
         ctrl, _ = self._make_controller_with_battery(hass_mock, di_sensor, battery_sensor="sensor.valve_battery")
         event = self._make_battery_event("sensor.valve_battery", 50)
         ctrl._on_battery_change(event)
 
-        assert len(ctrl._battery_alerted) == 0
+        assert ctrl._notifier.sent == []
 
     def test_alert_only_once(self, hass_mock, di_sensor):
         """Should not re-alert for same zone until battery recovers."""
@@ -919,20 +970,20 @@ class TestBatteryMonitoring:
         ctrl._on_battery_change(event)  # second time
 
         # Zone should only be in alerted set once
-        assert len(ctrl._battery_alerted) == 1
+        assert len(ctrl._notifier.sent) == 1
 
     def test_re_alerts_after_recovery(self, hass_mock, di_sensor):
         """Should re-alert if battery recovers and drops again."""
         ctrl, _ = self._make_controller_with_battery(hass_mock, di_sensor, battery_sensor="sensor.valve_battery")
         # Drop
         ctrl._on_battery_change(self._make_battery_event("sensor.valve_battery", 10))
-        assert "Garden" in ctrl._battery_alerted
+        assert ctrl._notifier.is_active("Garden", NotificationKind.BATTERY_LOW)
         # Recover
         ctrl._on_battery_change(self._make_battery_event("sensor.valve_battery", 80))
-        assert "Garden" not in ctrl._battery_alerted
+        assert not ctrl._notifier.is_active("Garden", NotificationKind.BATTERY_LOW)
         # Drop again
         ctrl._on_battery_change(self._make_battery_event("sensor.valve_battery", 12))
-        assert "Garden" in ctrl._battery_alerted
+        assert ctrl._notifier.is_active("Garden", NotificationKind.BATTERY_LOW)
 
     def test_no_battery_sensor_no_tracking(self, hass_mock, di_sensor):
         ctrl, _ = self._make_controller_with_battery(hass_mock, di_sensor)
@@ -1039,7 +1090,7 @@ class TestValveMonitoringEdgeCases:
             di_sensor,
         )
         zone._zone_deficit = 10.0
-        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=_RecordingNotifier())
 
         # Flow meter returns unavailable
         unavail = MagicMock()
@@ -1078,7 +1129,7 @@ class TestValveMonitoringEdgeCases:
             di_sensor,
         )
         zone._zone_deficit = 10.0
-        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=_RecordingNotifier())
 
         meter_open = MagicMock(state="100.0", attributes={"unit_of_measurement": "L"})
         meter_close = MagicMock(state="120.0", attributes={"unit_of_measurement": "L"})
@@ -1132,7 +1183,7 @@ class TestDeficitAnomaly:
             di_sensor,
         )
         zone._zone_deficit = zone_deficit
-        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=_RecordingNotifier())
         return ctrl, zone
 
     @pytest.mark.asyncio
@@ -1141,11 +1192,9 @@ class TestDeficitAnomaly:
         ctrl, _ = self._make_controller(hass_mock, di_sensor, zone_deficit=35.0, threshold=15.0)
         await ctrl._check_deficit_anomaly()
 
-        hass_mock.services.async_call.assert_called_once()
-        call_args = hass_mock.services.async_call.call_args
-        assert call_args.args[0] == "persistent_notification"
-        assert "35.0 mm" in call_args.args[2]["message"]
-        assert "Garden" in ctrl._deficit_anomaly_alerted
+        assert ctrl._notifier.kinds() == [NotificationKind.DEFICIT_ANOMALY]
+        assert ctrl._notifier.sent[0][2]["deficit"] == "35", "whole millimetres, like the limit beside it"
+        assert ctrl._notifier.is_active("Garden", NotificationKind.DEFICIT_ANOMALY)
 
     @pytest.mark.asyncio
     async def test_no_alert_below_2x_threshold(self, hass_mock, di_sensor):
@@ -1153,7 +1202,7 @@ class TestDeficitAnomaly:
         ctrl, _ = self._make_controller(hass_mock, di_sensor, zone_deficit=25.0, threshold=15.0)
         await ctrl._check_deficit_anomaly()
 
-        hass_mock.services.async_call.assert_not_called()
+        assert ctrl._notifier.sent == []
 
     @pytest.mark.asyncio
     async def test_alert_only_once(self, hass_mock, di_sensor):
@@ -1162,24 +1211,24 @@ class TestDeficitAnomaly:
         await ctrl._check_deficit_anomaly()
         await ctrl._check_deficit_anomaly()
 
-        assert hass_mock.services.async_call.call_count == 1
+        assert len(ctrl._notifier.sent) == 1
 
     @pytest.mark.asyncio
     async def test_re_alerts_after_recovery(self, hass_mock, di_sensor):
         """Should re-alert if deficit drops and rises again."""
         ctrl, zone = self._make_controller(hass_mock, di_sensor, zone_deficit=40.0, threshold=15.0)
         await ctrl._check_deficit_anomaly()
-        assert "Garden" in ctrl._deficit_anomaly_alerted
+        assert ctrl._notifier.is_active("Garden", NotificationKind.DEFICIT_ANOMALY)
 
         # Deficit recovers
         zone._zone_deficit = 10.0
         await ctrl._check_deficit_anomaly()
-        assert "Garden" not in ctrl._deficit_anomaly_alerted
+        assert not ctrl._notifier.is_active("Garden", NotificationKind.DEFICIT_ANOMALY)
 
         # Deficit rises again
         zone._zone_deficit = 35.0
         await ctrl._check_deficit_anomaly()
-        assert hass_mock.services.async_call.call_count == 2
+        assert len(ctrl._notifier.sent) == 2
 
     @pytest.mark.asyncio
     async def test_exactly_at_2x_threshold_alerts(self, hass_mock, di_sensor):
@@ -1187,7 +1236,7 @@ class TestDeficitAnomaly:
         ctrl, _ = self._make_controller(hass_mock, di_sensor, zone_deficit=30.0, threshold=15.0)
         await ctrl._check_deficit_anomaly()
 
-        assert "Garden" in ctrl._deficit_anomaly_alerted
+        assert ctrl._notifier.is_active("Garden", NotificationKind.DEFICIT_ANOMALY)
 
 
 class TestBatteryMonitoringEdgeCases:
@@ -1216,28 +1265,28 @@ class TestBatteryMonitoringEdgeCases:
             },
             di_sensor,
         )
-        return IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        return IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=_RecordingNotifier())
 
     def test_non_numeric_battery_state(self, hass_mock, di_sensor):
         """Non-numeric battery state should not crash."""
         ctrl = self._make_controller_with_battery(hass_mock, di_sensor)
         event = self._make_battery_event("sensor.valve_battery", "unavailable")
         ctrl._on_battery_change(event)  # should not raise
-        assert len(ctrl._battery_alerted) == 0
+        assert ctrl._notifier.sent == []
 
     def test_exactly_at_threshold_alerts(self, hass_mock, di_sensor):
         """Battery exactly at 15% should trigger alert."""
         ctrl = self._make_controller_with_battery(hass_mock, di_sensor)
         event = self._make_battery_event("sensor.valve_battery", 15)
         ctrl._on_battery_change(event)
-        assert "Garden" in ctrl._battery_alerted
+        assert ctrl._notifier.is_active("Garden", NotificationKind.BATTERY_LOW)
 
     def test_unknown_battery_entity_ignored(self, hass_mock, di_sensor):
         """Battery event for unknown entity should be ignored."""
         ctrl = self._make_controller_with_battery(hass_mock, di_sensor)
         event = self._make_battery_event("sensor.unknown_battery", 5)
         ctrl._on_battery_change(event)
-        assert len(ctrl._battery_alerted) == 0
+        assert ctrl._notifier.sent == []
 
     def test_none_new_state_ignored(self, hass_mock, di_sensor):
         """Battery event with new_state=None should be silently ignored."""
@@ -1245,7 +1294,7 @@ class TestBatteryMonitoringEdgeCases:
         event = MagicMock()
         event.data = {"entity_id": "sensor.valve_battery", "new_state": None}
         ctrl._on_battery_change(event)
-        assert len(ctrl._battery_alerted) == 0
+        assert ctrl._notifier.sent == []
 
 
 class TestMarkIrrigatedFeedback:

@@ -84,3 +84,16 @@ jobs:
           # pre-release: HACS only offers them to users who enabled beta
           # versions, everyone else stays on the latest stable release.
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+      - name: Keep only the newest pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # HACS offers every published release, so each beta adds a line to the
+          # list a tester scrolls through and that list only ever grows. Runs
+          # after the release above, so a failure here leaves the release
+          # published: tidying the shelf must never cost the thing being shelved.
+          python3 scripts/prune_prereleases.py \
+            --repo "${{ github.repository }}" \
+            --current-tag "${{ github.ref_name }}" \
+            --apply

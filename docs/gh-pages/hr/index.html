@@ -119,57 +119,63 @@
 
 <section class="features">
     <div class="container">
-        <h2>Mogu&cacute;nosti</h2>
+        <h2>&Scaron;to NeverDry radi za vas</h2>
+        <p class="vision-lead" style="text-align: center; max-width: 46em; margin: 0 auto 1.6em; font-size: 1.1em; line-height: 1.5;">Dobro zalijevanje zahtijeva agronomiju, hidrauliku i malo elektrotehnike. NeverDry sve to preuzima umjesto vas i pita samo ono &scaron;to mo&zcaron;ete vidjeti: va&scaron;e biljke, va&scaron;e ventile, va&scaron; vrt.</p>
         <div class="feature-grid">
             <div class="feature-card">
                 <div class="icon">🌡️</div>
-                <h3>Znanstveni ET Model</h3>
-                <p>Pojednostavljena FAO-56 vodna bilanca. Procjenjuje evapotranspiraciju iz temperature s dva podesiva parametra.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🌱</div>
-                <h3>10 Biljnih Obitelji</h3>
-                <p>Koeficijent usjeva (Kc) po zoni sa sezonskom varijacijom. Travnjak, povr&cacute;e, sukulenti, vo&cacute;ke i vi&scaron;e. Automatska prilagodba hemisferi.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🚿</div>
-                <h3>Izravno Upravljanje Ventilima</h3>
-                <p>Automatski otvara i zatvara ventile. Sekvencijalno navodnjavanje vi&scaron;e zona s hitnim zaustavljanjem.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">📊</div>
-                <h3>Deficit po Zoni</h3>
-                <p>Svaka zona prati vlastiti deficit vode u tlu. Razli&ccaron;ite biljke se su&scaron;e razli&ccaron;itom brzinom - kako i treba.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🌧️</div>
-                <h3>Osjetljiv na Ki&scaron;u</h3>
-                <p>Automatski preska&ccaron;e navodnjavanje na ki&scaron;ne dane. Deficit se smanjuje sa svakim ki&scaron;nim događajem.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">⚙️</div>
-                <h3>Konfiguracija putem Su&ccaron;elja</h3>
-                <p>Potpuna konfiguracija iz Home Assistant su&ccaron;elja. Nije potrebno uređivanje YAML datoteka.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🔄</div>
-                <h3>Be&scaron;avna A&zcaron;uriranja</h3>
-                <p>Automatizirana izdanja putem GitHub Actions. Migracija konfiguracije &ccaron;uva va&scaron;e postavke između verzija. A&zcaron;uriranje jednim klikom u HACS-u.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🖐️</div>
-                <h3>Ru&ccaron;ni ventil prepoznat</h3>
-                <p>Otvorite ventil fizi&ccaron;kim gumbom, Zigbee aplikacijom ili iz HA - NeverDry prati sesiju, a&zcaron;urira deficit i automatski zatvara pri manjem od potrebne vode i sigurnosnog timeouta.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">💧</div>
-                <h3>Svi okida&ccaron;i pokriveni</h3>
-                <p>Navodnjavanje iz rasporeda, Lovelace gumba, automatizacija, gumba na ventilu, ili zabilje&zcaron;ite &laquo;zalio sam crijevom&raquo; - NeverDry odr&zcaron;ava deficit to&ccaron;nim u sva &ccaron;etiri slu&ccaron;aja.</p>
+                <h3>Zna kada je va&scaron; vrt &#382;edan</h3>
+                <p>Prati isparavanje i oborine iz dana u dan. Kada deficit vode u tlu prije&#273;e va&scaron; prag, NeverDry otvara ventil to&#269;no onoliko dugo koliko je potrebno - bez fiksnih tajmera, bez naga&#273;anja.</p>
             </div>
             <div class="feature-card">
                 <div class="icon">🛡️</div>
-                <h3>Vi&scaron;eslojna sigurnost</h3>
-                <p>Tri neovisna sigurnosna sloja sprje&ccaron;avaju trajno otvoreni ventil: softverski watchdog (asyncio zadatak), hardversko blokiranje (Zigbee entitet ili MQTT) i vremensko ograni&ccaron;enje isporuke. Ako jedan sloj zakaže, sljede&cacute;i preuzima.</p>
+                <h3>Ventil se uvijek zatvori</h3>
+                <p>Ako ventil prestane odgovarati, NeverDry nastavlja poku&scaron;avati - &scaron;est poku&scaron;aja, sa sve duljom stankom izme&#273;u njih - i tek tada blokira tu zonu i prikazuje upozorenje na va&scaron;oj nadzornoj plo&#269;i. Tri neovisna sigurnosna mehanizma osiguravaju da voda ne te&#269;e beskona&#269;no.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌱</div>
+                <h3>Svaka biljka ima svoj raspored</h3>
+                <p>Travnjak, ru&#382;e, agrumi, sukulenti - 10 profila biljaka sa sezonskim promjenama. Va&scaron; travnjak u srpnju pije vi&scaron;e nego &scaron;to &#263;e va&scaron;a lavanda ikada popiti. NeverDry to automatski uzima u obzir.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📊</div>
+                <h3>Zone su neovisne</h3>
+                <p>Gredica s ru&#382;ama i travnjak su&scaron;e se razli&#269;itom brzinom. Svaka zona vodi vlastiti deficit vode u tlu - nema vi&scaron;e jednog rasporeda za sve.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌧️</div>
+                <h3>Presko&#269;i zalijevanje nakon ki&scaron;e</h3>
+                <p>NeverDry to&#269;no bilje&#382;i koliko je ki&scaron;e palo i automatski to oduzima od deficita. Nema vi&scaron;e zalijevanja dan nakon oluje.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🖐️</div>
+                <h3>Uzeli ste crijevo? Samo javite NeverDryju</h3>
+                <p>Otvorite ventil ru&#269;no, upotrijebite fizi&#269;ku tipku ili zalijte crijevom - "Mark irrigated" odr&#382;ava deficit to&#269;nim, bez obzira na to kako ste zalijevali.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">💧</div>
+                <h3>Zalijevajte s bilo kojeg mjesta</h3>
+                <p>Tipka na nadzornoj plo&#269;i, automatizacija, raspored, fizi&#269;ki ventil - NeverDry uvijek bilje&#382;i &scaron;to se dogodilo i u skladu s tim a&#382;urira deficit.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">⚙️</div>
+                <h3>Postavljanje iz su&#269;elja</h3>
+                <p>Bez YAML datoteka. Zone, biljke, ventile i pragove postavljate izravno u su&#269;elju Home Assistanta.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🔄</div>
+                <h3>A&#382;uriranje jednim klikom</h3>
+                <p>HACS vas obavijesti kada je dostupna nova verzija. Jedan klik, ponovno pokretanje HA-a - va&scaron;e postavke i povijest uvijek ostaju sa&#269;uvani.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📡</div>
+                <h3>Radi i bez ventila</h3>
+                <p>Nemate hardver? NeverDry vam &scaron;alje obavijest kada treba zalijevati i koliko. Na&#269;in nadzora bez ikakvog hardvera.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌍</div>
+                <h3>Metri&#269;ki i imperijalni sustav</h3>
+                <p>Svi senzori navode ispravnu klasu ure&#273;aja Home Assistanta - deficit u mm ili in&#269;ima, volumeni u litrama ili galonima, protok u L/h ili gal/h. Jedinice automatski slijede postavke va&scaron;eg HA-a.</p>
             </div>
         </div>
     </div>
@@ -253,6 +259,16 @@
     </div>
 </section>
 
+<!-- Get Help -->
+<section class="support" style="background: #f8f8f8;">
+    <h2>Pomo&#263;</h2>
+    <p style="margin-bottom: 1.5em;">Pitanja o postavljanju ili radu? Pridru&#382;ite se razgovoru.</p>
+    <div style="display: flex; gap: 1em; justify-content: center; flex-wrap: wrap;">
+        <a class="kofi-btn" style="background: #24292e;" href="https://github.com/never-dry/NeverDry/issues">🐛 GitHub Issues</a>
+        <a class="kofi-btn" style="background: #03a9f4;" href="https://community.home-assistant.io/t/neverdry-smart-irrigation-that-calculates-when-and-how-long-to-water-fao-56-water-balance-hacs/1013835">💬 HA Community</a>
+    </div>
+</section>
+
 <!-- The companion project -->
 <section class="how-it-works" style="background: #fff;">
     <div class="container" style="max-width: 760px;">
@@ -300,7 +316,7 @@
     </div>
 </section>
 
-<section style="background: var(--accent-light); padding: 16px 20px; text-align: center; font-size: 0.85em; color: #555;">
+<section data-translation-notice style="background: var(--accent-light); padding: 16px 20px; text-align: center; font-size: 0.85em; color: #555;">
     <div class="container">
         Ovaj prijevod je izra&dstrok;en automatski. Svaki doprinos za pobolj&scaron;anje je dobrodo&scaron;ao -
         <a href="https://github.com/never-dry/NeverDry/issues" style="color: var(--accent);">otvori issue</a> ili po&scaron;alji pull request.

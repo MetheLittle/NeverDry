@@ -53,6 +53,10 @@ def _create_ha_stubs():
     class SensorDeviceClass:
         AREA = "area"
         DURATION = "duration"
+        # Enum sensors carry an identifier as their state and let the frontend
+        # translate it. Present in Home Assistant since 2022.10; the stub has to
+        # mirror it or the entity that reports the active model cannot load.
+        ENUM = "enum"
         PRECIPITATION = "precipitation"
         PRECIPITATION_INTENSITY = "precipitation_intensity"
         TIMESTAMP = "timestamp"
@@ -72,8 +76,24 @@ def _create_ha_stubs():
     # homeassistant.helpers.event
     event_mod = ModuleType("homeassistant.helpers.event")
     event_mod.async_track_state_change_event = MagicMock()
+    event_mod.async_track_state_report_event = MagicMock()
     event_mod.async_track_time_change = MagicMock()
     event_mod.async_track_time_interval = MagicMock()
+
+    # homeassistant.helpers.translation
+    # Returns the English catalogue read straight from strings.json, so a test that exercises
+    # a notification asserts the text a user would actually be shown rather than a mock.
+    translation_mod = ModuleType("homeassistant.helpers.translation")
+
+    async def _async_get_translations(hass, language, category, integrations=None):
+        import json
+        from pathlib import Path as _Path
+
+        strings = _Path(__file__).resolve().parent.parent / "custom_components" / "never_dry" / "strings.json"
+        section = json.loads(strings.read_text(encoding="utf-8")).get(category, {})
+        return {f"component.never_dry.{category}.{key}": value for key, value in section.items()}
+
+    translation_mod.async_get_translations = _async_get_translations
 
     # homeassistant.helpers.restore_state
     restore_mod = ModuleType("homeassistant.helpers.restore_state")
@@ -126,6 +146,12 @@ def _create_ha_stubs():
             "async_press": lambda self: None,
         },
     )
+
+    # homeassistant.components.repairs — the guided fix flows. Stubbed as a bare
+    # base class: what the integration puts in it is ours and testable, what
+    # Home Assistant does with it is not.
+    repairs_mod = ModuleType("homeassistant.components.repairs")
+    repairs_mod.RepairsFlow = type("RepairsFlow", (), {})
 
     # homeassistant.components.recorder
     recorder_mod = ModuleType("homeassistant.components.recorder")
@@ -225,6 +251,7 @@ def _create_ha_stubs():
         "homeassistant.data_entry_flow": data_entry_flow_mod,
         "homeassistant.components": ModuleType("homeassistant.components"),
         "homeassistant.components.button": button_mod,
+        "homeassistant.components.repairs": repairs_mod,
         "homeassistant.components.sensor": sensor_mod,
         "homeassistant.config_entries": config_entries_mod,
         "homeassistant.const": const_mod,
@@ -235,6 +262,7 @@ def _create_ha_stubs():
         "homeassistant.helpers.entity_platform": entity_platform_mod,
         "homeassistant.helpers.entity_registry": entity_registry_mod,
         "homeassistant.helpers.event": event_mod,
+        "homeassistant.helpers.translation": translation_mod,
         "homeassistant.helpers.restore_state": restore_mod,
         "homeassistant.helpers.device_registry": device_registry_mod,
         "homeassistant.helpers.storage": storage_mod,

@@ -14,10 +14,11 @@ import contextlib
 import logging
 import math
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from time import monotonic
+from typing import ClassVar
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -43,22 +44,30 @@ from homeassistant.helpers.typing import ConfigType
 from . import flow_utils
 from .const import (
     CONF_ALPHA,
+    CONF_ANEMOMETER_HEIGHT,
     CONF_BACKFILL_DAYS,
     CONF_D_MAX,
+    CONF_ET_METHOD,
     CONF_FIELD_CAPACITY,
+    CONF_HUMIDITY_SENSOR,
     CONF_INTER_ZONE_DELAY,
+    CONF_NET_RADIATION_SENSOR,
     CONF_RAIN_SENSOR,
     CONF_RAIN_SENSOR_TYPE,
     CONF_ROOT_DEPTH,
     CONF_T_BASE,
+    CONF_TEMP_MAX_SENSOR,
+    CONF_TEMP_MIN_SENSOR,
     CONF_TEMP_SENSOR,
     CONF_VWC_SENSOR,
+    CONF_WIND_SPEED_SENSOR,
     CONF_ZONE_AREA,
     CONF_ZONE_BATTERY_SENSOR,
     CONF_ZONE_DELIVERY_MODE,
     CONF_ZONE_DELIVERY_TIMEOUT,
     CONF_ZONE_EFFICIENCY,
     CONF_ZONE_EXPOSURE,
+    CONF_ZONE_FIELD_CAPACITY,
     CONF_ZONE_FLOW_METER_SENSOR,
     CONF_ZONE_FLOW_RATE,
     CONF_ZONE_HW_MAX_DURATION_PAYLOAD,
@@ -69,23 +78,30 @@ from .const import (
     CONF_ZONE_MICROCLIMATE_FACTOR,
     CONF_ZONE_NAME,
     CONF_ZONE_PLANT_FAMILY,
+    CONF_ZONE_ROOT_DEPTH,
+    CONF_ZONE_SOIL_TYPE,
     CONF_ZONE_SYSTEM_TYPE,
     CONF_ZONE_THRESHOLD,
     CONF_ZONE_VALVE,
     CONF_ZONE_VOLUME_ENTITY,
+    CONF_ZONE_VWC_SENSOR,
+    CONF_ZONE_WILTING_POINT,
     CONF_ZONES,
     DEFAULT_ALPHA,
+    DEFAULT_ANEMOMETER_HEIGHT_M,
     DEFAULT_BACKFILL_DAYS,
     DEFAULT_D_MAX,
     DEFAULT_DELIVERY_MODE,
     DEFAULT_DELIVERY_TIMEOUT_S,
     DEFAULT_EFFICIENCY,
+    DEFAULT_ET_METHOD,
     DEFAULT_FIELD_CAPACITY,
     DEFAULT_INTER_ZONE_DELAY,
     DEFAULT_KC,
     DEFAULT_MICROCLIMATE_FACTOR,
     DEFAULT_RAIN_SENSOR_TYPE,
     DEFAULT_ROOT_DEPTH,
+    DEFAULT_SOIL_TYPE,
     DEFAULT_T_BASE,
     DEFAULT_THRESHOLD,
     DELIVERY_DURATION_MARGIN,
@@ -94,23 +110,52 @@ from .const import (
     DOMAIN,
     ET_BUFFER_MIN_READINGS,
     ET_BUFFER_SIZE,
+    ET_METHOD_AUTO,
     ET_TEMP_VALID_RANGE,
     EXPOSURES,
     KC_ANCHOR_DAYS,
     MICROCLIMATE_FACTOR_MAX,
     MICROCLIMATE_FACTOR_MIN,
     PLANT_FAMILIES,
+    PROBE_CADENCE_MEMORY_S,
+    PROBE_STALE_BACKSTOP_S,
     RAIN_TYPE_EVENT,
     SAFETY_LAYER_SPREAD,
+    SOIL_TYPES,
     SYSTEM_TYPES,
     UNUSUAL_FLOW_MAX_LPM,
     VALVE_STARTUP_GRACE_S,
 )
 from .controller import IrrigationController
+from .environment import DEFAULT_LATITUDE, Environment, QuietWatermark, RainSensorType
 from .services import async_setup_services
-from .unit_convert import LPM_TO_GPH, LPM_TO_LPH
+from .session_flow import MIN_PUBLICATION_SAMPLES
+from .unit_convert import LITERS_TO_GALLONS, LPM_TO_GPH, LPM_TO_LPH
 from .valve_fsm import FailureKind, ValveState
-from .water_balance_model import vwc_to_fraction
+from .water_balance_model import (
+    MODEL_CATALOGUE,
+    RUNNABLE_INPUTS,
+    W_M2_TO_MJ_DAY,
+    DailySolarEnergy,
+    DiurnalRange,
+    ETModel,
+    ETStep,
+    HargreavesModel,
+    HargreavesStep,
+    ModelInput,
+    PenmanMonteithModel,
+    PenmanStep,
+    ReferenceFrame,
+    VWCPerZoneModel,
+    VWCReading,
+    WaterBalanceModel,
+    build_model,
+    net_radiation_mj,
+    probe_percent_to_fraction,
+    solar_radiation_from_range,
+    vwc_to_fraction,
+    wind_at_2m,
+)
 from .zone import Zone as DomainZone
 
 _LOGGER = logging.getLogger(__name__)
@@ -186,6 +231,62 @@ class SensorBuffer:
 
     def __len__(self) -> int:
         return len(self._buf)
+
+
+def _read_float(hass, entity_id: str | None) -> float | None:
+    """A numeric reading from ``entity_id``, or ``None`` when there is not one.
+
+    Unavailable, unknown, missing and non-numeric all answer the same way on
+    purpose: the caller has to decide what to do without a reading, and merging
+    the cases stops that decision being made four times.
+    """
+    if not entity_id:
+        return None
+    state = hass.states.get(entity_id)
+    if state is None or state.state in ("unavailable", "unknown"):
+        return None
+    try:
+        value = float(state.state)
+    except (ValueError, TypeError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _wind_to_m_s(hass, entity_id: str | None, value: float) -> float:
+    """Wind speed in m/s, converting from whatever unit the entity declares.
+
+    Read from the entity rather than assumed: consumer stations report km/h,
+    Home Assistant may convert to mph in an imperial system, and the equation
+    wants m/s. A factor of 3.6 applied in the wrong direction is not a rounding
+    error, it is a different climate.
+    """
+    state = hass.states.get(entity_id) if entity_id else None
+    unit = (state.attributes.get("unit_of_measurement") if state else None) or "m/s"
+    unit = str(unit).lower()
+    if unit in ("km/h", "kph"):
+        return value / 3.6
+    if unit in ("mph", "mi/h"):
+        return value * 0.44704
+    if unit in ("kn", "kt", "knot", "knots"):
+        return value * 0.514444
+    return value
+
+
+def _read_solar_mj(hass, entity_id: str | None) -> float | None:
+    """Solar radiation as MJ/m2/day, or ``None`` when unreadable.
+
+    A pyranometer reports an instantaneous flux in W/m2 while the equations work
+    in daily energy, so the reading is converted rather than compared. An entity
+    already publishing MJ/m2/day is passed through.
+    """
+    value = _read_float(hass, entity_id)
+    if value is None:
+        return None
+    state = hass.states.get(entity_id)
+    unit = str((state.attributes.get("unit_of_measurement") if state else None) or "W/m²").lower()
+    if "mj" in unit:
+        return value
+    return value * W_M2_TO_MJ_DAY
 
 
 def _to_celsius(state) -> float | None:
@@ -354,6 +455,26 @@ def _hub_device_info(entry_id: str) -> DeviceInfo:
     )
 
 
+#: Which derived quantities are worth an entity, per running method. Only the
+#: ones that method actually computes: an entity stuck at unknown teaches the
+#: user to ignore the whole diagnostic group.
+_MODEL_INPUT_ENTITIES: dict[str, tuple[tuple[str, str, str], ...]] = {
+    "hargreaves": (
+        ("derived_diurnal_range_c", "°C", "mdi:thermometer-lines"),
+        ("derived_temp_max_c", "°C", "mdi:thermometer-high"),
+        ("derived_temp_min_c", "°C", "mdi:thermometer-low"),
+    ),
+    "penman_monteith": (
+        ("derived_diurnal_range_c", "°C", "mdi:thermometer-lines"),
+        ("derived_temp_max_c", "°C", "mdi:thermometer-high"),
+        ("derived_temp_min_c", "°C", "mdi:thermometer-low"),
+        ("derived_solar_mj", "MJ/m²", "mdi:white-balance-sunny"),
+        ("derived_net_radiation_mj", "MJ/m²", "mdi:sun-angle"),
+        ("derived_wind_2m_m_s", "m/s", "mdi:weather-windy"),
+    ),
+}
+
+
 def _zone_device_info(entry_id: str, zone_name: str) -> DeviceInfo:
     """Device info for a zone (sensor + buttons grouped together)."""
     slug = zone_name.lower().replace(" ", "_")
@@ -376,9 +497,14 @@ def _create_entities(
     # In VWC mode the ET model is bypassed entirely — an "ET Hourly
     # Estimate" entity that keeps updating from temperature reads as if
     # the model were still active (tester report, 2026-07-18).
-    if not config.get(CONF_VWC_SENSOR):
-        entities.append(ETSensor(hass, config, hub_device))
+    if di_sensor.reference_frame is ReferenceFrame.ET:
+        entities.append(ETSensor(hass, config, hub_device, hub=di_sensor))
     entities.append(di_sensor)
+    entities.append(WaterBalanceMethodSensor(di_sensor, hub_device))
+    # The derived quantities, as entities so they get history: the way to judge
+    # a computed radiation is to watch it follow the weather for a week.
+    for key, unit, icon in _MODEL_INPUT_ENTITIES.get(type(di_sensor._model).method_id, ()):
+        entities.append(ModelInputSensor(di_sensor, key, unit, icon, device_info=hub_device))
 
     zone_sensors: list[IrrigationZoneSensor] = []
     for zone_conf in config.get(CONF_ZONES, []):
@@ -395,6 +521,8 @@ def _create_entities(
         entities.append(ZoneLastSourceSensor(zone_sensor, zone_device))
         entities.append(ZoneLastVolumeSensor(zone_sensor, zone_device))
         entities.append(ZoneFlowRateSensor(zone_sensor, zone_device))
+        entities.append(ZoneMeasuredFlowSensor(zone_sensor, zone_device))
+        entities.append(ZoneMeterResolutionSensor(zone_sensor, zone_device))
         entities.append(ZoneDurationSensor(zone_sensor, zone_device))
         entities.append(ZoneLastDurationSensor(zone_sensor, zone_device))
         entities.append(ZoneKcSensor(zone_sensor, zone_device))
@@ -411,7 +539,7 @@ def _create_entities(
                 ZoneLinkedSensor(
                     hass,
                     zone_conf[CONF_ZONE_VALVE],
-                    "Valve",
+                    "linked_valve",
                     "mdi:valve",
                     f"linked_valve_{slug}",
                     zone_device,
@@ -422,7 +550,7 @@ def _create_entities(
                 ZoneLinkedSensor(
                     hass,
                     zone_conf[CONF_ZONE_BATTERY_SENSOR],
-                    "Battery",
+                    "linked_battery",
                     "mdi:battery",
                     f"linked_battery_{slug}",
                     zone_device,
@@ -433,7 +561,7 @@ def _create_entities(
                 ZoneLinkedSensor(
                     hass,
                     zone_conf[CONF_ZONE_FLOW_METER_SENSOR],
-                    "Flow meter",
+                    "linked_water_meter",
                     "mdi:gauge",
                     f"linked_flow_{slug}",
                     zone_device,
@@ -448,54 +576,42 @@ def _create_entities(
     for entity in entities:
         entity._attr_unique_id = f"{entry_id}_{entity._attr_unique_id}"
 
+    _drop_stale_model_inputs(hass, entry_id, entities)
+
     return entities, di_sensor, zone_sensors
 
 
-_HW_DURATION_KEYWORDS = frozenset({"max", "duration", "time", "irrigation", "timer", "delay"})
-_HW_MINUTE_KEYWORDS = frozenset({"min", "minute", "minutes"})
+def _drop_stale_model_inputs(hass: HomeAssistant, entry_id: str, entities: list) -> None:
+    """Forget the derived entities the current method does not produce.
 
+    Which derived quantities exist depends on the method, so changing method
+    changes the set. Home Assistant keeps an entity that stops being created: it
+    survives in the registry and shows as unavailable for ever. Six dead rows in
+    the diagnostic group is exactly the noise that teaches people to stop
+    reading it — the problem this set was narrowed to avoid, moved one step
+    along.
 
-def _discover_hw_max_duration(
-    hass: HomeAssistant,
-    switch_entity_id: str,
-) -> tuple[str | None, float]:
-    """Look for a hardware max-duration ``number`` entity on the same HA device.
-
-    Searches the entity registry for ``number.*`` entities sharing the same
-    device as ``switch_entity_id`` whose name contains irrigation/duration
-    keywords. Returns ``(entity_id, multiplier)`` where multiplier converts
-    seconds to the entity's native unit (1.0 for seconds, 1/60 for minutes),
-    or ``(None, 1.0)`` when nothing suitable is found.
+    Only ``model_input_*`` ids are touched, and only for this entry. Everything
+    else in the registry is somebody else's business, and a zone sensor removed
+    by accident would take its history with it.
     """
-    from homeassistant.helpers import entity_registry as er
-    from homeassistant.helpers.entity_registry import async_entries_for_device
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:  # pragma: no cover - Home Assistant is always present in production
+        return
 
-    ent_reg = er.async_get(hass)
-    switch_entry = ent_reg.async_get(switch_entity_id)
-    if switch_entry is None or switch_entry.device_id is None:
-        return None, 1.0
-
-    device_id = switch_entry.device_id
-    candidates = [
-        entry
-        for entry in async_entries_for_device(ent_reg, device_id, include_disabled_entities=False)
-        if entry.domain == "number"
-        and any(kw in (entry.entity_id + " " + (entry.original_name or "")).lower() for kw in _HW_DURATION_KEYWORDS)
-    ]
-    if not candidates:
-        return None, 1.0
-
-    best = candidates[0]
-    state = hass.states.get(best.entity_id)
-    unit = (state.attributes.get("unit_of_measurement", "") if state else "").lower()
-    multiplier = 1.0 / 60.0 if any(kw in unit for kw in _HW_MINUTE_KEYWORDS) else 1.0
-    _LOGGER.debug(
-        "Valve '%s' hw_max_duration entity discovered: %s (multiplier=%.4f)",
-        switch_entity_id,
-        best.entity_id,
-        multiplier,
-    )
-    return best.entity_id, multiplier
+    registry = er.async_get(hass)
+    wanted = {entity._attr_unique_id for entity in entities}
+    marker = f"{entry_id}_model_input_"
+    for entry in list(registry.entities.values()):
+        if entry.config_entry_id != entry_id or not str(entry.unique_id).startswith(marker):
+            continue
+        if entry.unique_id not in wanted:
+            _LOGGER.info(
+                "Removing %s: the running water-balance method no longer computes it",
+                entry.entity_id,
+            )
+            registry.async_remove(entry.entity_id)
 
 
 def _setup_controller(
@@ -506,13 +622,13 @@ def _setup_controller(
 ) -> IrrigationController:
     """Create the irrigation controller and register all services.
 
-    Also builds one :class:`ValveOperator` per zone with a valve and a
+    Also builds one :class:`~.driver.ZoneDriver` per zone with a valve and a
     shared :class:`ValveNotifier`. Smart valves controlled in
-    ``volume_preset`` mode bypass the operator: their entry is omitted
+    ``volume_preset`` mode bypass the driver: their entry is omitted
     from the dict.
     """
+    from .driver import ZoneDriver
     from .valve_notifier import ValveNotifier  # local import: optional path
-    from .valve_operator import ValveOperator
 
     inter_zone_delay = config.get(CONF_INTER_ZONE_DELAY, DEFAULT_INTER_ZONE_DELAY)
 
@@ -524,19 +640,28 @@ def _setup_controller(
         # volume_preset relies on smart-valve self-control; bypass operator.
         if getattr(zs, "delivery_mode", None) == "volume_preset":
             continue
-        hw_entity, hw_mult = _discover_hw_max_duration(hass, zs.valve)
-        op = ValveOperator(
-            hass=hass,
-            switch_entity_id=zs.valve,
-            flow_sensor_entity_id=zs.flow_meter_sensor,
-            zone_name=zs.zone_name,
+        # The delivery loop still lives in the controller, so no delivery
+        # arguments are passed here: this seam is the command layer only —
+        # open, close, and the state the two produce.
+        op = ZoneDriver(
+            hass,
+            zs.valve,
+            flow_meter_sensor=zs.flow_meter_sensor,
+            # The design rate, even though the delivery loop still lives in the
+            # controller: the driver needs it to size the flow-verification
+            # window (resolution / flow rate — GH #173). Without it that window
+            # falls back to a blanket constant, which is the defect being fixed.
+            flow_rate_lpm=zs._flow_rate,
+            name=zs.zone_name,
             notifier=notifier,
             # Callable, not snapshot: re-evaluated at every valve open so the
             # watchdog and hardware timer scale with the current deficit.
             max_open_duration_s=lambda zs=zs: zs.watchdog_timeout,
             hw_max_duration_s=lambda zs=zs: zs.hw_max_duration_s,
-            hw_max_duration_entity=hw_entity,
-            hw_max_duration_multiplier=hw_mult,
+            # No hw_max_duration_entity: a ``number`` picked on the valve's device
+            # by name keywords could be any setting, and writing it at every open
+            # changes hardware the user never pointed us at. Only the explicitly
+            # configured MQTT topic below writes the on-device timer.
             hw_max_duration_topic=zs.hw_max_duration_topic,
             hw_max_duration_payload_template=zs.hw_max_duration_payload,
         )
@@ -597,13 +722,21 @@ async def async_setup_entry(
 
 
 class ETSensor(SensorEntity):
-    """Instantaneous evapotranspiration estimate [mm/h].
+    """The reference evapotranspiration rate [mm/h] the running model produces.
 
-    Uses a simplified linear model: ET_h = max(0, alpha * (T - T_base) / 24)
+    It used to compute the simple temperature formula itself, which was true
+    while that was the only model. With four of them it became a second opinion:
+    the entity published 0.24 mm/h while the model integrating the deficit was
+    producing 0.22 — a number nobody was using, sitting on the device next to the
+    ones that mattered.
+
+    So it mirrors the hub rather than calculating. This is the same rate every
+    zone scales by its Kc, which is what makes it the honest thing to publish
+    under this name.
     """
 
     _attr_has_entity_name = True
-    _attr_name = "ET Hourly Estimate"
+    _attr_translation_key = "et_hourly_estimate"
     _attr_unique_id = "et_hourly_estimate"
     _attr_device_class = SensorDeviceClass.PRECIPITATION_INTENSITY
     _attr_native_unit_of_measurement = UnitOfVolumetricFlux.MILLIMETERS_PER_HOUR
@@ -613,8 +746,20 @@ class ETSensor(SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:sun-thermometer"
 
-    def __init__(self, hass: HomeAssistant, config: ConfigType, device_info: DeviceInfo | None = None) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config: ConfigType,
+        device_info: DeviceInfo | None = None,
+        hub: DrynessIndexSensor | None = None,
+    ) -> None:
+        """Mirror ``hub``'s rate; without one, fall back to computing the simple formula.
+
+        The fallback exists for the tests that build this entity alone. In the
+        integration a hub is always passed.
+        """
         self._hass = hass
+        self._hub = hub
         self._temp_sensor = config[CONF_TEMP_SENSOR]
         self._alpha = config.get(CONF_ALPHA, DEFAULT_ALPHA)
         self._t_base = config.get(CONF_T_BASE, DEFAULT_T_BASE)
@@ -637,12 +782,20 @@ class ETSensor(SensorEntity):
             return
         t = _to_celsius(new_state)
         if t is not None:
-            self._value = max(0.0, self._alpha * (t - self._t_base) / 24)
+            self._value = ETModel.et_hourly(t, alpha=self._alpha, t_base=self._t_base)
         self.async_write_ha_state()
 
     @property
     def native_value(self) -> float:
+        """The hub's last computed rate, or the simple formula when standing alone."""
+        if self._hub is not None:
+            return round(self._hub.current_et_rate, 4)
         return round(self._value, 4)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Which method produced this rate — the same question the deficit raises."""
+        return {"et_method": self._hub.active_method} if self._hub is not None else {}
 
 
 # ══════════════════════════════════════════════════════════
@@ -660,7 +813,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
     """
 
     _attr_has_entity_name = True
-    _attr_name = "Dryness Index"
+    _attr_translation_key = "dryness_index"
     _attr_unique_id = "never_dry"
     _attr_device_class = SensorDeviceClass.PRECIPITATION
     _attr_native_unit_of_measurement = UnitOfLength.MILLIMETERS
@@ -672,17 +825,60 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
 
     def __init__(self, hass: HomeAssistant, config: ConfigType, device_info: DeviceInfo | None = None) -> None:
         self._hass = hass
-        self._temp_sensor = config[CONF_TEMP_SENSOR]
-        self._rain_sensor = config[CONF_RAIN_SENSOR]
+        # What this installation *has*, and the shared sky over it. The bindings
+        # and the yearly rain used to be eleven loose attributes here; they are
+        # one object now, and the private names below survive as views onto it so
+        # every existing reader is unaffected.
+        self._env = Environment(
+            temperature_sensor=config[CONF_TEMP_SENSOR],
+            rain_sensor=config[CONF_RAIN_SENSOR],
+            soil_moisture_sensor=config.get(CONF_VWC_SENSOR),
+            humidity_sensor=config.get(CONF_HUMIDITY_SENSOR),
+            wind_speed_sensor=config.get(CONF_WIND_SPEED_SENSOR),
+            net_radiation_sensor=config.get(CONF_NET_RADIATION_SENSOR),
+            temp_max_sensor=config.get(CONF_TEMP_MAX_SENSOR),
+            temp_min_sensor=config.get(CONF_TEMP_MIN_SENSOR),
+            rain_sensor_type=RainSensorType(config.get(CONF_RAIN_SENSOR_TYPE, DEFAULT_RAIN_SENSOR_TYPE)),
+            backfill_days=config.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
+            latitude=getattr(getattr(hass, "config", None), "latitude", DEFAULT_LATITUDE),
+            # The published attribute must never be null, so the site starts on
+            # the current year rather than on "no year recorded".
+            yearly_rain_year=datetime.now().year,
+        )
         self._alpha = config.get(CONF_ALPHA, DEFAULT_ALPHA)
         self._t_base = config.get(CONF_T_BASE, DEFAULT_T_BASE)
         self._d_max = config.get(CONF_D_MAX, DEFAULT_D_MAX)
-        self._vwc_sensor = config.get(CONF_VWC_SENSOR)
         self._field_cap = config.get(CONF_FIELD_CAPACITY, DEFAULT_FIELD_CAPACITY)
         self._root_depth = config.get(CONF_ROOT_DEPTH, DEFAULT_ROOT_DEPTH)
-        self._rain_type = config.get(CONF_RAIN_SENSOR_TYPE, DEFAULT_RAIN_SENSOR_TYPE)
-        self._backfill_days = config.get(CONF_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS)
-        self._deficit = 0.0
+        # The water balance itself lives in the model, not here. This entity
+        # supplies readings and publishes the answer; which physics turns one
+        # into the other is the model's business, and it is chosen once — by
+        # what the installation declared, which is the capability match.
+        self._configured_method = config.get(CONF_ET_METHOD, DEFAULT_ET_METHOD)
+        self._method_reason = ""
+        # The stable half of the reason, for the card to translate itself (#313,
+        # second half — card-side, not Python-side: see _select_model). `reason`
+        # stays alongside it in English for one release, so a card older than
+        # this change still shows something readable instead of the bare code.
+        self._reason_code = ""
+        self._reason_params: dict = {}
+        self._last_et_rate = 0.0
+        # What the model was last fed, split into what came from a sensor and
+        # what the integration worked out. Kept so the answer can be checked
+        # rather than trusted: a derived maximum that looks wrong, or a radiation
+        # balance that does not match the pyranometer, is visible here and
+        # nowhere else.
+        # Never empty: between a restart and the first computation the entity
+        # would otherwise publish half a list with no explanation, which reads
+        # as "the feature is not working" rather than "it has not run yet".
+        self._last_inputs: dict = {"status": "no reading computed since startup"}
+        # Entities that show what the model was fed. They subscribe directly
+        # rather than watching this entity's state: the inputs change without
+        # the deficit changing — at startup, most obviously — and a listener on
+        # the state would sleep through exactly the update that matters.
+        self._input_listeners: list[Callable[[], None]] = []
+        self._model: WaterBalanceModel = ETModel()
+        self._select_model()
         # None = baseline unknown (fresh boot): the first reading fixes the
         # baseline WITHOUT crediting. Starting at 0.0 re-credited the whole
         # cumulative/24h rain reading at every restart — 14.2 mm of rain
@@ -695,15 +891,167 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         # over the whole garden), so every zone mirrors the same "Rain Yearly"
         # value instead of keeping its own drifting per-zone counter. Resets on
         # 1 Jan. See docs/design_water_balance_reference_model.md (D3).
-        self._yearly_rain: float = 0.0
-        self._yearly_rain_year: int = datetime.now().year
         self._temp_buffer = SensorBuffer(ET_BUFFER_SIZE, valid_range=ET_TEMP_VALID_RANGE)
+        # Observed from the thermometer we already read, so the daily extremes
+        # never have to be asked for as two more entities.
+        self._diurnal = DiurnalRange()
+        # The pyranometer reports power; the equations need the day's energy.
+        # Accumulated here rather than converted per reading — see DailySolarEnergy.
+        self._solar_day = DailySolarEnergy()
+        self._anemometer_h = config.get(CONF_ANEMOMETER_HEIGHT, DEFAULT_ANEMOMETER_HEIGHT_M)
         # One warning per condition, not one per poll: a probe reporting
         # percentages does so at every reading, and an unreadable one likewise.
         self._vwc_percent_warned = False
         self._vwc_invalid_warned = False
         if device_info:
             self._attr_device_info = device_info
+
+    # ── Delegation to the model (the water balance) ─────────────────────────
+
+    @property
+    def _deficit(self) -> float:
+        """The current deficit [mm] — a view onto the model, which owns it.
+
+        Kept under the old private name so every existing reader and writer is
+        unaffected, exactly as the site attributes were when they moved into
+        :class:`Environment`. The point is that there is now one storage: an
+        assignment here cannot drift from what the model integrates, because it
+        *is* what the model integrates.
+        """
+        return self._model.deficit.value_mm
+
+    @_deficit.setter
+    def _deficit(self, value: float) -> None:
+        """Adopt a deficit computed outside a reading — a restore or a backfill."""
+        self._model.restore(value)
+
+    @property
+    def reference_frame(self) -> ReferenceFrame:
+        """The frame this hub's deficit is defined against — the model decides it."""
+        return self._model.reference_frame
+
+    def _select_model(self, observed_range_c: float | None = None) -> None:
+        """Choose the model once, and record in one sentence why.
+
+        Called at construction and again when the recorder has filled the
+        diurnal window — that is, at startup, with the evidence in hand. Never
+        again: a method that changes while the integration runs would move the
+        physics under a garden with nobody watching, which is the failure this
+        whole design is built to avoid.
+
+        The reason is kept because the answer alone is not actionable. "Simple"
+        tells a user nothing; "simple, because the thermometer shows no real
+        daily swing" tells them where to look, and that they may overrule it.
+        """
+        # A model is state, not only physics: it holds the deficit. Re-selecting
+        # after the restore has run would hand back a brand-new object starting
+        # at zero, wiping the value the entity just recovered — which is exactly
+        # what happened the first time this ran on a live garden.
+        carried = self._model.deficit.value_mm if getattr(self, "_model", None) is not None else None
+
+        explicit = self._configured_method != ET_METHOD_AUTO
+        self._model = build_model(
+            self._env,
+            method_id=None if not explicit else self._configured_method,
+            diurnal_range_c=observed_range_c,
+            alpha=self._alpha,
+            t_base=self._t_base,
+            d_max=self._d_max,
+            field_capacity=self._field_cap,
+            root_depth=self._root_depth,
+        )
+        if carried:
+            self._model.restore(carried)
+        running = type(self._model).method_id
+
+        if explicit and running == self._configured_method:
+            self._reason_code = "explicit"
+            self._reason_params = {}
+            self._method_reason = "chosen explicitly"
+        elif explicit:
+            self._reason_code = "fallback"
+            self._reason_params = {"method": self._configured_method}
+            self._method_reason = (
+                f"'{self._configured_method}' was chosen but this installation cannot run it; "
+                f"using the best it supports"
+            )
+        elif observed_range_c is not None and observed_range_c < DiurnalRange.IMPLAUSIBLE_RANGE_C:
+            self._reason_code = "flat_range"
+            self._reason_params = {"range": round(observed_range_c, 1)}
+            self._method_reason = (
+                f"automatic: the temperature sensor shows a daily swing of only "
+                f"{observed_range_c:.1f} °C, which is too flat to be real weather — so the methods "
+                f"that read the daily range were left out. If your sensor is genuinely outdoors and "
+                f"you want Hargreaves-Samani, select it explicitly."
+            )
+        else:
+            self._reason_code = "auto"
+            self._reason_params = {}
+            self._method_reason = "automatic: the best method the declared sensors support"
+
+    @property
+    def current_et_rate(self) -> float:
+        """The reference rate [mm/h] most recently broadcast to the zones."""
+        return self._last_et_rate
+
+    @property
+    def active_method(self) -> str:
+        """The identifier of the method actually running.
+
+        Not the one configured: ``auto`` has to resolve to something, and a
+        stored choice whose sensors are gone degrades rather than fails. Those
+        are the two cases where asking the configuration gives the wrong answer,
+        and they are exactly the cases a user needs to see.
+        """
+        return type(self._model).method_id
+
+    # ── Delegation to the site (Environment) ────────────────────────────────
+    #
+    # Views onto ``self._env``, which is the single storage. Read-only where the
+    # code only reads: a binding that changed after setup would leave the
+    # listeners subscribed to the old entity, so it is not a thing to allow by
+    # accident — the entry reloads instead.
+
+    @property
+    def environment(self) -> Environment:
+        """The site this hub reads from. The zones need its latitude and frame."""
+        return self._env
+
+    @property
+    def _temp_sensor(self) -> str:
+        return self._env.temperature_sensor
+
+    @property
+    def _rain_sensor(self) -> str:
+        return self._env.rain_sensor
+
+    @property
+    def _vwc_sensor(self) -> str | None:
+        return self._env.soil_moisture_sensor
+
+    @property
+    def _rain_type(self) -> RainSensorType:
+        return self._env.rain_sensor_type
+
+    @property
+    def _backfill_days(self) -> int:
+        return self._env.backfill_days
+
+    @property
+    def _yearly_rain(self) -> float:
+        return self._env.yearly_rain_mm
+
+    @_yearly_rain.setter
+    def _yearly_rain(self, value: float) -> None:
+        self._env.yearly_rain_mm = value
+
+    @property
+    def _yearly_rain_year(self) -> int:
+        return self._env.yearly_rain_year
+
+    @_yearly_rain_year.setter
+    def _yearly_rain_year(self, value: int) -> None:
+        self._env.yearly_rain_year = value
 
     def register_zone_listener(self, listener: Callable) -> None:
         """Register a zone sensor callback for ET/rain broadcasts."""
@@ -720,12 +1068,13 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         return self._yearly_rain
 
     def _accrue_yearly_rain(self, rain_mm: float) -> None:
-        """Add credited rain to the yearly total, resetting on a new year."""
-        year = datetime.now().year
-        if year != self._yearly_rain_year:
-            self._yearly_rain = 0.0
-            self._yearly_rain_year = year
-        self._yearly_rain += rain_mm
+        """Add credited rain to the yearly total — the site keeps the books.
+
+        The roll-over on a new year used to be written out here as well as in
+        ``Environment``; one copy is enough, and it is the one that can be tested
+        without a Home Assistant runtime.
+        """
+        self._env = self._env.accrue_yearly_rain(rain_mm, year=datetime.now().year)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -733,6 +1082,13 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         attrs: dict = {
             "yearly_rain_mm": round(self._yearly_rain, 2),
             "yearly_rain_year": self._yearly_rain_year,
+            # Which physics is actually running. Published because the choice can
+            # differ from what was asked for — `auto` resolves it, and a stored
+            # choice the site no longer supports degrades — and a user who cannot
+            # see the answer is reading a number without knowing how it was made.
+            "et_method": self.active_method,
+            "et_method_configured": self._configured_method,
+            "et_method_reason": self._method_reason,
         }
         if self._last_rain is not None:
             attrs["rain_baseline_mm"] = round(self._last_rain, 2)
@@ -779,8 +1135,9 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 self._yearly_rain_year = int(last.attributes.get("yearly_rain_year", self._yearly_rain_year))
                 self._yearly_rain = float(last.attributes.get("yearly_rain_mm", 0.0))
                 if datetime.now().year != self._yearly_rain_year:
-                    self._yearly_rain = 0.0
-                    self._yearly_rain_year = datetime.now().year
+                    # A restart across midnight on 1 January. Clearing and
+                    # re-anchoring is the site's own rule, not a third copy of it.
+                    self._env = self._env.reset_yearly_rain(year=datetime.now().year)
 
         if not restored:
             if self._vwc_sensor:
@@ -790,6 +1147,19 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 _LOGGER.info("VWC mode: skipping ET-model backfill")
             else:
                 await self._backfill_from_recorder()
+
+        # The automatic choice is made once, here, with the evidence rather than
+        # without it. Filling the diurnal window from the recorder first means a
+        # site is judged on the swing its thermometer actually shows, and that a
+        # richer tier starts working immediately instead of after a day of
+        # warm-up.
+        await self._bootstrap_diurnal_range()
+        if self._configured_method == ET_METHOD_AUTO:
+            observed = self._diurnal.extremes()
+            self._select_model(None if observed is None else observed[1] - observed[0])
+        _LOGGER.info("Water balance method: %s — %s", self.active_method, self._method_reason)
+
+        self._publish_initial_inputs()
 
         tracked = [self._temp_sensor, self._rain_sensor]
         if self._vwc_sensor:
@@ -817,7 +1187,12 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         if rain_delta > 0:
             self._accrue_yearly_rain(rain_delta)
 
-        if self._vwc_sensor:
+        # The branch follows the **model**, not the sensor. They used to be the
+        # same question, because a declared probe was the only way to get the VWC
+        # frame. Since the method can be chosen, they can disagree — a site with
+        # a probe that picks the simple tier — and branching on the sensor then
+        # feeds a VWC reading to an ET model, which raises on every update.
+        if self._model.reference_frame is not ReferenceFrame.ET:
             self._update_from_vwc()
             # In VWC mode, broadcast zeros — zones use VWC deficit * Kc. Rain is
             # already credited above; the VWC probe reflects soil moisture
@@ -835,15 +1210,203 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 self.async_write_ha_state()
                 return
 
-            et_h = max(0.0, self._alpha * (t_median - self._t_base) / 24)
-            et_dt = et_h * dt_h
-            self._deficit = max(0.0, min(self._deficit + et_dt - rain_delta, self._d_max))
+            # Every temperature reading also feeds the diurnal range, whether or
+            # not the running tier uses it: switching method must not mean
+            # waiting a day for the window to fill.
+            hours = now.timestamp() / 3600.0
+            self._diurnal.observe(hours, t_median)
+            watts = _read_float(self._hass, self._env.net_radiation_sensor)
+            if watts is not None:
+                self._solar_day.observe(hours, watts)
+
+            # The reading goes to the model and the model does the physics. The
+            # rate is asked for separately because the zones need it: each one
+            # integrates the same rate against its own Kc, so the tier the site
+            # runs reaches every zone through this broadcast, with no zone
+            # needing to know which tier that is.
+            reading = self._build_reading(dt_h, t_median, rain_delta, now)
+            if reading is None:
+                # The running model needs something the site cannot supply yet —
+                # a diurnal range still filling. Freeze rather than guess: a
+                # partial range understates the weather, and understated weather
+                # is a garden watered less than it needs.
+                self.async_write_ha_state()
+                return
+            et_h = self._model.et_rate(reading)
+            self._model.step(reading)
             self._broadcast_to_zones(dt_h, et_h, rain_delta)
 
         self.async_write_ha_state()
 
+    def _build_reading(self, dt_h: float, temp_c: float, rain_mm: float, now: datetime) -> ModelInput | None:
+        """The reading the *running* model consumes, or ``None`` if not available yet.
+
+        The hub knows how to observe; each model knows what it needs. This is the
+        one place the two meet, and it is deliberately a single function: a model
+        that is offered without an entry here is selectable and not runnable,
+        which is the failure this shape exists to make impossible.
+        """
+        if isinstance(self._model, PenmanMonteithModel):
+            return self._build_penman_reading(dt_h, temp_c, rain_mm, now)
+        if isinstance(self._model, HargreavesModel):
+            extremes = self._diurnal.extremes()
+            if extremes is None:
+                # Warming up: the tier falls back to the temperature-only rate
+                # rather than freezing, because a fresh install would otherwise
+                # look like a garden that never dries out.
+                self._last_inputs = self._warming_up_inputs(temp_c)
+                return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
+            tmin, tmax = extremes
+            self._last_inputs = {
+                "status": "computing",
+                "measured_temperature_c": round(temp_c, 2),
+                "derived_temp_max_c": round(tmax, 2),
+                "derived_temp_min_c": round(tmin, 2),
+                "derived_diurnal_range_c": round(tmax - tmin, 2),
+                "diurnal_window_hours": self._diurnal.coverage_h,
+            }
+            return HargreavesStep(
+                dt_h=dt_h,
+                tmax_c=tmax,
+                tmin_c=tmin,
+                day_of_year=now.timetuple().tm_yday,
+                rain_mm=rain_mm,
+            )
+        self._last_inputs = {
+            "status": "computing",
+            "measured_temperature_c": round(temp_c, 2),
+            "diurnal_window_hours": self._diurnal.coverage_h,
+        }
+        return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
+
+    def register_input_listener(self, callback_fn: Callable[[], None]) -> Callable[[], None]:
+        """Subscribe to changes of the published model inputs; returns the unsubscribe."""
+        self._input_listeners.append(callback_fn)
+
+        def _unsubscribe() -> None:
+            with contextlib.suppress(ValueError):
+                self._input_listeners.remove(callback_fn)
+
+        return _unsubscribe
+
+    def _notify_input_listeners(self) -> None:
+        """Tell the derived entities to republish."""
+        for listener in list(self._input_listeners):
+            listener()
+
+    def _publish_initial_inputs(self) -> None:
+        """Fill the derived values once at startup, without touching the balance.
+
+        Everything derived reads *unknown* until the first temperature change,
+        and an entity that says nothing after a restart is indistinguishable
+        from one that is broken — which is how three separate looks at this
+        device concluded the feature was not working.
+
+        Deliberately not a full tick: running one would fix the rain baseline
+        earlier than the design intends, and moving rain accounting to make a
+        display look better is the wrong trade. This builds the reading for its
+        inputs and throws it away.
+        """
+        if self.reference_frame is not ReferenceFrame.ET:
+            return
+        raw_state = self._hass.states.get(self._temp_sensor)
+        temp = _to_celsius(raw_state)
+        if temp is None:
+            return
+        with contextlib.suppress(Exception):
+            self._build_reading(0.0, temp, 0.0, datetime.now())
+        self._notify_input_listeners()
+
+    def _warming_up_inputs(self, temp_c: float) -> dict:
+        """What to publish while a tier cannot yet compute its own rate.
+
+        Saying "warming up, N hours of 24" is the difference between a user
+        seeing the method work and a user seeing nothing and assuming it does
+        not.
+        """
+        return {
+            "status": "warming up",
+            "measured_temperature_c": round(temp_c, 2),
+            "diurnal_window_hours": self._diurnal.coverage_h,
+            "warming_up_code": "daily_range",
+            "warming_up_params": {"hours": DiurnalRange.MIN_COVERAGE_H},
+            "warming_up_because": f"the daily range needs {DiurnalRange.MIN_COVERAGE_H} hours of readings",
+        }
+
+    def _build_penman_reading(self, dt_h: float, temp_c: float, rain_mm: float, now: datetime) -> ModelInput | None:
+        """The full-weather reading, with the net radiation computed rather than read.
+
+        A pyranometer reports the shortwave arriving; FAO-56 needs the *balance*,
+        which also depends on what the ground loses to the sky — and that term
+        needs the day's extremes and the humidity. So this waits for the diurnal
+        window like Hargreaves does, even though the tier reads a radiation
+        sensor: without the extremes the longwave half cannot be computed.
+
+        With no pyranometer the radiation is estimated from the same extremes
+        (FAO-56 eq. 50), which is what makes the tier reachable for a site that
+        has humidity and wind but no radiation instrument.
+        """
+        extremes = self._diurnal.extremes()
+        if extremes is None:
+            self._last_inputs = self._warming_up_inputs(temp_c)
+            return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
+        tmin, tmax = extremes
+
+        rh = _read_float(self._hass, self._env.humidity_sensor)
+        wind_raw = _read_float(self._hass, self._env.wind_speed_sensor)
+        if rh is None or wind_raw is None:
+            # A sensor unavailable this tick is not a reason to stop watering:
+            # fall back for this step and pick the richer reading up on the next.
+            self._last_inputs = {
+                **self._warming_up_inputs(temp_c),
+                "warming_up_code": "sensor_unreadable",
+                "warming_up_params": {},
+                "warming_up_because": "a required sensor was unreadable this tick",
+            }
+            return ETStep(dt_h=dt_h, temp_c=temp_c, rain_mm=rain_mm)
+
+        ra = HargreavesModel.extraterrestrial_radiation(now.timetuple().tm_yday, self._env.latitude)
+        measured_solar = _read_float(self._hass, self._env.net_radiation_sensor)
+        # The day's energy, not the current flux scaled to a day: an evening
+        # reading treated as a daily average understates the radiation by a
+        # factor of several, and every number downstream inherits it.
+        solar = self._solar_day.energy_mj()
+        if solar is None:
+            solar = solar_radiation_from_range(ra, tmax_c=tmax, tmin_c=tmin)
+
+        wind_2m = wind_at_2m(_wind_to_m_s(self._hass, self._env.wind_speed_sensor, wind_raw), self._anemometer_h)
+        net_rad = net_radiation_mj(solar_mj=solar, ra_mj=ra, tmax_c=tmax, tmin_c=tmin, rh_pct=rh)
+
+        self._last_inputs = {
+            "status": "computing",
+            "measured_temperature_c": round(temp_c, 2),
+            "measured_humidity_pct": round(rh, 1),
+            "measured_wind_raw": round(wind_raw, 2),
+            "measured_solar_w_m2": round(measured_solar, 1) if measured_solar is not None else None,
+            "derived_temp_max_c": round(tmax, 2),
+            "derived_temp_min_c": round(tmin, 2),
+            "derived_diurnal_range_c": round(tmax - tmin, 2),
+            "diurnal_window_hours": self._diurnal.coverage_h,
+            "derived_wind_2m_m_s": round(wind_2m, 2),
+            "derived_solar_mj": round(solar, 2),
+            "solar_is_measured": self._solar_day.energy_mj() is not None,
+            "solar_window_hours": self._solar_day.coverage_h,
+            "derived_extraterrestrial_mj": round(ra, 2),
+            "derived_net_radiation_mj": round(net_rad, 2),
+        }
+        return PenmanStep(
+            dt_h=dt_h,
+            temp_c=temp_c,
+            rh_pct=rh,
+            wind_m_s=wind_2m,
+            net_radiation_mj=net_rad,
+            rain_mm=rain_mm,
+        )
+
     def _broadcast_to_zones(self, dt_h: float, et_h: float, rain: float) -> None:
         """Notify all registered zone sensors with ET/rain data."""
+        self._last_et_rate = et_h
+        self._notify_input_listeners()
         for listener in self._zone_listeners:
             listener(dt_h, et_h, rain)
 
@@ -892,7 +1455,13 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
                 vwc,
             )
 
-        self._deficit = max(0.0, (self._field_cap - vwc) * self._root_depth * 1000)
+        deficit = self._model.step(VWCReading(vwc=vwc))
+        self._last_inputs = {
+            "status": "computing",
+            "measured_soil_moisture_raw": round(raw, 3),
+            "derived_soil_moisture_fraction": round(vwc, 3),
+            "derived_deficit_mm": round(deficit.value_mm, 2),
+        }
 
     def _compute_rain_delta(self) -> float:
         """Compute rain increment since last reading.
@@ -975,8 +1544,61 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             return
 
         rain_delta = self._compute_rain_delta()
-        et_dt = max(0.0, self._alpha * (t_median - self._t_base) / 24) * dt_h
-        self._deficit = max(0.0, min(self._deficit + et_dt - rain_delta, self._d_max))
+        self._model.step(ETStep(dt_h=dt_h, temp_c=t_median, rain_mm=rain_delta))
+
+    async def _bootstrap_diurnal_range(self) -> None:
+        """Fill the daily windows from recorder history, so the choice is informed.
+
+        Without it the window starts empty at every restart and the site is
+        judged, or left warming up, on no data at all. The thermometer almost
+        always predates the integration, so the evidence is usually already
+        there — it just has to be read.
+
+        Failures are not fatal and not reported loudly: an installation without
+        a recorder simply fills the window live, which is the previous behaviour.
+        """
+        try:
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.history import get_significant_states
+        except ImportError:
+            return
+
+        instance = get_instance(self._hass)
+        if instance is None:
+            return
+
+        now = datetime.now(UTC)
+        start = now - timedelta(hours=26)
+        wanted = [self._temp_sensor]
+        if self._env.net_radiation_sensor:
+            wanted.append(self._env.net_radiation_sensor)
+        try:
+            history = await instance.async_add_executor_job(get_significant_states, self._hass, start, now, wanted)
+        except Exception as exc:
+            _LOGGER.debug("Diurnal range bootstrap skipped: %s", exc)
+            return
+
+        seen = 0
+        for state in (history or {}).get(self._temp_sensor, []):
+            value = _to_celsius(state)
+            if value is None:
+                continue
+            self._diurnal.observe(state.last_changed.timestamp() / 3600.0, value)
+            seen += 1
+        for state in (history or {}).get(self._env.net_radiation_sensor or "", []):
+            try:
+                watts = float(state.state)
+            except (ValueError, TypeError):
+                continue
+            self._solar_day.observe(state.last_changed.timestamp() / 3600.0, watts)
+
+        if seen:
+            _LOGGER.debug(
+                "Diurnal range bootstrapped from %d readings — %d hours covered; solar window %d hours",
+                seen,
+                self._diurnal.coverage_h,
+                self._solar_day.coverage_h,
+            )
 
     async def _backfill_from_recorder(self) -> None:
         """Replay historical T/rain from HA recorder to bootstrap deficit.
@@ -1077,7 +1699,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             if kind == "temp":
                 if last_temp is not None:
                     dt_h = (ts - last_time).total_seconds() / 3600.0
-                    et_h = max(0.0, self._alpha * (last_temp - self._t_base) / 24)
+                    et_h = ETModel.et_hourly(last_temp, alpha=self._alpha, t_base=self._t_base)
                     deficit = max(0.0, min(deficit + et_h * dt_h, self._d_max))
                 last_temp = value
                 last_time = ts
@@ -1085,7 +1707,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
             elif kind == "rain":
                 if last_temp is not None:
                     dt_h = (ts - last_time).total_seconds() / 3600.0
-                    et_h = max(0.0, self._alpha * (last_temp - self._t_base) / 24)
+                    et_h = ETModel.et_hourly(last_temp, alpha=self._alpha, t_base=self._t_base)
                     deficit = max(0.0, min(deficit + et_h * dt_h, self._d_max))
                     last_time = ts
 
@@ -1127,8 +1749,7 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
         (GH forum: yearly rain stuck after switching rain sensor type).
         Historical recorder statistics are left untouched.
         """
-        self._yearly_rain = 0.0
-        self._yearly_rain_year = datetime.now().year
+        self._env = self._env.reset_yearly_rain(year=datetime.now().year)
 
     def set_deficit_mm(self, value: float) -> None:
         """Set deficit to an arbitrary value [mm] — intended for testing/debugging."""
@@ -1174,27 +1795,32 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._valve = zone_config.get(CONF_ZONE_VALVE)
         self._system_type = zone_config.get(CONF_ZONE_SYSTEM_TYPE)
         self._flow_rate = zone_config.get(CONF_ZONE_FLOW_RATE, 0.0)
+        # The form asks for L/h and converts, so the only advice that is safe to
+        # give is to check the figure against the zone. Telling the user to
+        # divide by 60 dates from when the form asked for L/min: followed today,
+        # it turns a correct entry into one sixty times too small (GH #318).
         if self._flow_rate > UNUSUAL_FLOW_MAX_LPM:
             _LOGGER.warning(
-                "Zone '%s': flow_rate_lpm=%.1f L/min (= %.0f L/h) looks unrealistically high "
-                "for garden irrigation. If you configured it in L/h, divide by 60 (e.g. %.0f L/h → %.2f L/min).",
+                "Zone '%s': design flow rate %.0f L/h is above %.0f L/h, unusual for a garden zone. "
+                "It is right for a large lawn; otherwise check the zone's flow rate, which the form takes in L/h.",
                 zone_config.get(CONF_ZONE_NAME, "?"),
-                self._flow_rate,
                 self._flow_rate * 60,
-                self._flow_rate,
-                self._flow_rate / 60,
+                UNUSUAL_FLOW_MAX_LPM * 60,
             )
         self._threshold = zone_config.get(CONF_ZONE_THRESHOLD, DEFAULT_THRESHOLD)
         self._delivery_mode = zone_config.get(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE)
         self._volume_entity = zone_config.get(CONF_ZONE_VOLUME_ENTITY)
         self._flow_meter_sensor = zone_config.get(CONF_ZONE_FLOW_METER_SENSOR)
         self._delivery_timeout = zone_config.get(CONF_ZONE_DELIVERY_TIMEOUT, DEFAULT_DELIVERY_TIMEOUT_S)
+        self._last_valve_test: dict | None = None
         self._battery_sensor = zone_config.get(CONF_ZONE_BATTERY_SENSOR)
         self._irrigation_mode = zone_config.get(CONF_ZONE_IRRIGATION_MODE, "manual")
         self._irrigation_time = zone_config.get(CONF_ZONE_IRRIGATION_TIME)
         self._hw_max_duration_topic: str | None = zone_config.get(CONF_ZONE_HW_MAX_DURATION_TOPIC)
         self._hw_max_duration_payload: str = zone_config.get(CONF_ZONE_HW_MAX_DURATION_PAYLOAD, "{value}")
         self._irrigating = False
+        self._awaiting_valve = False
+        self._silence_verdict: bool | None = None
         self._no_guard_flow_warned = False
         # Reachability grace: when this zone was built, and whether its valve
         # has ever been seen alive. Monotonic, so a clock change cannot
@@ -1245,6 +1871,92 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
 
         self._d_max = dryness_sensor._d_max
 
+        # A probe of this zone's own, if declared. When present it replaces the
+        # site's model entirely for this zone: the reading is a measurement of
+        # the soil being watered, and no estimate can improve on that.
+        self._own_probe = zone_config.get(CONF_ZONE_VWC_SENSOR)
+        self._own_probe_warned = False
+        self._probe_vwc: float | None = None
+        self._probe_implied_mm: float | None = None
+
+        # The two numbers that scale the reading, and the switch. A probe with
+        # both owns this zone's deficit; a probe without them is telemetry,
+        # exactly as it was. Nothing about an existing installation changes on
+        # upgrade, because the values it has never been asked for are absent:
+        # the model moves the day the user fills them in, and not before.
+        self._own_root_depth = zone_config.get(CONF_ZONE_ROOT_DEPTH)
+        # The soil type decides and the box is read only behind Custom: the same
+        # preset/override contract as the system type, the plant family and the
+        # exposure. Which leaves the root depth as the one number the user has to
+        # supply, and therefore as the switch -- and it is the right one to have
+        # kept, because no table holds it. A lawn, a hedge and a pot differ by a
+        # factor of four on the same ground, and only the person who planted
+        # them knows which it is.
+        self._soil_type = zone_config.get(CONF_ZONE_SOIL_TYPE, DEFAULT_SOIL_TYPE)
+        soil = SOIL_TYPES.get(self._soil_type, SOIL_TYPES[DEFAULT_SOIL_TYPE])
+        preset = soil["field_capacity"]
+        self._own_field_capacity = zone_config.get(CONF_ZONE_FIELD_CAPACITY) if preset is None else preset
+        # The other end of the interval, and the reason a probe needs a soil *row*
+        # rather than a single number: the reading says where the ground sits
+        # between dry and wet, so both ends have to come from the same soil.
+        # Custom carries neither, and asks for both in the form - which is what
+        # lets a probe drive a Custom-soil zone at all. It used to supply the top
+        # end only, so the one owner who had measured their own soil was the one
+        # who lost the probe.
+        preset_floor = soil["wilting_point"]
+        self._own_wilting_point = zone_config.get(CONF_ZONE_WILTING_POINT) if preset_floor is None else preset_floor
+        self._probe_drives = bool(self._own_probe) and None not in (
+            self._own_root_depth,
+            self._own_field_capacity,
+            self._own_wilting_point,
+        )
+        # When the zone has not declared them the site's values are used, as
+        # before, and only to publish the implied deficit beside the model's.
+        self._probe_model = (
+            VWCPerZoneModel(
+                source=self._zone_name,
+                field_capacity=(self._own_field_capacity if self._probe_drives else dryness_sensor._field_cap),
+                wilting_point=(
+                    self._own_wilting_point
+                    if self._own_wilting_point is not None
+                    else SOIL_TYPES[DEFAULT_SOIL_TYPE]["wilting_point"]
+                ),
+                root_depth=(self._own_root_depth if self._probe_drives else dryness_sensor._root_depth),
+                d_max=self._d_max,
+            )
+            if self._own_probe
+            else None
+        )
+        # When the probe last spoke, and how long it usually goes between
+        # readings. A probe that dies keeps its last value on display, so
+        # freshness is the whole safety of letting it drive: without it a
+        # battery that fails in June would report damp soil until September and
+        # the zone would never be watered again.
+        self._probe_last_seen: datetime | None = None
+        # Two dates, because "alive" and "moving" are different questions and a
+        # single timestamp cannot answer both. This one is when the reading last
+        # *changed*: on ground that has plateaued it stands still for hours while
+        # the probe is perfectly healthy, which is why it must never stand in for
+        # the one above. Kept because the opposite case needs it - a radio that
+        # keeps reporting while the sensing element has frozen is invisible to a
+        # freshness check, and the distance between these two dates is the only
+        # thing in the system that would show it (GH #234). Published, not wired
+        # into a decision: acting on it is a second channel of reliability and a
+        # choice of its own.
+        self._probe_value_moved_at: datetime | None = None
+        self._probe_quiet = QuietWatermark(window_s=PROBE_CADENCE_MEMORY_S)
+        self._probe_silent_logged = False
+        # When the *device* last spoke, which is a different question from when
+        # the reading last changed, and it is the one that decides whether the
+        # probe is alive. Home Assistant writes a sensor's state only when its
+        # value changes, so a probe sitting on stable ground produces no writes
+        # at all: on 2026-09-16 a live probe published its temperature nineteen
+        # times overnight while its moisture entity, unchanged at 99, published
+        # once. Asked of the moisture entity alone, that reads as eight hours of
+        # silence from a device that had not stopped talking for a minute.
+        self._probe_device_entities: tuple[str, ...] | None = None
+        self._probe_device_seen: datetime | None = None
+
         # Efficiency: the system type decides, per the preset/override
         # contract in const. Only the custom type (default_efficiency: None)
         # reads the box; behind a real type the box is ignored and the config
@@ -1275,13 +1987,20 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             microclimate_factor=self._microclimate_factor,
             d_max=self._d_max,
             threshold_mm=self._threshold,
+            # The frame follows the hub's model, not a default. With a soil
+            # probe configured the deficit is a VWC measurement scaled by Kc,
+            # not an ET integration, and a Deficit that says otherwise is the
+            # value object asserting the one thing it exists to prevent. Nothing
+            # reads the frame yet; tagging it correctly now is what stops the
+            # first reader from inheriting a lie.
+            frame=ReferenceFrame.VWC_SYSTEM if dryness_sensor._vwc_sensor else ReferenceFrame.ET,
         )
         # The counters default to "no year recorded"; today's entity starts on
         # the current one, and the published attribute must not become null.
         self._zone.counters.yearly_water_year = datetime.now().year
 
         slug = self._zone_name.lower().replace(" ", "_")
-        self._attr_name = "Volume"
+        self._attr_translation_key = "volume"
         self._attr_unique_id = f"irrigation_zone_{slug}"
         if device_info:
             self._attr_device_info = device_info
@@ -1315,12 +2034,228 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._zone.efficiency = value
 
     @property
-    def _zone_deficit(self) -> float:
+    def _et_deficit(self) -> float:
+        """The site model's number for this zone, integrated whether published or not.
+
+        It never stops advancing. When a probe drives the zone this is the
+        reserve, and a reserve that had to be rebuilt after the probe failed
+        would be no reserve at all: the failure arrives with the garden already
+        dry, which is the worst moment to start integrating from zero.
+        """
         return self._zone.deficit.value_mm
+
+    @property
+    def _zone_deficit(self) -> float:
+        """The number this zone acts on, from the one place that holds it.
+
+        The choice between soil and estimate lives in the domain Zone, so that
+        the dose, the trigger and the published figure cannot answer different
+        questions. What lives here is only the part that needs a clock: whether
+        the measurement still speaks for the soil. Reading the value is also the
+        moment that is checked, because every decision in the integration goes
+        through this property and nothing guarantees it is preceded by a tick.
+        """
+        self._review_probe_standing()
+        return self._zone.acting_deficit.value_mm
 
     @_zone_deficit.setter
     def _zone_deficit(self, value: float) -> None:
+        # Always the model's state, never the probe's: the probe is stateless
+        # and recomputes from its next reading, so there is nothing on that side
+        # to write to. A delivery credited while the probe drives therefore
+        # re-anchors the reserve on what the soil had just said, which is better
+        # than letting it drift unobserved for a season.
         self._zone.deficit = self._zone.deficit.with_value(value)
+
+    @property
+    def domain_zone(self):
+        """The zone as the domain sees it, with its measurement's standing reviewed.
+
+        The controller reaches for this to decide, and the review has to happen
+        on the way rather than at a tick: nothing orders a tick's listeners, so a
+        decision could otherwise be taken on a measurement that a listener which
+        had not run yet was about to withdraw. Depending on registration order
+        for that would be a dependency nobody can see from either side.
+        """
+        self._review_probe_standing()
+        return self._zone
+
+    def _review_probe_standing(self) -> None:
+        """Withdraw the measurement when it can no longer speak for the soil.
+
+        Cheap enough to run on every read: a subtraction and a quantile over at
+        most forty numbers.
+        """
+        if not self._probe_drives:
+            return
+        if self._probe_implied_mm is None or not self._probe_is_fresh():
+            self._zone.measured_deficit = None
+
+    def _warn_once_if_the_probe_went_quiet(self) -> None:
+        """Say it in the log when a driving probe stops being believed, once.
+
+        A zone quietly back on the estimate is the failure this whole freshness
+        check exists to survive, and surviving it silently would only move the
+        surprise later. Not a notification: judging a device is one thing, and
+        telling the user their model is wrong is another, which NeverDry does not
+        do.
+        """
+        if not self._probe_drives or self._probe_silent_logged or self._probe_is_fresh():
+            return
+        self._probe_silent_logged = True
+        _LOGGER.warning(
+            "Zone '%s': probe '%s' has stopped reporting, so the deficit falls back to the "
+            "site model until it speaks again",
+            self._zone_name,
+            self._own_probe,
+        )
+
+    @property
+    def deficit_source(self) -> str:
+        """Which of the two numbers is the one this zone is acting on."""
+        self._review_probe_standing()
+        return "zone_probe" if self._zone.measured_deficit is not None else "site_model"
+
+    @property
+    def probe_set_aside(self) -> bool:
+        """A probe that should be driving this zone, and currently is not.
+
+        Kept apart from :attr:`deficit_source` rather than folded into it as a
+        third value, because that attribute is something people write
+        automations against and a new value would arrive unannounced.
+
+        The distinction it carries is the one the field asked for. Two zones can
+        both report ``site_model`` for opposite reasons: one has no probe and
+        never did, the other has one that has gone quiet - and only the second
+        means a number changed scale without anything happening in the garden.
+        That is the 9.6 mm to 0.7 mm of GH #234, where nothing on screen said
+        the ruler had been swapped.
+        """
+        return bool(self._probe_drives) and self._zone.measured_deficit is None
+
+    def _probe_is_fresh(self) -> bool:
+        """Whether the probe has spoken recently enough for its reading to stand.
+
+        The bar is the probe's **own** observed cadence, never a constant: one
+        sensor publishes every thirty seconds and another twice a day, and a
+        number picked here would call one of them dead. Until it has come back
+        from one stretch of quiet there is no bar and the verdict is simply not
+        available -- absence of evidence is not evidence of silence, and
+        refusing a perfectly good reading would send the zone onto the estimate
+        for no reason.
+
+        The silence measured is the **device's**, not the reading's, and that
+        distinction is the whole correctness of this check. Home Assistant
+        writes a sensor's state only when its value changes, so a probe on
+        ground that is not moving publishes nothing, and a reading that stands
+        still is the commonest thing a working soil probe does. Judged on the
+        moisture entity alone, a live probe is declared dead for the crime of
+        reporting the same number twice.
+
+        Which is what happened: on 2026-09-16 a probe published its temperature
+        nineteen times across the night, every 55 minutes, while its moisture
+        entity published once. The zone spent the night on the estimate beside
+        a device that had never stopped talking.
+
+        So the union of the device's entities answers it, exactly as the valve
+        reachability watch already does: any of them reporting proves the device
+        is on the mesh, and no member is inspected for what it says. An
+        unchanged reading from a device that is demonstrably alive is not
+        missing evidence -- it is the device stating that the soil has not
+        moved, which is the most useful thing it can say.
+
+        Which stretch of quiet sets the bar matters too, and a quantile over
+        recent gaps is the wrong estimator for a device that reports on change.
+        See :class:`~.environment.QuietWatermark` for the field case.
+
+        The backstop is the one exception, and it is a backstop rather than a
+        verdict: a probe dead since installation never produces the quiet
+        stretches its own bar would be derived from, so without it the very case
+        this exists to catch would be the one case it could not see.
+
+        Residual, stated rather than hidden: a device whose radio keeps working
+        while its sensing element freezes passes this check. Detecting that
+        needs a reading that contradicts itself, not a silence, and it is the
+        open second-channel question (GH #234, a temperature frozen to the
+        decimal for hours).
+        """
+        if self._probe_last_seen is None:
+            return False
+        self._observe_probe_device()
+        now = datetime.now(UTC)
+        # The device where it can be resolved, the reading where it cannot: a
+        # registry that will not answer must not turn every probe into a dead
+        # one, so the fallback is the behaviour this check has always had.
+        spoke_at = self._probe_device_seen or self._probe_last_seen
+        age_s = (now - spoke_at).total_seconds()
+        if age_s > PROBE_STALE_BACKSTOP_S:
+            return False
+        floor_s = self._probe_quiet.value(now.timestamp())
+        return floor_s is None or age_s <= floor_s
+
+    def _observe_probe_device(self) -> None:
+        """Note when the probe's device last spoke, and time the quiet between.
+
+        Sampled on the way through rather than from a subscription of its own.
+        The check runs on every ET tick and on every decision, which is often
+        enough to see the device advance; and a missed advance merges two quiet
+        stretches into one, which overstates the bar rather than understating
+        it. That is the safe direction, and it is the same trade the valve
+        reachability watch makes.
+        """
+        seen = self._probe_device_spoke_at()
+        if seen is None:
+            return
+        previous = self._probe_device_seen
+        if previous is not None and seen > previous:
+            # A stretch of quiet that has just ended: the device went this long
+            # without a word and came back, so this much quiet is normal for it.
+            self._probe_quiet.record(seen.timestamp(), (seen - previous).total_seconds())
+        if previous is None or seen > previous:
+            self._probe_device_seen = seen
+
+    def _probe_device_spoke_at(self) -> datetime | None:
+        """The most recent word from any entity of the probe's device."""
+        latest: datetime | None = None
+        for entity_id in self._probe_device_entity_ids():
+            state = self._hass.states.get(entity_id)
+            if state is None:
+                continue
+            stamp = getattr(state, "last_reported", None) or getattr(state, "last_updated", None)
+            # Guarded rather than trusted: a stand-in state object hands back
+            # something that is not a datetime, and the comparison below would
+            # raise inside a property every reader goes through.
+            if isinstance(stamp, datetime) and stamp.tzinfo is not None and (latest is None or stamp > latest):
+                latest = stamp
+        return latest
+
+    def _probe_device_entity_ids(self) -> tuple[str, ...]:
+        """Every entity of the probe's device, resolved once and kept.
+
+        A device's entity set does not change between ticks in a way that
+        matters here, and the walk is the only part of this check that is not
+        a dictionary lookup.
+        """
+        if self._probe_device_entities is None:
+            self._probe_device_entities = self._resolve_probe_device_entities()
+        return self._probe_device_entities
+
+    def _resolve_probe_device_entities(self) -> tuple[str, ...]:
+        """Registry walk: probe entity -> its device -> every entity of it."""
+        if not self._own_probe:
+            return ()
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            registry = er.async_get(self._hass)
+            entry = registry.async_get(self._own_probe)
+            if entry is None or entry.device_id is None:
+                return (self._own_probe,)
+            siblings = er.async_entries_for_device(registry, entry.device_id, include_disabled_entities=False)
+            return tuple(e.entity_id for e in siblings) or (self._own_probe,)
+        except Exception:  # a registry hiccup must not turn a live probe into a dead one
+            _LOGGER.debug("Could not resolve the device of probe '%s'", self._own_probe, exc_info=True)
+            return (self._own_probe,)
 
     @property
     def _deficit_at_irrigation_start(self) -> float | None:
@@ -1409,8 +2344,20 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         return self._zone.credit_delivery(_LitersDelivered(liters)).value_mm
 
     def settle_cycle(self, liters: float, *, source: str, at: datetime, duration_s: int = 0) -> float:
-        """Close a cycle: credit the final figure, stamp it, drop the snapshot."""
+        """Close a cycle: credit the final figure, stamp it, drop the snapshot.
+
+        The session listeners are fired **here** rather than at ``set_irrigating``
+        because this is where the session's figures are written. Closing the
+        valve happens first and would notify too early: the last-session sensors
+        would refresh while still holding the previous run's numbers, and then
+        wait for the next ET tick to catch up. That left a window of minutes in
+        which the card described the previous irrigation as if it were the one
+        that had just ended, with nothing to say the value was stale — and the
+        minutes right after a run are exactly when somebody looks (field,
+        2026-08-19: a 6039 s session reading "2" for six minutes).
+        """
         deficit = self._zone.settle(_LitersDelivered(liters, duration_s), source=source, at=at)
+        self.notify_session_listeners()
         return deficit.value_mm
 
     async def async_added_to_hass(self) -> None:
@@ -1420,10 +2367,38 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         global Dryness Index scaled by this zone's Kc — so a new zone
         starts with a realistic deficit instead of zero.
         """
+        if self._own_probe:
+            self.async_on_remove(async_track_state_change_event(self.hass, [self._own_probe], self._on_own_probe))
+            # A subscription only fires on change, so without this a zone would
+            # sit on the estimate after every restart until its probe happened
+            # to publish again. Reading the state now costs nothing and carries
+            # its own timestamp, so a stale one stays stale.
+            with contextlib.suppress(Exception):
+                self._on_own_probe(None)
+
         last = await self.async_get_last_state()
         if last and last.attributes:
             with contextlib.suppress(ValueError, TypeError):
-                self._zone_deficit = float(last.attributes.get("deficit_mm", 0.0))
+                # The reserve, never the number that was on display. Those are
+                # the same value only when no probe was driving the zone, and
+                # when one was they are the two ends of a bug: reading
+                # ``deficit_mm`` here wrote the probe's measurement into the
+                # weather estimate, so every Home Assistant restart replaced the
+                # reserve with whatever the soil happened to say -- zero, in the
+                # case that started this (GH #234; field: one zone at 0.03 mm
+                # while its three siblings held 0.31, 1.52 and 2.38).
+                #
+                # The estimate is what has to survive a restart, because it is
+                # what the zone falls back on the moment the probe stops being
+                # believed, and a reserve rebuilt from zero arrives with the
+                # garden already dry. ``deficit_mm`` is still read as the
+                # fallback, for states written before ``estimate_mm`` existed:
+                # for a zone with no probe the two are equal, and for one with a
+                # probe this is the last restart that can inherit the defect.
+                restored = last.attributes.get("estimate_mm", last.attributes.get("deficit_mm", 0.0))
+                self._zone_deficit = float(restored)
+            if self._own_probe and self._probe_last_seen is None:
+                self._restore_probe_standing(last.attributes)
             with contextlib.suppress(ValueError, TypeError):
                 ts = last.attributes.get("last_irrigated")
                 if ts:
@@ -1431,6 +2406,20 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
                     self._last_volume_delivered = float(last.attributes.get("last_volume_delivered", 0.0))
                     self._last_irrigation_source = last.attributes.get("last_irrigation_source")
                     self._last_session_duration_s = int(last.attributes.get("last_session_duration_s", 0))
+            # The supervised test result, rebuilt from the attributes it published.
+            # Without this, *saving* the measured flow rate destroyed the evidence
+            # for it: writing the config reloads the entry, the entity is recreated,
+            # and the number you had just read vanished from the screen — on every
+            # zone, not only the one saved. It also meant the statistics series lost
+            # a point each time somebody acted on it.
+            restored_test = {
+                key[len("valve_test_") :]: value
+                for key, value in last.attributes.items()
+                if key.startswith("valve_test_")
+            }
+            if restored_test:
+                self._last_valve_test = {"zone_name": self._zone_name, **restored_test}
+
             with contextlib.suppress(ValueError, TypeError):
                 self._total_water_delivered = float(last.attributes.get("total_water_delivered_l", 0.0))
             with contextlib.suppress(ValueError, TypeError):
@@ -1455,12 +2444,64 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             # See docs/design_water_balance_reference_model.md (D4).
             self._zone_deficit = 0.0
 
+    def _restore_probe_standing(self, attributes: Mapping) -> None:
+        """Carry the probe's last reading across a restart, timestamp included.
+
+        The live read at setup is the first choice and is usually enough, but on
+        a full Home Assistant restart the probe's own integration may not have
+        set up yet, so there is no state to read and nothing to record. The zone
+        then sits on the estimate until the probe happens to speak again -- a
+        whole reporting cycle, forty minutes on the devices this was found on.
+        In the field on 2026-09-16 that showed as a deficit alternating between
+        2.6 mm and 0.15 mm across every restart, two numbers on two different
+        scales with no physical event between them, and the controller deciding
+        on whichever one it caught.
+
+        The subscription cannot cover this on its own: it fires when the probe
+        next changes state, which is precisely the event being waited for.
+
+        The timestamp is restored with the reading and never invented. A
+        measurement from last week has to stay stale through the restart, which
+        is what a rehydrated ``_probe_last_seen`` gives and what a ``now()``
+        would quietly destroy. The millimetres are recomputed rather than
+        restored, because the ground this zone was configured with may be the
+        very thing that changed in the edit that caused the reload.
+
+        The bar is deliberately not restored. It is evidence about the device,
+        and after a restart the first gap observed spans the downtime, which is
+        evidence about Home Assistant instead. Starting with no bar means the
+        reading is believed until the backstop, which is the conservative
+        direction: the expensive mistake here is refusing a good measurement.
+        """
+        seen = attributes.get("probe_last_seen")
+        pct = attributes.get("probe_moisture_pct")
+        if seen is None or pct is None or self._probe_model is None:
+            return
+        with contextlib.suppress(ValueError, TypeError):
+            stamp = datetime.fromisoformat(str(seen))
+            if stamp.tzinfo is None:
+                return
+            vwc = probe_percent_to_fraction(float(pct))
+            if vwc is None:
+                return
+            self._probe_last_seen = stamp
+            # Restored together with the timestamp it is compared against: the
+            # two halves of the freshness judgement, or neither.
+            self._probe_quiet.restore(attributes.get("probe_quiet_samples"))
+            self._probe_vwc = vwc
+            measured = self._probe_model.step(VWCReading(vwc=vwc))
+            self._probe_implied_mm = measured.value_mm
+            if self._probe_drives:
+                self._zone.measured_deficit = measured
+
     def _get_latitude(self) -> float:
-        """Get latitude from HA config, default to 45.0 (northern)."""
-        try:
-            return self._hass.config.latitude
-        except AttributeError:
-            return 45.0
+        """The site's latitude, which decides the hemisphere of the Kc curve.
+
+        Read from the site rather than from ``hass.config`` directly: it is a
+        property of the place, and the place is what ``Environment`` is. Fixed at
+        setup, so moving house takes a reload — which moving house does anyway.
+        """
+        return self._dryness.environment.latitude
 
     def _get_current_kc(self) -> float:
         """Effective Kc for this zone (base * exposure).
@@ -1485,8 +2526,111 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             kc = self._get_current_kc()
             self._zone_deficit = max(
                 0.0,
-                min(self._zone_deficit + et_h * kc * dt_h - rain, self._d_max),
+                min(self._et_deficit + et_h * kc * dt_h - rain, self._d_max),
             )
+        self._warn_once_if_the_probe_went_quiet()
+        if getattr(self, "hass", None):
+            self.async_write_ha_state()
+
+    @callback
+    def _on_own_probe(self, event) -> None:
+        """Record this zone's probe reading. It does **not** own the deficit.
+
+        A point measurement does not generalise to the zone, and the reason is
+        empirical rather than theoretical: two zones on the same soil sit at
+        systematically different moisture because the irrigation is unbalanced
+        and one has far more shade on the ground. Both are circumstances of a
+        spot. Letting the deficit follow that reading would take an imbalance in
+        the plumbing and a difference in canopy and feed them back as if they
+        were information about how much water the soil needs.
+
+        What a probe legitimately generalises is what the *soil* does — the field
+        capacity it settles at after drainage, and how fast it drains and dries.
+        Those are properties of the texture, not of the plant above it, and both
+        need a curve over days rather than a single reading. So the reading is
+        published and the deficit stays with the model that covers the whole zone.
+
+        The probe-implied deficit is published beside it on purpose: the gap
+        between predicted and measured after an irrigation is the one signal that
+        reveals a hydraulic fault — thirty litres delivered and the moisture did
+        not move means a clogged emitter or a closed tap, which nothing else in
+        the system can see.
+        """
+        state = event.data.get("new_state") if event else self._hass.states.get(self._own_probe)
+        if state is None or state.state in ("unavailable", "unknown"):
+            return
+        try:
+            raw = float(state.state)
+        except (ValueError, TypeError):
+            return
+        vwc = probe_percent_to_fraction(raw)
+        if vwc is None:
+            # The measurement is withdrawn, not held. Holding the last value is
+            # what turns a probe that has started talking nonsense into a zone
+            # that never waters again: the held figure stays fresh, so the
+            # freshness guard never fires. The estimate underneath is a worse
+            # number than a working probe and a far better one than a wrong
+            # probe (GH #234).
+            #
+            # Dropping the published reading along with it, so that the card and
+            # the attributes do not go on showing the last good percentage as if
+            # it were current. Clearing the implied figure is also what makes
+            # ``_review_probe_standing`` withdraw on every later read, rather
+            # than this branch having to remember to.
+            self._probe_vwc = None
+            self._probe_implied_mm = None
+            if self._probe_drives:
+                self._zone.measured_deficit = None
+            if not self._own_probe_warned:
+                self._own_probe_warned = True
+                _LOGGER.warning(
+                    "Zone '%s': probe '%s' reported %s, which is not a reading on the 0-100 scale "
+                    "this integration supports. The zone is using the weather estimate instead",
+                    self._zone_name,
+                    self._own_probe,
+                    raw,
+                )
+            if getattr(self, "hass", None):
+                self.async_write_ha_state()
+            return
+        self._own_probe_warned = False
+        # The state's own timestamp where there is one: it says when the probe
+        # spoke, which is the quantity being measured, rather than when this
+        # callback got round to it.
+        #
+        # ``last_reported`` and not ``last_updated``: the question here is
+        # whether the probe is alive, and a probe that republishes the same
+        # number is alive. ``last_updated`` moves only when the value changes,
+        # so on ground that has plateaued it stops while the probe keeps
+        # talking - and this timestamp is what the freshness check falls back on
+        # whenever the probe's device cannot be resolved. Reading it there made
+        # a healthy probe on still ground look silent, and the zone was handed
+        # back to the weather estimate on a different scale (GH #234, two
+        # installations).
+        changed = getattr(state, "last_updated", None)
+        stamp = getattr(state, "last_reported", None) or changed
+        seen = stamp if isinstance(stamp, datetime) and stamp.tzinfo else datetime.now(UTC)
+        if isinstance(changed, datetime) and changed.tzinfo:
+            self._probe_value_moved_at = changed
+        # The gap between two readings is deliberately *not* fed to the bar. It
+        # measures how long the soil took to move by a whole point, which is a
+        # property of the weather, and the bar is about the device. Feeding it
+        # both is what set the bar at 33 minutes on a probe that reports every
+        # 55 (2026-09-16). The bar is fed from the device's own silences, in
+        # ``_observe_probe_device``.
+        self._probe_last_seen = seen
+        self._probe_silent_logged = False
+
+        self._probe_vwc = vwc
+        measured = self._probe_model.step(VWCReading(vwc=vwc))
+        self._probe_implied_mm = measured.value_mm
+        if self._probe_drives:
+            # The whole value object, not just the number: it already carries
+            # VWC_PER_ZONE, which is the truthful frame for a measurement of one
+            # patch of soil and the one thing a hand-built Deficit here would get
+            # wrong. This is also what ends the wait after a delivery, because
+            # the reading that arrives now is the first that can have seen it.
+            self._zone.measured_deficit = measured
         if getattr(self, "hass", None):
             self.async_write_ha_state()
 
@@ -1561,23 +2705,105 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         if expected_s <= 0:
             return self._delivery_timeout
         bound_s = round(expected_s * DELIVERY_DURATION_MARGIN)
-        if bound_s > self._delivery_timeout and not self._timeout_caps_job_warned:
+        # Same comparison as `timeout_caps_duration`, and for the same reason:
+        # the log used to fire on `bound_s`, so it announced that irrigation
+        # "will stop short" whenever the allowance was tighter than twice the
+        # job — including when the job fitted with room to spare.
+        if expected_s > self._delivery_timeout and not self._timeout_caps_job_warned:
             # The cap bites: the zone needs more time than the user allows, so
             # it will stop short. Silence here would under-water the zone every
             # cycle with nothing to show for it — the failure this whole bound
             # exists to avoid, only in the other direction.
             self._timeout_caps_job_warned = True
             _LOGGER.warning(
-                "Zone '%s' needs about %ds to deliver %.1fL at %.2f L/min, but its safety"
+                "Zone '%s' needs about %ds to deliver %.1fL at %.1f L/h, but its safety"
                 " timeout is %ds — irrigation will stop short. Raise the safety timeout, or"
                 " check that the configured flow rate matches the real one",
                 self._zone_name,
                 expected_s,
                 self.volume_liters,
-                self._flow_rate,
+                self._flow_rate * 60,
                 self._delivery_timeout,
             )
         return min(self._delivery_timeout, bound_s)
+
+    @property
+    def timeout_caps_duration(self) -> bool:
+        """True when the safety timeout is shorter than the job needs.
+
+        The zone will stop short: it opens, it runs out of allowance, and it
+        closes having delivered less than the deficit asked for. Nothing is
+        broken and nothing errors — the garden is simply under-watered every
+        cycle, which is the quietest failure this project has.
+
+        Published so the card can flag it without re-deriving the rule. The
+        comparison lives here, next to the clamp it describes, because a second
+        copy in JavaScript would be a second source of truth for a safety
+        bound — and the two would drift the first time the margin changed.
+        """
+        expected_s = self._guard_duration_s
+        if expected_s <= 0:
+            return False
+        # The JOB against the allowance, not the job plus its headroom. The
+        # earlier version compared `expected * DELIVERY_DURATION_MARGIN`, which
+        # is the bound used to *tighten* a short job's timeout — a different
+        # quantity. It fired on zones that finish comfortably: with a 4969 s job
+        # and a 5400 s allowance it claimed the zone would stop short, and the
+        # zone stops short of nothing. Found in the field the same afternoon the
+        # warning became visible, which is the argument for making it visible.
+        return expected_s > self._delivery_timeout
+
+    @property
+    def last_valve_test(self) -> dict | None:
+        """The last supervised test result, or ``None`` if never tested."""
+        return self._last_valve_test
+
+    def record_valve_test(self, result: dict) -> None:
+        """Keep the last supervised test result and publish it.
+
+        Kept on the zone rather than in a store of its own because it is a fact
+        *about this zone's plumbing*, and because the place people look for it is
+        the zone they just tested. One result, not a history: the history is worth
+        having (a delivery that decays over weeks is how clogged emitters
+        announce themselves) and is deliberately out of this first delivery.
+        """
+        self._last_valve_test = result
+        # `getattr`, not `self.hass`: the attribute does not exist until Home
+        # Assistant adds the entity, and a test can complete during startup.
+        # The same guard is used elsewhere in this file for the same reason.
+        if getattr(self, "hass", None) is not None:
+            self.async_write_ha_state()
+
+    @property
+    def active_warnings(self) -> list[str]:
+        """Conditions that change how much water this zone gets, as codes.
+
+        Codes and not sentences: the card owns the wording and the translation,
+        the entity owns the truth. A rendered string here would need a second
+        home for every language and would put user-facing copy in the layer
+        that decides irrigation.
+
+        Only conditions derivable from the current configuration and state
+        belong here. The one-shot ``_warned`` flags elsewhere in this file mark
+        things that happened *once* to a reading; those need their own carrier
+        and are deliberately not folded in.
+        """
+        out: list[str] = []
+        # Reachability first, and outside the mode gate: a valve that stopped
+        # answering is not a configuration nuance, and it applies to every
+        # delivery mode including monitoring. `None` means "not judged yet" and
+        # must not read as trouble.
+        if self.valve_reachable is False:
+            out.append("valve_unreachable")
+        if self._delivery_mode == DELIVERY_MODE_ESTIMATED_FLOW:
+            return out
+        if self.timeout_caps_duration:
+            out.append("timeout_caps_duration")
+        if self._flow_rate <= 0:
+            # Same condition as the once-per-boot log below: no guard flow means
+            # the expected duration is unknown and the timeout sits at its floor.
+            out.append("no_guard_flow")
+        return out
 
     @property
     def watchdog_timeout(self) -> int:
@@ -1616,8 +2842,25 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         return self._hw_max_duration_payload
 
     def set_operator(self, operator) -> None:
-        """Attach the ValveOperator so FSM state can be exposed in attributes."""
+        """Attach the driver so FSM state can be exposed in attributes."""
         self._operator = operator
+
+    @property
+    def effective_flow_lpm(self) -> float:
+        """The rate to estimate with: what the driver has learned, else the design rate.
+
+        Which of the two is better is the driver's judgement — it is the only
+        object holding the measured sessions, and it applies the precedence
+        rule in one place. Asking it here is what keeps that rule from being
+        re-derived by every caller that needs a number.
+
+        A zone with no driver falls back to the design rate, because there is no
+        history to consult: a zone with no valve never delivers, and a smart
+        valve doses itself without going through a driver at all.
+        """
+        if self._operator is not None:
+            return self._operator.effective_flow_lpm
+        return self._flow_rate
 
     @property
     def _within_startup_grace(self) -> bool:
@@ -1682,12 +2925,39 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             return None if self._within_startup_grace else False
         if self._operator is not None and self._operator.state == ValveState.UNREACHABLE:
             return None if self._within_startup_grace else False
-        return True
+        # 3. **Comparative** — the valve has been far quieter than its siblings.
+        #    Weaker than a failed command and weaker than an unavailable entity,
+        #    so it is consulted last; but it is the only one that speaks *before*
+        #    an irrigation is due, which is the whole point of watching. A device
+        #    off the mesh keeps publishing a stale, perfectly ordinary `off`, so
+        #    the first two never fire for it (field: two valves off the mesh,
+        #    2026-08-18).
+        silent_vs_siblings = self._silence_verdict is True and not self._within_startup_grace
+        return not silent_vs_siblings
 
     @property
     def is_irrigating(self) -> bool:
         """True if this zone is currently being irrigated."""
         return self._irrigating
+
+    def set_silence_verdict(self, silent: bool | None) -> None:
+        """Record what the fleet-silence watch concluded about this valve.
+
+        ``None`` means the watch could not tell — one valve, or a fleet with no
+        observed cadence yet — and must not be drawn as either state.
+        """
+        self._silence_verdict = silent
+
+    def set_awaiting_valve(self, state: bool) -> None:
+        """Mark that a valve command has been issued and has not yet resolved.
+
+        Between pressing *Irrigate* and the valve confirming, nothing on the
+        card changed: a zone whose valve took 48 s to give up looked exactly
+        like a button that did nothing (field, 'Giardino Pino', 2026-08-18).
+        The wait is the part worth showing — it is also the part that ends in
+        a failure often enough to matter.
+        """
+        self._awaiting_valve = state
 
     def set_irrigating(self, state: bool) -> None:
         """Set the irrigating state (called by controller)."""
@@ -1726,7 +2996,12 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._yearly_water_delivered = 0.0
         self._yearly_water_year = datetime.now().year
 
-    def reset_deficit(self, source: str = "unknown", delivered_liters: float | None = None) -> None:
+    def reset_deficit(
+        self,
+        source: str = "unknown",
+        delivered_liters: float | None = None,
+        duration_s: int | None = None,
+    ) -> None:
         """Reset this zone's deficit to zero (called after irrigation).
 
         When ``delivered_liters`` is provided it is credited to the water
@@ -1736,26 +3011,22 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         cycle settles. When omitted (manual reset / mark-irrigated), the volume
         is derived from the current deficit via ``volume_liters``.
         """
-        self._last_irrigation_source = source
-        credited = round(self.volume_liters if delivered_liters is None else delivered_liters, 1)
-        self._last_volume_delivered = credited
-        self._session_water_delivered = credited
-        self._total_water_delivered += credited
-        # Reset yearly counter on year change
-        now = datetime.now()
-        if now.year != self._yearly_water_year:
-            self._yearly_water_delivered = 0.0
-            self._yearly_water_year = now.year
-        self._yearly_water_delivered += credited
-        self._last_irrigated = now
-        self._zone_deficit = 0.0
+        self._zone.mark_irrigated(
+            source=source, at=datetime.now(), credited_liters=delivered_liters, duration_s=duration_s
+        )
+        # The same channel ``settle_cycle`` uses, and for the same reason. This
+        # is the branch a *successful* delivery takes, so leaving it silent meant
+        # the figures that change at the close were refreshed on every partial
+        # run and on no complete one -- the case that happens every day. On the
+        # field install the expected duration stood at 80 s, the value written
+        # while the deficit was still owed, for as long as it took the next tick
+        # to arrive (pino, 2026-09-10).
+        self.notify_session_listeners()
 
     @property
     def volume_liters(self) -> float:
-        """Volume to irrigate this zone [L]."""
-        if self._efficiency <= 0:
-            return 0.0
-        return self._zone_deficit * self._area / self._efficiency
+        """Volume to irrigate this zone [L] — the zone's own demand."""
+        return self._zone.water_demand_l
 
     @property
     def _guard_duration_s(self) -> int:
@@ -1834,8 +3105,123 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
             "volume_liters": round(self.volume_liters, 1),
             "duration_s": self.duration_s,
             "deficit_mm": round(self._zone_deficit, 2),
+            # The reserve, published separately because it is what a restart has
+            # to restore. While a probe drives the zone, ``deficit_mm`` above is
+            # the soil's answer and this is the weather model still integrating
+            # underneath; with no probe the two are the same number. Restoring
+            # the wrong one of the two is GH #234's second defect.
+            "estimate_mm": round(self._et_deficit, 2),
+            "deficit_source": self.deficit_source,
+            "probe_set_aside": self.probe_set_aside,
             "irrigating": self._irrigating,
+            "awaiting_valve": self._awaiting_valve,
         }
+        if self._delivery_mode != DELIVERY_MODE_ESTIMATED_FLOW:
+            # Only where the timeout is actually the closing criterion: in
+            # estimated mode the valve opens for a computed duration and the
+            # bound never bites, so flagging it would warn about a limit that
+            # does not apply. `delivery_timeout_s` is published further down by
+            # the block that already owned it — one home per attribute.
+            attrs["timeout_caps_duration"] = self.timeout_caps_duration
+            warnings = self.active_warnings
+            if warnings:
+                attrs["warnings"] = warnings
+
+        operator = getattr(self, "_operator", None)
+        if operator is not None and getattr(operator, "meter_publication_samples", None) is not None:
+            # What the meter's silence is worth. A counter reporting every 300 s
+            # cannot supervise a 359 s session, and that is visible here and
+            # nowhere else: no single reading shows a cadence. Absent rather
+            # than zero while unmeasured, since a zero would read as "instant".
+            attrs["meter_guard_usable"] = operator.meter_guard_usable
+            # What the card shows is the typical gap between publications, and
+            # the count of intervals behind it, so "measured" is visibly
+            # different from "seen once". The worst case rides along for
+            # diagnostics: it is what sizes the post-close wait, and reading a
+            # long wait against a short cadence is otherwise puzzling.
+            attrs["meter_refresh_samples"] = operator.meter_publication_samples
+            attrs["meter_refresh_min_samples"] = MIN_PUBLICATION_SAMPLES
+            if (median := operator.meter_publication_median_s) is not None:
+                attrs["meter_refresh_s"] = round(median)
+            if (peak := operator.meter_publication_peak_s) is not None:
+                attrs["meter_refresh_peak_s"] = round(peak)
+            if (kind := operator.meter_refresh_kind) is not None:
+                attrs["meter_refresh_kind"] = kind
+
+        if self._last_valve_test:
+            # Prefixed and flat: the card and the report block read these, and a
+            # nested dict in an attribute is awkward for both.
+            for key, value in self._last_valve_test.items():
+                if key == "zone_name":
+                    continue
+                attrs[f"valve_test_{key}"] = value
+
+        if self._probe_vwc is not None:
+            # Published, not used: the raw material for observing field capacity
+            # and the soil's dynamics, and for spotting a delivery that moved no
+            # water. The deficit above is the model's, and stays the model's.
+            # Named for what it is: a position on the probe's 0-100 scale, not a
+            # volumetric water content, which is the confusion the whole of
+            # GH #234 came out of.
+            attrs["probe_moisture_pct"] = round(self._probe_vwc * 100, 1)
+            attrs["probe_implied_deficit_mm"] = round(self._probe_implied_mm, 2)
+            # When the reading was taken. Published because it is what carries
+            # the measurement across a restart with its age intact: a reading
+            # from a minute ago and one from last week are the same number and
+            # must not be believed the same way. Restoring the figure without
+            # its timestamp would make every stale probe look fresh at boot,
+            # which is the opposite of the bug this pair exists to fix.
+            if self._probe_last_seen is not None:
+                attrs["probe_last_seen"] = self._probe_last_seen.isoformat()
+            # Beside it, and deliberately not instead of it: this one answers
+            # "is the reading moving", the other "is the probe alive". Far apart
+            # is a probe reporting a frozen value.
+            if self._probe_value_moved_at is not None:
+                attrs["probe_value_moved_at"] = self._probe_value_moved_at.isoformat()
+            # The bar the age above is judged against. Restoring one without the
+            # other leaves an old age measured against nothing, and nothing is
+            # read as fresh - which is how a probe silent for fifteen hours was
+            # believed after a reload, and its zone's deficit fell by 9 mm.
+            samples = self._probe_quiet.as_samples()
+            if samples:
+                attrs["probe_quiet_samples"] = samples
+        if self._probe_drives:
+            # What the reading was multiplied by, published beside what it
+            # produced. The number carries the authority of a measurement and
+            # the scale of a declaration, and the only honest way to show it is
+            # to show both.
+            attrs["probe_root_depth_m"] = self._own_root_depth
+            attrs["probe_field_capacity"] = self._own_field_capacity
+            attrs["probe_wilting_point"] = self._own_wilting_point
+            # The reservoir the deficit is a share of: 2 mm missing means one
+            # thing under a pot and another under a lawn, and this is the number
+            # that says which. Also the ceiling the reading can produce, so a
+            # deficit stuck near it is readable as "the probe says bone dry"
+            # rather than as an arbitrary figure.
+            if self._probe_model is not None:
+                attrs["probe_reservoir_mm"] = round(self._probe_model.reservoir_mm, 1)
+            # The soil alongside the number it produced. With the automatic
+            # entry this is the whole of what the zone was told about its
+            # ground, and an assumption that is not visible is the hardcoded
+            # constant this replaced with a dropdown in front of it.
+            attrs["probe_soil_type"] = self._soil_type
+            attrs["probe_fresh"] = self._probe_is_fresh()
+            # The bar the line above was judged against, beside the verdict.
+            # Without it a zone on the estimate is a fact with no explanation,
+            # and the explanation is the whole of the diagnosis: this probe was
+            # called stopped at 34 minutes because the bar had been learned at
+            # 33. ``None`` until a stretch of quiet has ended, which reads
+            # correctly as "no bar yet" rather than as "no quiet allowed".
+            now = datetime.now(UTC)
+            bar_s = self._probe_quiet.value(now.timestamp())
+            attrs["probe_quiet_bar_s"] = round(bar_s) if bar_s is not None else None
+            # And the number the bar was compared against: how long the device
+            # has been quiet, which is not how old the reading is. Published
+            # side by side because reading them apart is what made a live probe
+            # look dead for eight hours.
+            attrs["probe_device_silence_s"] = (
+                round((now - self._probe_device_seen).total_seconds()) if self._probe_device_seen else None
+            )
         attrs["total_water_delivered_l"] = round(self._total_water_delivered, 1)
         attrs["yearly_water_delivered_l"] = round(self._yearly_water_delivered, 1)
         attrs["yearly_water_year"] = self._yearly_water_year
@@ -1876,7 +3262,7 @@ class ZoneDeficitSensor(SensorEntity):
 
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.PRECIPITATION
-    _attr_name = "Deficit"
+    _attr_translation_key = "deficit"
     _attr_native_unit_of_measurement = UnitOfLength.MILLIMETERS
     # Native precision in mm; HA scales up the decimals automatically when the
     # user's unit system converts to inches (issue #139).
@@ -1895,9 +3281,19 @@ class ZoneDeficitSensor(SensorEntity):
         if device_info:
             self._attr_device_info = device_info
         zone_sensor._dryness.register_zone_listener(self._on_update)
+        # And on session close, not only on the periodic broadcast. The deficit
+        # is settled the moment a run ends, and waiting for the next tick left
+        # the figure showing the debt the irrigation had just paid off -- which
+        # is exactly the minute somebody looks (field, pino 2026-09-10: 0.34 mm
+        # on screen, 0.00 in the model, for the three minutes after the close).
+        zone_sensor.register_session_listener(self._on_session_update)
 
     def _on_update(self, dt_h: float, et_h: float, rain: float) -> None:
         """Update when the dryness sensor broadcasts."""
+        if getattr(self, "hass", None):
+            self.async_write_ha_state()
+
+    def _on_session_update(self) -> None:
         if getattr(self, "hass", None):
             self.async_write_ha_state()
 
@@ -1910,6 +3306,13 @@ class ZoneDeficitSensor(SensorEntity):
         attrs = {
             "flow_rate_lpm": self._zone_sensor._flow_rate,
             "irrigating": self._zone_sensor._irrigating,
+            "awaiting_valve": self._zone_sensor._awaiting_valve,
+            # Where this number came from, on the entity that shows the number.
+            # It lived only on the parent zone entity, which is not what the
+            # card reads - so the one figure whose meaning can change had no way
+            # to say which meaning was current.
+            "deficit_source": self._zone_sensor.deficit_source,
+            "probe_set_aside": self._zone_sensor.probe_set_aside,
         }
         if self._zone_sensor._last_irrigated:
             attrs["last_session_duration_s"] = self._zone_sensor._last_session_duration_s
@@ -1943,7 +3346,7 @@ class ZoneRainSensor(SensorEntity):
 
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.WATER
-    _attr_name = "Rain Yearly"
+    _attr_translation_key = "rain_yearly"
     _attr_native_unit_of_measurement = UnitOfVolume.LITERS
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:weather-rainy"
@@ -1990,7 +3393,7 @@ class ZoneSessionWaterSensor(SensorEntity):
 
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.VOLUME_STORAGE
-    _attr_name = "Session water"
+    _attr_translation_key = "session_water"
     _attr_native_unit_of_measurement = UnitOfVolume.LITERS
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:water-pump"
@@ -2006,9 +3409,16 @@ class ZoneSessionWaterSensor(SensorEntity):
         if device_info:
             self._attr_device_info = device_info
         zone_sensor._dryness.register_zone_listener(self._on_update)
+        # A running total has to stop running the moment the run does, or the
+        # zero written at the close is not seen until the next hourly tick.
+        zone_sensor.register_session_listener(self._on_session_update)
 
     def _on_update(self, dt_h: float, et_h: float, rain: float) -> None:
         """Update when the dryness sensor broadcasts."""
+        if getattr(self, "hass", None):
+            self.async_write_ha_state()
+
+    def _on_session_update(self) -> None:
         if getattr(self, "hass", None):
             self.async_write_ha_state()
 
@@ -2037,7 +3447,7 @@ class ZoneYearlyWaterSensor(SensorEntity):
     # this is a cumulative consumption total (GH #105). WATER also makes
     # the sensor usable in the HA Energy dashboard water tracking.
     _attr_device_class = SensorDeviceClass.WATER
-    _attr_name = "Irrigated Yearly"
+    _attr_translation_key = "irrigated_yearly"
     _attr_native_unit_of_measurement = UnitOfVolume.LITERS
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:calendar-clock"
@@ -2077,7 +3487,7 @@ class ZoneDurationSensor(SensorEntity):
 
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.DURATION
-    _attr_name = "Duration"
+    _attr_translation_key = "duration"
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:timer"
@@ -2114,7 +3524,7 @@ class ZoneLastDurationSensor(SensorEntity):
 
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.DURATION
-    _attr_name = "Last duration"
+    _attr_translation_key = "last_duration"
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:timer"
@@ -2131,8 +3541,15 @@ class ZoneLastDurationSensor(SensorEntity):
         if device_info:
             self._attr_device_info = device_info
         zone_sensor._dryness.register_zone_listener(self._on_update)
+        # Also on session close, so the figure is right the moment it changes
+        # rather than at the next ET tick.
+        zone_sensor.register_session_listener(self._on_session_update)
 
     def _on_update(self, dt_h: float, et_h: float, rain: float) -> None:
+        if getattr(self, "hass", None):
+            self.async_write_ha_state()
+
+    def _on_session_update(self) -> None:
         if getattr(self, "hass", None):
             self.async_write_ha_state()
 
@@ -2156,23 +3573,39 @@ class _ZoneTextSensor(SensorEntity):
     def __init__(
         self,
         zone_sensor: IrrigationZoneSensor,
-        name: str,
+        translation_key: str,
         icon: str,
         unique_suffix: str,
         device_info: DeviceInfo | None = None,
         diagnostic: bool = False,
+        follows_session: bool = False,
     ) -> None:
+        """``follows_session`` for anything that changes when a session closes.
+
+        Without it the entity keeps whatever it last published until Home
+        Assistant next polls it, which is fine for a value that changes with the
+        weather and wrong for one that changes the instant a button is pressed:
+        *Mark irrigated* rewrote the zone and the page went on showing the
+        previous run for up to half a minute, which reads as a button that did
+        not work (GH #216).
+        """
         self._zone_sensor = zone_sensor
-        self._attr_name = name
+        self._attr_translation_key = translation_key
         self._attr_icon = icon
         slug = zone_sensor.zone_name.lower().replace(" ", "_")
         self._attr_unique_id = f"{unique_suffix}_{slug}"
+        if follows_session:
+            zone_sensor.register_session_listener(self._on_session_update)
         if device_info:
             self._attr_device_info = device_info
         if diagnostic:
             from homeassistant.const import EntityCategory
 
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def _on_session_update(self) -> None:
+        if getattr(self, "hass", None):
+            self.async_write_ha_state()
 
 
 class ZoneLastIrrigatedSensor(_ZoneTextSensor):
@@ -2186,10 +3619,11 @@ class ZoneLastIrrigatedSensor(_ZoneTextSensor):
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
             zone_sensor,
-            "Last irrigated",
+            "last_irrigated",
             "mdi:clock-outline",
             "last_irrigated_zone",
             device_info,
+            follows_session=True,
         )
 
     @property
@@ -2201,20 +3635,61 @@ class ZoneLastIrrigatedSensor(_ZoneTextSensor):
 
 
 class ZoneLastSourceSensor(_ZoneTextSensor):
-    """How the zone was last irrigated."""
+    """How the zone was last irrigated.
+
+    An ``enum`` device class with a translation key, rather than a plain string:
+    the raw value is an internal token (``mark_irrigated``, ``scheduled``) and it
+    was reaching the user verbatim. Translating it here means Home Assistant
+    renders it everywhere — card, history, logbook, voice — instead of only in
+    the places we remembered to handle.
+
+    Every value the controller can write must be listed in ``options`` or Home
+    Assistant rejects the state, so this list is the authoritative enumeration:
+    the four ``Trigger`` members, plus ``button`` for the card's actions,
+    ``automatic`` as the controller's fallback, and the two ``reset_deficit``
+    reasons that also surface here.
+    """
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_translation_key = "last_source"
+    _attr_options: ClassVar[list[str]] = [
+        "scheduled",
+        "reactive",
+        "manual",
+        "service",
+        "button",
+        "automatic",
+        "mark_irrigated",
+        "service_reset",
+    ]
 
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
             zone_sensor,
-            "Last source",
+            "last_source",
             "mdi:information-outline",
             "last_source_zone",
             device_info,
+            follows_session=True,
         )
 
     @property
     def native_value(self) -> str | None:
-        return self._zone_sensor._last_irrigation_source
+        """The raw token, or ``None`` when it is one we never declared.
+
+        Returning an undeclared value would make Home Assistant log the state as
+        invalid on every write; a gap is quieter than a broken entity, and the
+        log line below says which token is missing from ``options``.
+        """
+        value = self._zone_sensor._last_irrigation_source
+        if value is None or value in self._attr_options:
+            return value
+        _LOGGER.warning(
+            "Zone '%s': irrigation source '%s' is not a declared option — add it to ZoneLastSourceSensor",
+            self._zone_sensor.zone_name,
+            value,
+        )
+        return None
 
 
 class ZoneFlowRateSensor(_ZoneTextSensor):
@@ -2231,7 +3706,7 @@ class ZoneFlowRateSensor(_ZoneTextSensor):
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
             zone_sensor,
-            "Flow rate",
+            "flow_rate",
             "mdi:gauge",
             "flow_rate_zone",
             device_info,
@@ -2258,6 +3733,164 @@ class ZoneFlowRateSensor(_ZoneTextSensor):
         return round(lpm * LPM_TO_LPH, 1)
 
 
+class ZoneMeasuredFlowSensor(_ZoneTextSensor):
+    """What the last supervised test actually measured, next to what was declared.
+
+    Two reasons this exists rather than living only in the log. The first is
+    immediate: without it, pressing *Save measured flow rate* is a blind act —
+    you would be writing a number you never saw. The second is the one that
+    lasts: with a `measurement` state class Home Assistant keeps the series, and
+    a series is worth more than any single reading here. Flow depends on mains
+    pressure, so it depends on the hour and on who else is drawing water; one
+    test tells you the flow *at that moment*, while a run of them tells you the
+    zone's flow and, at steady pressure, a slow decline is emitters clogging.
+
+    Sits beside the *Design flow rate* on purpose. Seeing 205 next to 360 is
+    the whole argument for the feature, and no wording explains it as well.
+    """
+
+    _attr_device_class = SensorDeviceClass.VOLUME_FLOW_RATE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, zone_sensor, device_info=None):
+        super().__init__(
+            zone_sensor,
+            "measured_flow",
+            "mdi:gauge-full",
+            "measured_flow_zone",
+            device_info,
+            diagnostic=True,
+        )
+
+    @property
+    def _is_imperial(self) -> bool:
+        units = getattr(getattr(self, "hass", None), "config", None)
+        units = getattr(units, "units", None)
+        return getattr(units, "volume_unit", None) == UnitOfVolume.GALLONS
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        if self._is_imperial:
+            return UnitOfVolumeFlowRate.GALLONS_PER_HOUR
+        return UnitOfVolumeFlowRate.LITERS_PER_HOUR
+
+    @property
+    def native_value(self) -> float | None:
+        """The median of what this zone has really delivered — `None` until it has.
+
+        Reads the rolling history rather than the last test on purpose. Flow
+        follows mains pressure, so a single run — supervised or not — reports
+        the flow *at that moment*; the median over sessions reports the zone.
+        A supervised test is not excluded, it is simply the first sample in the
+        same series.
+        """
+        operator = getattr(self._zone_sensor, "_operator", None)
+        lpm = getattr(operator, "measured_flow_lpm", None) if operator else None
+        if not lpm:
+            return None
+        return round(lpm * (LPM_TO_GPH if self._is_imperial else LPM_TO_LPH), 1)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """The gap against the design rate, plus what the last test could see.
+
+        `vs_design_pct` is the diagnosis the pair exists for: the design rate is
+        the sum of the emitters' rated output, so a zone delivering well under it
+        is losing water to pressure or to clogged emitters. One number alone says
+        nothing — 205 L/h is only alarming next to a design figure of 360.
+
+        `smallest_step` with `updates` is the limit of detection: a meter that
+        changed once in a minute cannot describe a run that short, however
+        precise its unit looks.
+        """
+        design_lpm = self._zone_sensor._flow_rate
+        attrs: dict = {
+            "design_flow_lph": round(design_lpm * LPM_TO_LPH, 1) if design_lpm else None,
+        }
+        operator = getattr(self._zone_sensor, "_operator", None)
+        if operator is not None:
+            history = operator.session_flow_diagnostics
+            attrs["sample_count"] = history.get("sample_count")
+            attrs["min_samples_required"] = history.get("min_samples_required")
+            attrs["min_lph"] = round(v * LPM_TO_LPH, 1) if (v := history.get("min_lpm")) else None
+            attrs["max_lph"] = round(v * LPM_TO_LPH, 1) if (v := history.get("max_lpm")) else None
+            measured = operator.measured_flow_lpm
+            if measured and design_lpm:
+                attrs["vs_design_pct"] = round(measured / design_lpm * 100.0, 1)
+
+        test = self._zone_sensor.last_valve_test
+        if test:
+            attrs.update(
+                {
+                    "last_test_volume_l": test.get("volume_l"),
+                    "last_test_duration_s": test.get("duration_s"),
+                    "smallest_step": test.get("smallest_step"),
+                    "updates": test.get("updates"),
+                    "meter_entity": test.get("meter_entity"),
+                    "notes": test.get("notes"),
+                }
+            )
+        return attrs
+
+
+class ZoneMeterResolutionSensor(_ZoneTextSensor):
+    """The smallest increment this zone's water meter has ever reported.
+
+    Its limit of detection, learned by watching deliveries — no test required.
+    Exposed rather than kept internal because it is the number that decides how
+    long the integration must wait before a still counter means anything, and a
+    control whose basis is invisible cannot be argued with when it misfires.
+
+    With a series behind it, it also reports on the meter itself: a resolution
+    that suddenly coarsens is a counter that has started skipping.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, zone_sensor, device_info=None):
+        super().__init__(
+            zone_sensor,
+            "meter_resolution",
+            "mdi:ruler",
+            "meter_resolution_zone",
+            device_info,
+            diagnostic=True,
+        )
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return UnitOfVolume.GALLONS if self._is_imperial else UnitOfVolume.LITERS
+
+    @property
+    def _is_imperial(self) -> bool:
+        units = getattr(getattr(self, "hass", None), "config", None)
+        units = getattr(units, "units", None)
+        return getattr(units, "volume_unit", None) == UnitOfVolume.GALLONS
+
+    @property
+    def native_value(self) -> float | None:
+        """`None` until the counter has been seen to move at least once."""
+        operator = getattr(self._zone_sensor, "_operator", None)
+        resolution = getattr(operator, "meter_resolution_l", None) if operator else None
+        if not resolution:
+            return None
+        return round(resolution * LITERS_TO_GALLONS if self._is_imperial else resolution, 3)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """What the resolution costs in waiting, which is why it is published."""
+        operator = getattr(self._zone_sensor, "_operator", None)
+        if operator is None:
+            return {}
+        attrs: dict = {}
+        if (first_tick := getattr(operator, "time_to_first_tick_s", lambda: None)()) is not None:
+            attrs["time_to_first_tick_s"] = round(first_tick, 1)
+            # The shortest supervised test that can see anything at all: one
+            # increment proves the valve opened, several are needed to measure.
+            attrs["shortest_useful_test_min"] = max(1, math.ceil(first_tick * 5 / 60))
+        return attrs
+
+
 class ZoneLastVolumeSensor(_ZoneTextSensor):
     """Volume delivered in the last irrigation."""
 
@@ -2267,10 +3900,11 @@ class ZoneLastVolumeSensor(_ZoneTextSensor):
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
             zone_sensor,
-            "Last volume",
+            "last_volume",
             "mdi:water",
             "last_volume_zone",
             device_info,
+            follows_session=True,
         )
 
     @property
@@ -2284,7 +3918,7 @@ class ZoneIrrigationModeSensor(_ZoneTextSensor):
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
             zone_sensor,
-            "Irrigation mode",
+            "irrigation_mode",
             "mdi:cog",
             "irrigation_mode_zone",
             device_info,
@@ -2302,7 +3936,7 @@ class ZoneIrrigationTimeSensor(_ZoneTextSensor):
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
             zone_sensor,
-            "Irrigation time",
+            "irrigation_time",
             "mdi:clock-time-six",
             "irrigation_time_zone",
             device_info,
@@ -2326,7 +3960,7 @@ class ZoneThresholdSensor(_ZoneTextSensor):
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
             zone_sensor,
-            "Threshold",
+            "threshold",
             "mdi:target",
             "threshold_zone",
             device_info,
@@ -2347,7 +3981,7 @@ class ZoneAreaSensor(_ZoneTextSensor):
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
             zone_sensor,
-            "Area",
+            "area",
             "mdi:texture-box",
             "area_zone",
             device_info,
@@ -2360,12 +3994,21 @@ class ZoneAreaSensor(_ZoneTextSensor):
 
 
 class ZoneEfficiencySensor(_ZoneTextSensor):
-    """Configured zone efficiency."""
+    """Configured zone efficiency.
+
+    ``state_class`` on a dimensionless number, for a reason that is about
+    presentation rather than statistics: without a unit *or* a state class Home
+    Assistant shows the raw state string, so this read ``0.92`` beside a
+    threshold reading ``20,0 mm`` in the same Spanish card - one number
+    localised and the next not (GH #279, @laurash96).
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
             zone_sensor,
-            "Efficiency",
+            "efficiency",
             "mdi:percent",
             "efficiency_zone",
             device_info,
@@ -2378,12 +4021,20 @@ class ZoneEfficiencySensor(_ZoneTextSensor):
 
 
 class ZoneKcSensor(_ZoneTextSensor):
-    """Current crop coefficient Kc (effective: base curve * site exposure)."""
+    """Current crop coefficient Kc (effective: base curve * site exposure).
+
+    Carries a ``state_class`` for the same presentation reason as
+    :class:`ZoneEfficiencySensor`. Unlike efficiency it genuinely varies - the
+    seasonal curve moves it through the year - so the long-term statistics this
+    also switches on are worth having rather than merely harmless.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, zone_sensor, device_info=None):
         super().__init__(
             zone_sensor,
-            "Kc",
+            "kc",
             "mdi:leaf",
             "kc_zone",
             device_info,
@@ -2419,6 +4070,148 @@ class ZoneKcSensor(_ZoneTextSensor):
 # ══════════════════════════════════════════════════════════
 
 
+class WaterBalanceMethodSensor(SensorEntity):
+    """Which water-balance method is running, as an entity rather than an attribute.
+
+    An attribute would technically answer the question, but only for someone who
+    already knows to look for it. This is the one fact a user needs in order to
+    read every other number the integration publishes: a deficit means something
+    different depending on whether it was estimated from temperature, computed
+    from a full weather station, or measured by a probe.
+
+    It also makes two invisible behaviours visible. ``auto`` has to resolve to
+    something, and a stored choice whose sensors have gone degrades to what the
+    site can still support — in both cases what runs is not what is written in
+    the configuration, and until now nothing said so.
+
+    Diagnostic by category: it describes the installation, not the garden.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:function-variant"
+    _attr_should_poll = False
+    # An enum, not free text: the state is an identifier, and the frontend can
+    # only translate it — into "Simple (temperature only)" rather than
+    # "et_simple" — if the sensor declares the set it draws from.
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_translation_key = "water_balance_method"
+
+    def __init__(self, hub: DrynessIndexSensor, device_info: DeviceInfo | None = None) -> None:
+        """Mirror the method of ``hub``, on the hub's own device."""
+        from homeassistant.const import EntityCategory
+
+        self._hub = hub
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_unique_id = "water_balance_method"
+        # Only the methods that can run: an option the sensor can never report
+        # would be a promise in the dropdown of a state that never arrives.
+        self._attr_options = [m.method_id for m in MODEL_CATALOGUE if m.input_type in RUNNABLE_INPUTS]
+        if device_info:
+            self._attr_device_info = device_info
+
+    async def async_added_to_hass(self) -> None:
+        """Follow the hub, or the attributes freeze at whatever startup found.
+
+        This entity does not poll and has nothing of its own to react to, so
+        without a subscription it writes once — publishing an empty set of model
+        inputs forever, because at startup no reading has been built yet. The hub
+        writes its own state on every tick; this rides on that.
+        """
+        self.async_on_remove(self._hub.register_input_listener(self._republish))
+        self.async_write_ha_state()
+
+    @callback
+    def _republish(self) -> None:
+        """Republish: the method rarely changes, the inputs change every tick."""
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> str:
+        """The identifier of the method actually running."""
+        return self._hub.active_method
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """What was asked for, and what the site can feed — the *why* of the answer."""
+        return {
+            "configured": self._hub._configured_method,
+            "reason": self._hub._method_reason,
+            "reason_code": self._hub._reason_code,
+            "reason_params": self._hub._reason_params,
+            "reference_frame": self._hub.reference_frame.value,
+            "declared_sensors": sorted(k.value for k in self._hub.environment.declared_sensors),
+            "et_rate_mm_h": round(self._hub.current_et_rate, 4),
+            # Everything below is the last reading the model was given, split
+            # into measured and derived. It is the only place the two can be
+            # compared, which is what makes the estimate checkable instead of
+            # merely believable.
+            **self._hub._last_inputs,
+        }
+
+
+class ModelInputSensor(SensorEntity):
+    """One quantity the model derived, as an entity rather than an attribute.
+
+    Attributes answer "what is it now"; entities also answer "what has it been
+    doing", because Home Assistant records them and draws them. For a derived
+    value that is the whole point: the way to know whether a daily radiation is
+    right is to watch it over a week and see it follow the weather, which an
+    attribute cannot show.
+
+    Diagnostic by category, and only created for the model actually running —
+    an entity that is permanently unknown teaches the user to ignore the group
+    it lives in.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        hub: DrynessIndexSensor,
+        key: str,
+        unit: str,
+        icon: str,
+        precision: int = 2,
+        device_info: DeviceInfo | None = None,
+    ) -> None:
+        """Publish ``key`` from the hub's last model inputs."""
+        from homeassistant.const import EntityCategory
+
+        self._hub = hub
+        self._key = key
+        self._attr_translation_key = f"model_input_{key}"
+        self._attr_unique_id = f"model_input_{key}"
+        self._attr_native_unit_of_measurement = unit
+        self._attr_icon = icon
+        self._attr_suggested_display_precision = precision
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        if device_info:
+            self._attr_device_info = device_info
+
+    async def async_added_to_hass(self) -> None:
+        """Follow the hub's inputs directly, not its state.
+
+        And republish once on the way in: entities are added concurrently, so
+        whether the hub has already computed by the time this runs is a race.
+        Losing it left the entity reading unknown until the next tick, which is
+        the failure this whole path exists to remove.
+        """
+        self.async_on_remove(self._hub.register_input_listener(self._republish))
+        self.async_write_ha_state()
+
+    @callback
+    def _republish(self) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> float | None:
+        """The value, or ``None`` while the model has not produced one."""
+        value = self._hub._last_inputs.get(self._key)
+        return value if isinstance(value, (int, float)) else None
+
+
 class ZoneLinkedSensor(SensorEntity):
     """Mirrors the state of an external HA entity within the NeverDry zone device.
 
@@ -2434,14 +4227,14 @@ class ZoneLinkedSensor(SensorEntity):
         self,
         hass: HomeAssistant,
         source_entity_id: str,
-        name: str,
+        translation_key: str,
         icon: str,
         unique_id: str,
         device_info: DeviceInfo | None = None,
     ) -> None:
         self._hass = hass
         self._source_entity_id = source_entity_id
-        self._attr_name = name
+        self._attr_translation_key = translation_key
         self._attr_icon = icon
         self._attr_unique_id = unique_id
         if device_info:

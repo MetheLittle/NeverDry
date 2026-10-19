@@ -7,6 +7,491 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-19
+
+The domain model stops being scaffolding and starts running the integration. Each
+entry below links the design note that explains it properly — this is the summary,
+not the argument.
+
+### Added
+- **The card says where the deficit came from.** A zone once fell from 9.6 mm to
+  0.7 mm between two readings, with no rain, no irrigation and nothing having
+  happened in the garden: the number had not collapsed, the ruler had changed,
+  from a probe measurement to a weather estimate. Under the bar the card now
+  says which one it is - measured by the probe, estimated from the weather, or
+  estimated because the probe has gone quiet. The third is the one that was
+  missing: a zone that never had a probe and a zone whose probe has fallen
+  silent used to look identical, and they mean opposite things. The answer is
+  set in bold: on a line of small grey type it was the one thing a reader was
+  looking for and the hardest of the three to pick out.
+
+- **A compact card, and sections you can switch off**
+  ([#269](https://github.com/never-dry/NeverDry/issues/269)). The zone card is
+  built for reading one zone closely, which makes it the wrong shape for an
+  overview dashboard with eight of them. A Layout setting now offers Full,
+  Compact - status and the deficit bar, which is what an overview is for - and
+  Custom, which reveals a checkbox per section and starts from what Compact
+  shows rather than from an empty card. Warnings are not in that list and
+  cannot be switched off: a compact card that goes quiet about a valve stuck
+  open would be worse than a long one.
+
+- **A zone can water by what its soil measures.** Give a zone's probe the depth
+  its roots reach and that zone stops estimating its deficit and starts reading
+  it. The weather model keeps running underneath the whole time, so a probe that
+  goes quiet costs an afternoon on the estimate rather than a season: a reading
+  older than that probe's own usual rhythm is set aside and the zone falls back,
+  with a line in the log. The depth is the one number no table holds, because a
+  lawn, a hedge and a pot differ by a factor of four on the same ground.
+  ([#234](https://github.com/never-dry/NeverDry/issues/234))
+- **Soil type as a choice rather than a number.** Sandy, loam, clay, or automatic
+  for a middle soil, and it supplies the field capacity the probe's reading is
+  measured against. Left on automatic the form tells you which soil it is
+  assuming, because a default nobody is told about is a hardcoded constant with a
+  dropdown in front of it. *Custom* is there for anyone who has measured their
+  own.
+- **Four ways to compute the water balance, and the site picks one.**
+  Temperature-only, Hargreaves, Penman-Monteith, or a soil probe. *Automatic*
+  takes the best your sensors support and says which one is running, because the
+  number depends on it. Five optional sensor pickers — humidity, wind, net
+  radiation and the two daily temperature extremes — unlock the richer tiers; a
+  site that declares none behaves exactly as before.
+  ([design](https://github.com/never-dry/NeverDry/blob/main/docs/design_water_balance_reference_model.md))
+- **A supervised valve test that measures your real flow rate**, shown beside the
+  configured one so the gap argues for itself. It publishes the meter's smallest
+  observed step and its update count too: on a coarse counter those are the limit
+  of detection, and without them a lone number looks like a measurement when it is
+  an artifact. ([design](https://github.com/never-dry/NeverDry/blob/main/docs/design/flow-rate-provenance.md))
+- **The quantities the model derives become entities**, not attributes at the
+  bottom of a dialog. Judging a computed daily radiation means watching it follow
+  the weather for a week, and Home Assistant keeps history for entities only. Only
+  the ones the running method actually computes appear.
+
+- **Spanish, both halves.** The configuration forms, errors, notifications and
+  entity names, and the zone card's own dictionary, so no screen is left half in
+  English. The card's Spanish came from @Mr-Neutr0n
+  ([#226](https://github.com/never-dry/NeverDry/pull/226)) and was completed here
+  for the labels that landed while it was open; the catalogue was written here
+  too.
+  ([#215](https://github.com/never-dry/NeverDry/issues/215))
+- **A valve compatibility register**, so *will my valve work* has an answer
+  written by people who own one. It records what each model reports and, more
+  usefully, what it quietly refuses: a timer valve that holds its own runtime
+  ignores the duration NeverDry asks for and stops when its own preset says so,
+  and a valve with no meter measures nothing, so what it delivered is credited
+  from the design flow rate rather than observed. Those caveats used to be
+  written and then dropped by the page generator, which is its own small lesson
+  about a table that is assembled rather than typed. First non-Zigbee row is an
+  Orbit B-hyve HT25, contributed rather than owned by the maintainer.
+  ([#223](https://github.com/never-dry/NeverDry/issues/223))
+
+### Changed
+- **NeverDry no longer writes to a setting it guessed on your valve.** Until
+  now every valve opening looked for a `number` entity on the same device whose
+  name contained a word such as "max", "time", "duration" or "delay", and set it
+  to the safety timeout. A name match is not a meaning: on a valve that exposes
+  several numbers it could be any of them, and the write changed hardware you
+  never pointed NeverDry at. The guess is gone. The on-device timer is still set
+  when you configure its MQTT topic explicitly; choosing a `number` entity for
+  it is planned as an opt-in setting.
+
+- **The minimum Home Assistant version is 2025.8.0, and it is checked**. It used
+  to be stated twice and verified never: `hacs.json` said 2024.6.0, the manual
+  said 2024.1.0, and the test suite stubs Home Assistant, so no release was ever
+  run against it. A separate job now installs the declared version and builds every
+  configuration form against its real schemas. Home Assistant's own analytics put
+  92.8% of reporting installations at or above 2025.8.0.
+
+- **Spanish, read back by somebody who speaks it**
+  ([#215](https://github.com/never-dry/NeverDry/issues/215)). Sixty-seven
+  strings rewritten by @laurash96 from their own reading of the catalogue: accents
+  restored where they had been dropped, a watering can that should have been a
+  hose, a count that read *Revisadas 1 zonas*, the decimal comma throughout, and
+  the word for water reaching a zone changed from one that means handing
+  something over to one that reads the same in Spain and in Latin America.
+  Second language in the project read back by a native speaker rather than by
+  its author. Whether to ship a separate Latin American catalogue was asked and
+  answered in the same thread: there is no lexical divergence to hold, and the
+  one real difference, the decimal separator, runs *through* Latin America
+  rather than around it, so no regional code could resolve it.
+
+  **A second round, and this one against the product rather than the file**
+  (2026-09-27). The configuration and options forms, the entity names and the
+  zone card were read with the integration running, which is the reading that
+  catches what a file cannot: the safety watchdog was called *el vigilante de
+  seguridad*, a security guard, and the soil probe was a *sensor* in one place
+  and a *sonda* in another. Three names are now one name each. The twenty-two
+  strings added the same day, the form warnings and the wilting point fields,
+  are written and not yet read back, and `docs/translations.md` says so - the
+  column that admits what nobody has checked is what has attracted three
+  read-backs so far.
+
+- **The zone card speaks the language of whoever is looking at it.** About half
+  its labels used to be taken from the entity names, which Home Assistant
+  resolves once in the *server's* language: a household whose frontend was in
+  German saw German headings wrapped around Italian labels, and no translation
+  could have fixed it. Four cells were labelled with the zone's own name, and two
+  different quantities, water delivered and rain, were both called *Water*.
+- **Italian, read back against the running product rather than the file.** Around
+  seventy strings. A valve that is not answering had three different names; two
+  valve states had collapsed into one, so a valve that had never spoken and a
+  valve that had stopped answering read alike. Two of those defects were in the
+  English source and are fixed there too.
+- **German, read back by somebody who speaks it.** Seventy-six form strings and
+  thirty-five card labels, rewritten by @MetheLittle on their own installation. The
+  difference is the kind a dictionary cannot reach: the flow rate the zone was
+  built to deliver stopped being a compound noun nobody says out loud and became
+  *Soll-Durchflussrate*, a schedule stopped being *by clock*, and the flow guard
+  stopped claiming it could not check the valve and started saying what is true,
+  that it could not confirm the opening. First language in the project read back
+  by a native speaker rather than by its author.
+  ([#229](https://github.com/never-dry/NeverDry/issues/229))
+- **The soil probe belongs to a zone, not to the installation.** A probe measures
+  one patch of soil with one planting above it; declared once for everything it
+  drove zones it knows nothing about. A zone that has one measures instead of
+  estimating and stops listening to the site. This also removes, rather than
+  fixes, the class of defect where a shared probe overwrote a zone's deficit right
+  after that zone was watered. ([design](https://github.com/never-dry/NeverDry/blob/main/docs/design/soil-moisture-model.md))
+- **Three flow rates, told apart.** *Design* — what the zone was built to deliver.
+  *Water meter* — what the counter reads, renamed because it reports litres, not a
+  rate. *Historical* — the median of what past sessions actually delivered, and
+  what planning now uses when it exists. One label covering all three was the root
+  of false leak reports, false actuation failures, and zones quietly watering a
+  fraction of what they should. ([design](https://github.com/never-dry/NeverDry/blob/main/docs/design/flow-rate-provenance.md))
+- **The zone card** shows site exposure, separates what was measured from what was
+  derived, acknowledges a press before its outcome, and puts the zone's settings
+  one click away.
+- **The three ways into a zone now answer the same** ([#196]). First-run setup, *add
+  zone* and *edit zone* each took a zone in, and each judged it differently: setup
+  refused a delivery mode whose one indispensable input was missing, while the two
+  options steps saved it without a word — or, for a flow meter or volume preset
+  with no entity behind it, quietly swapped the mode for *estimated flow*. A mode
+  you did not choose, needing a design flow rate nobody then checked. All three
+  doors now apply the same rule and say the same thing, so a zone that cannot
+  deliver is refused wherever you try to save it. If you already have such a zone,
+  the next edit will ask you for the missing value before it will save. A zone with
+  **no valve** is exempt from all of it: it delivers nothing by design — it watches
+  the deficit and tells you when to water by hand — so asking it how fast it waters
+  would be asking about something it will never do.
+- **Declining "save anyway" no longer undoes your edit** ([#196]). A zone with
+  unusual values asks for confirmation, and submitting without ticking the box
+  sends you back to the form. That return was drawn from the *saved* zone — the
+  configuration you were in the middle of changing — so a box you had just
+  emptied came back full. The form now comes back holding what you typed,
+  cleared boxes included.
+- **The form stops reading identifiers out loud.** An error said *"required for
+  estimated_flow delivery mode"* while the dropdown beside it said *"Simple
+  on/off"*: the same choice, named twice, once in a language meant for the code.
+  Twelve messages and labels did this. In Italian the design flow rate had its
+  whole explanation pasted into the label slot, so during setup the field
+  announced itself with a 493-character paragraph while every neighbour had a
+  name.
+- **A silent water meter no longer stops the watering.** A zone whose meter was
+  already unavailable when its turn came did not water at all, and said so only in
+  the log. Mid-session the code had always judged this the other way — a run that
+  measures zero with the valve open is credited from the flow rate, because a
+  silent sensor is far more likely than a dry pipe — and a meter that is silent
+  from the start is the same fault. It now waters on the estimate, and you are
+  told: *Flow meter not reporting* when the volume was estimated, *Water delivered
+  could not be credited* when the zone had no design flow rate to estimate with
+  and its deficit was therefore left standing. Both are new notifications; until
+  now the only trace was a log line nobody opens while the garden looks fine.
+  The estimate itself also got better: it follows the rate your sessions actually
+  measured, where before it used the design rate regardless. Crediting the design
+  rate on a zone that really delivers a fraction of it settles a debt that was
+  never paid — and it did so most confidently on exactly the installations whose
+  meter had stopped answering.
+
+### Fixed
+- **A zone's soil probe reading is handled on Home Assistant's event loop.**
+  The handler that receives a zone's own probe reading was not marked as a
+  callback, so Home Assistant ran it in a worker thread. From there it updated
+  the zone while the rest of the integration was reading it, and its final state
+  write was refused with an error in the system log ("calls
+  async_write_ha_state from a thread other than the event loop"), so the reading
+  and the attributes shown by the card were not published. Only zones with
+  their own probe were affected. A test now checks every event handler in the
+  integration for the same mistake.
+
+- **Flow rates in the log read as the form shows them**
+  ([#340](https://github.com/never-dry/NeverDry/pull/340)). The form takes and
+  shows flow rates in L/h, but three log messages printed the stored value in
+  L/min: the credit estimated when a flow sensor reads zero, the estimate for a
+  manual irrigation, and the warning that the safety timeout will stop a run
+  short. Compared with the form, the log read a figure sixty times smaller than
+  the one typed. They now print L/h. The German form also names the imperial
+  units, gal/h for the design flow rate and gal, gal/min and gal/h for a flow
+  meter, as the English one does.
+- **The model card explains its choice in your language**
+  ([#313](https://github.com/never-dry/NeverDry/issues/313)). The line under the
+  method's name, why this method was chosen, and the warming-up notice reached the
+  card as English sentences built in Python, so a Spanish, German or Italian
+  install read them in English, with the method's internal name quoted in it. The
+  integration now sends a stable code and the raw values, and the card writes the
+  sentence from its own dictionary, the same way it writes every other label. The
+  English sentence is still sent for one release, so an older card keeps showing
+  something readable. Contributed by @laurash96, who also wrote the Spanish.
+- **A zone edited to Custom soil can be saved again**
+  ([#234](https://github.com/never-dry/NeverDry/issues/234)). Custom soil asks for
+  both ends of the reservoir, the field capacity and the wilting point, and the
+  check that enforces it is shared by the two zone forms. The add form had the
+  wilting point box; the edit form never got it. Switching an existing zone to
+  Custom therefore asked for a number there was nowhere to type, and the zone could
+  not be saved at all. The box is now in the edit form, showing the stored value,
+  and a test compares the two forms field by field so the next field added to one
+  cannot be forgotten in the other.
+- **The flow rate reads in one unit wherever you meet it**
+  ([#318](https://github.com/never-dry/NeverDry/issues/318)). The zone form asks
+  for the design flow rate in litres per hour (gallons per hour on an imperial
+  instance), but the explanation under the box existed only in first-run setup:
+  adding or editing a zone later showed the L/h label with nothing beneath it,
+  nine field descriptions missing in every language, while the README said L/min.
+  The descriptions are now in all three zone forms, the README and manuals state
+  the unit the form takes, and the startup warning for an unusually high flow
+  rate names that unit instead of suggesting a conversion. A test keeps the three
+  forms' descriptions in step.
+- **Mark irrigated redraws everything it changed**
+  ([#216](https://github.com/never-dry/NeverDry/issues/216)). Pressing it reset
+  the volume at once while the time and the deficit stood still until the next
+  poll - a button that rewrites the zone and leaves the page showing the
+  previous run for up to half a minute reads as a button that did not work. Half
+  of it had been fixed in September as a side effect of unrelated work; the rest
+  was three entities on a base class that subscribed to nothing.
+- **The model card finds its entity in any language**
+  ([#279](https://github.com/never-dry/NeverDry/issues/279)). Entity ids are
+  built from the *translated* name, so on a Spanish install the water balance
+  sensor is `sensor.neverdry_metodo_de_balance_hidrico` and the card, which
+  looked for an English suffix, reported no NeverDry entities on an
+  installation where every one of them was present. It now matches on the
+  registry unique_id, which does not move with the language. Kc and efficiency
+  also stopped showing a decimal point in a card that used commas everywhere
+  else.
+
+  Two further things had to change before that fix could be seen. With the zone
+  card and the model card on one dashboard, only the first of the two was told
+  when the registry answered, so the second kept what it had drawn with nothing
+  to draw from. And the card treated not knowing as an answer: it announced that
+  no NeverDry entities existed while the registry had simply not replied yet, and
+  it now says nothing at all until there is something to say.
+- **The form warnings arrive in your language**
+  ([#286](https://github.com/never-dry/NeverDry/issues/286)). Eleven sentences
+  were written in Python and reached every installation in English - and they
+  are the ones that explain why something you configured will not do what you
+  expect: why a probe will not drive a zone, why an override is ignored, why a
+  flow meter belongs to another zone. They are in the catalogue now, in four
+  languages, and a new guard refuses the next sentence written in Python.
+
+- **Editing one zone emptied another zone's deficit**
+  ([#234](https://github.com/never-dry/NeverDry/issues/234)). A zone fell from
+  9.6 mm to 0.7 mm between two ticks two minutes apart, with no rain, no
+  irrigation and no new reading. Its probe had been silent for fifteen hours
+  and had been correctly set aside the evening before; editing an unrelated
+  zone reloads the whole integration, and the reload believed it again. Only
+  half the judgement survived: when the probe last spoke is restored, the bar
+  it is compared against was not, and a missing bar reads as *fresh* at any
+  age. Both halves are kept now, or neither.
+- **Choosing Custom soil took away the probe**
+  ([#234](https://github.com/never-dry/NeverDry/issues/234)). Every soil in the
+  list carries two numbers read off one texture row: what the ground holds when
+  full, and what stays locked in when a plant can no longer pull any out. A
+  probe reading says where the ground sits *between* them, so both are needed.
+  Custom asked for the first only - so the one gardener who had measured their
+  own soil was the one who lost the most capable feature in the product, and
+  the form explained the restriction instead of removing it. Custom now asks
+  for both, refuses a pair that cannot describe a real soil, and waters by its
+  probe like any other zone. The Italian text for those fields is rewritten,
+  accents included.
+
+- **The same probe, declared dead down the other path**
+  ([#234](https://github.com/never-dry/NeverDry/issues/234)). The fix below
+  taught the freshness check to watch the probe's whole device. Where that
+  device cannot be resolved there is a second path, and it was still asking the
+  old question: it measured the probe's life by when its value last *changed*,
+  so a probe reporting on time onto ground that had plateaued looked silent
+  there too. The reading was withdrawn and the zone fell back to the weather
+  estimate - not a crash in the deficit but a change of ruler, onto a different
+  scale, with nothing on screen to say so. Liveness is now read from when the
+  probe last *reported*. Reported independently by two installations.
+
+  The other half of that report is not fixed, and is worth stating plainly: a
+  probe that transmits only when its value changes has both timestamps moving
+  together, and no field in Home Assistant separates *the ground is still* from
+  *the probe is gone*. Those probes need a second signal rather than a better
+  reading of silence. The distance between the two dates is now published
+  (`probe_value_moved_at`, beside `probe_last_seen`) so that signal can be seen
+  before anything is decided on it: far apart is a radio still reporting while
+  the sensing element has frozen.
+- **Three notifications stopped leaving by the back door**
+  ([#235](https://github.com/never-dry/NeverDry/issues/235)). Low battery, an
+  anomalous deficit, and the notice that the garden needs watering with no valve
+  configured were each raised by hand, with their title and message written in
+  Python. They reached every non-English installation in English, months after
+  the interface was supposed to have stopped doing that - and two of them had a
+  translated template sitting unused, because the code that should have sent it
+  took the short way instead. All three now come from the catalogue, the
+  watering notice down to the per-zone line inside it. The guard that missed
+  them asked who *translates* text; it now also asks who *sends* it, so the next
+  one fails the build rather than reaching a user.
+
+- **A working probe was declared dead for reporting the same number twice**
+  ([#252](https://github.com/never-dry/NeverDry/issues/252)). Home Assistant
+  writes a sensor's state only when its value changes, so a soil probe sitting on
+  ground that is not moving publishes nothing at all, and ground that is not
+  moving is the commonest thing soil does. The freshness check watched the
+  moisture entity alone, which meant it was asking whether the *soil* had moved
+  and reading the answer as whether the *device* was alive. Measured on one
+  device across a single night: nineteen writes on its temperature entity, one
+  every 55 minutes, against one write on its moisture entity. The zone spent that
+  night on the weather estimate beside a probe with a metronomic heartbeat, and
+  the deficit on the card alternated between two numbers on two different scales
+  with nothing physical happening in between.
+
+  Freshness now asks the probe's **device**, taking the union of its entities the
+  way the valve reachability watch already does: any of them reporting proves the
+  device is there, and none is inspected for what it says. What that inverts is
+  the point of it. An unchanged reading from a device that is demonstrably alive
+  is not missing evidence, it is the device saying that the soil has not moved,
+  which is the most useful thing it can tell you.
+
+  The bar that silence is measured against was wrong in its own right, and is
+  now derived from the longest quiet the device has come back from over the past
+  week rather than from a quantile of recent value changes. The gap between two
+  readings measures how long the soil took to move by a whole point, which is
+  weather; it was serving as the yardstick for a device's heartbeat. On the night
+  above that put the bar at 33 minutes for a probe that reports every 55, and the
+  reading was refused by nineteen seconds.
+
+  Two new attributes sit beside `probe_fresh`: `probe_quiet_bar_s`, the bar the
+  verdict was given against, and `probe_device_silence_s`, how long the device
+  has actually been quiet. Reading the age of the reading apart from the silence
+  of the device is what made a live probe look dead for a night.
+
+  One case is knowingly left open: a device whose radio keeps working while its
+  sensing element freezes now passes this check. Catching that needs a reading
+  that contradicts itself rather than a silence, and it is the same
+  second-channel question the uncalibrated scale belongs to.
+- **A restart put a probe-driven zone back on the weather estimate**
+  ([#251](https://github.com/never-dry/NeverDry/issues/251)). Reloading the
+  integration was fine, because the probe was up and had a reading to be found.
+  A full Home Assistant restart was not: NeverDry starts before the probe's own
+  integration, finds nothing to read, and treats "never heard from" exactly like
+  "has gone quiet". The zone then waited for the probe to speak of its own
+  accord, which on the devices this was found on is up to forty minutes. Three
+  restarts on one morning produced the swing; eleven reloads in the same hour did
+  not.
+
+  The measurement now survives a restart together with its age. The timestamp is
+  carried across rather than invented, so a reading from last week stays stale
+  instead of being quietly refreshed into a good one, and the millimetres are
+  recomputed rather than restored, since the edit that caused a reload may have
+  been the zone's soil.
+- **A zone with a probe could sit at zero deficit and never water again**
+  ([#234](https://github.com/never-dry/NeverDry/issues/234)). Two installations
+  reported it within a day: one probe reading 21 %, four others between 94 and
+  100 %, every affected zone stuck at 0.0 mm, and changing the root depth
+  changed nothing. The deficit subtracted the reading from the soil's field
+  capacity, which requires the two to be the same quantity. A garden probe does
+  not report volumetric water content, so once the reading sat above the field
+  capacity the result went negative and the clamp turned it into zero. Zero on
+  the card looks exactly like soil that has just been watered.
+
+  The reading is now taken for what it can honestly be: where the ground sits
+  between dry and wet on the probe's own 0-100 scale, and therefore the share of
+  the soil's available water still present. That number is bounded, it cannot
+  invert, and only a reading of 100 produces no deficit. The scale is stated
+  under the probe field, in every language, along with the fact that it is used
+  **uncalibrated**: a real probe is calibrated at the factory against dry air and
+  open water, neither of which is a state soil is ever in, so the millimetres are
+  out by a factor nobody has measured. Which way, and what would close it, is
+  written up in the [design note](https://github.com/never-dry/NeverDry/blob/main/docs/design/soil-moisture-model.md).
+- **Every restart overwrote the weather reserve with the probe's number**
+  ([#234](https://github.com/never-dry/NeverDry/issues/234)). The deficit on
+  display is the soil's while a probe drives the zone, and that was the figure
+  restored at startup into the estimate underneath. So the reserve a zone falls
+  back on when its probe stops being believed was replaced, every restart, by
+  whatever the soil happened to say. In the field: one zone at 0.03 mm while its
+  three siblings, through the same restart, held 0.31, 1.52 and 2.38. The
+  estimate is now published and restored in its own right.
+- **A probe reading off the scale is set aside instead of held.** The last good
+  value used to stand, which kept it *fresh* for the staleness check and so kept
+  a probe talking nonsense in charge indefinitely. The published reading goes
+  with it, because a stale percentage on the card reads as the current state of
+  the soil.
+- **The soil-probe method could not be chosen by anyone**
+  ([#234](https://github.com/never-dry/NeverDry/issues/234)). Picking it answered
+  that sensors were missing, and no sensor you could declare would have satisfied
+  it: the check asked for a probe bound to the installation, and the probe moved
+  onto the zone several releases ago. The option is gone from the site menu,
+  which now describes the model your zones run on when they have no probe of
+  their own, and the error names the zone setting instead.
+- **Saving the model parameters no longer deletes an old site-wide probe.** On an
+  installation still waiting to be asked which zone its probe belongs to, opening
+  that form and pressing save lost the probe, and the question then disappeared
+  unanswered.
+- **A flow-metered valve no longer times out on a coarse counter** ([#173]). The
+  verification window was a fixed 10 s, but a counter cannot move before its
+  resolution divided by the flow rate — 50 s in the original report, around 60 s
+  on a meter that steps in 28 L units. The window is now derived per zone. Merely
+  widening it would have cost the safety it provides, so where the derivation
+  outgrows what still works as a guard the check is declared **inapplicable**
+  rather than stretched: the run proceeds and flow stays an observer.
+  ([design](https://github.com/never-dry/NeverDry/blob/main/docs/design/evidence-and-methodology.md))
+- **The valve picker accepts `valve.*` entities**, not only `switch.*` ([#94]).
+  The engine could already drive them; the form would not let you choose one.
+- **A rejected setup form no longer empties itself in silence** ([#196]). Filling in a
+  zone, pressing submit, and watching every field go blank with nothing on screen to
+  say why — the form would not close, and the installation could not be completed.
+  Two faults met there. The zone form is built from collapsible sections, and an error
+  filed against a field *inside* a section never reached the frontend, so no message
+  appeared; the three delivery-mode requirements were filed exactly that way, and the
+  one most people hit is the design flow rate — mandatory, but impossible to mark as
+  such in the form, because it only applies to one delivery mode. On top of that the
+  redraw carried none of the submitted values, so even a visible error cost the user
+  the whole zone. Errors now always reach the top of the form, and a rejected zone
+  comes back filled in. The first step keeps what was typed too: an ET method the
+  declared sensors cannot support used to take the sensor pickers down with it.
+  What is refused, and where, is now one rule — see *Changed*.
+
+### Thanks
+
+Thank you to everyone who contributed to this release. Code and translations:
+
+- **@laurash96** for the native Spanish read-back of the whole catalogue
+  ([#265](https://github.com/never-dry/NeverDry/pull/265),
+  [#266](https://github.com/never-dry/NeverDry/pull/266)), and for fixes that
+  only a running Spanish install could find: the ET coefficient's unit
+  ([#278](https://github.com/never-dry/NeverDry/pull/278)), the estimated-flow
+  dropdown entry ([#317](https://github.com/never-dry/NeverDry/pull/317)) and
+  the model card's reason ([#331](https://github.com/never-dry/NeverDry/pull/331)).
+- **@MetheLittle** for the German translation and for keeping it current
+  through every beta, Austrian German included
+  ([#218](https://github.com/never-dry/NeverDry/pull/218),
+  [#342](https://github.com/never-dry/NeverDry/pull/342)), and for the reports
+  on the soil probe and on manual irrigation
+  ([#234](https://github.com/never-dry/NeverDry/issues/234),
+  [#216](https://github.com/never-dry/NeverDry/issues/216)).
+- **@Mr-Neutr0n** for the Spanish translation of the Lovelace card
+  ([#226](https://github.com/never-dry/NeverDry/pull/226)).
+
+Reports and design discussions. Some are fixed here; the open ones are
+shaping what comes next:
+
+- **@safepay** for a close reading of the scheduler and of the flow units
+  ([#318](https://github.com/never-dry/NeverDry/issues/318),
+  [#337](https://github.com/never-dry/NeverDry/issues/337) and the
+  [scheduler discussion](https://github.com/never-dry/NeverDry/discussions/239)).
+- **@rpatel3001** for the flow-metered valve that timed out
+  ([#173](https://github.com/never-dry/NeverDry/issues/173)).
+- **@BradleyFord** for the compact card
+  ([#269](https://github.com/never-dry/NeverDry/issues/269)).
+- **@laurafabry** for the zone form that cleared its own fields
+  ([#196](https://github.com/never-dry/NeverDry/issues/196)).
+- **@sanderaernouts** for watering that must finish before sunrise
+  ([#231](https://github.com/never-dry/NeverDry/issues/231)).
+- **@MrEcosse** for the master pump
+  ([#95](https://github.com/never-dry/NeverDry/issues/95)).
+- **@fpytloun** for the scheduling direction check
+  ([#74](https://github.com/never-dry/NeverDry/issues/74)).
+
 ## [0.11.2] - 2026-08-29
 
 A patch stable for the 0.11 line, and it exists for one reason: **a new user could not finish installing the integration.**
@@ -104,6 +589,8 @@ For releases prior to 0.11.0, see the [GitHub Releases](https://github.com/never
 [0.11.1]: https://github.com/never-dry/NeverDry/releases/tag/v0.11.1
 [0.11.0]: https://github.com/never-dry/NeverDry/releases/tag/v0.11.0
 [#173]: https://github.com/never-dry/NeverDry/issues/173
+[#94]: https://github.com/never-dry/NeverDry/issues/94
+[#196]: https://github.com/never-dry/NeverDry/issues/196
 [#168]: https://github.com/never-dry/NeverDry/pull/168
 [#165]: https://github.com/never-dry/NeverDry/issues/165
 [#144]: https://github.com/never-dry/NeverDry/issues/144

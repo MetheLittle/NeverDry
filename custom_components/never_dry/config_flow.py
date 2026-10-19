@@ -16,22 +16,30 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
+from homeassistant.helpers.translation import async_get_translations
 
 from . import zone_device_identifier
 from .const import (
     CONF_ALPHA,
     CONF_D_MAX,
+    CONF_ET_METHOD,
+    CONF_HUMIDITY_SENSOR,
+    CONF_NET_RADIATION_SENSOR,
     CONF_RAIN_SENSOR,
     CONF_RAIN_SENSOR_TYPE,
     CONF_T_BASE,
+    CONF_TEMP_MAX_SENSOR,
+    CONF_TEMP_MIN_SENSOR,
     CONF_TEMP_SENSOR,
-    CONF_VWC_SENSOR,
+    CONF_WIND_SPEED_SENSOR,
     CONF_ZONE_AREA,
     CONF_ZONE_DELIVERY_MODE,
     CONF_ZONE_DELIVERY_TIMEOUT,
     CONF_ZONE_EFFICIENCY,
     CONF_ZONE_EXPOSURE,
+    CONF_ZONE_FIELD_CAPACITY,
     CONF_ZONE_FLOW_METER_SENSOR,
     CONF_ZONE_FLOW_RATE,
     CONF_ZONE_IRRIGATION_MODE,
@@ -40,26 +48,34 @@ from .const import (
     CONF_ZONE_MICROCLIMATE_FACTOR,
     CONF_ZONE_NAME,
     CONF_ZONE_PLANT_FAMILY,
+    CONF_ZONE_ROOT_DEPTH,
+    CONF_ZONE_SOIL_TYPE,
     CONF_ZONE_SYSTEM_TYPE,
     CONF_ZONE_THRESHOLD,
     CONF_ZONE_VALVE,
     CONF_ZONE_VOLUME_ENTITY,
+    CONF_ZONE_VWC_SENSOR,
+    CONF_ZONE_WILTING_POINT,
     CONF_ZONES,
     CONFIG_VERSION,
     DEFAULT_ALPHA,
     DEFAULT_D_MAX,
     DEFAULT_DELIVERY_MODE,
     DEFAULT_DELIVERY_TIMEOUT_S,
+    DEFAULT_ET_METHOD,
     DEFAULT_EXPOSURE,
     DEFAULT_IRRIGATION_MODE,
     DEFAULT_IRRIGATION_TIME,
     DEFAULT_RAIN_SENSOR_TYPE,
+    DEFAULT_SOIL_TYPE,
     DEFAULT_T_BASE,
     DEFAULT_THRESHOLD,
     DELIVERY_MODE_ESTIMATED_FLOW,
     DELIVERY_MODE_FLOW_METER,
     DELIVERY_MODE_VOLUME_PRESET,
     DOMAIN,
+    ET_METHOD_AUTO,
+    ET_METHOD_OPTIONS,
     EXPOSURES,
     IRRIGATION_MODE_MANUAL,
     IRRIGATION_MODE_REACTIVE,
@@ -71,6 +87,9 @@ from .const import (
     PLANT_FAMILIES,
     RAIN_TYPE_DAILY_TOTAL,
     RAIN_TYPE_EVENT,
+    SOIL_TYPE_AUTO,
+    SOIL_TYPE_CUSTOM,
+    SOIL_TYPES,
     SYSTEM_TYPE_CUSTOM,
     SYSTEM_TYPE_DRIP,
     SYSTEM_TYPE_MANUAL,
@@ -81,6 +100,7 @@ from .const import (
     UNUSUAL_FLOW_MAX_LPM,
     UNUSUAL_FLOW_MIN_LPM,
 )
+from .environment import Environment
 from .unit_convert import (
     LPM_TO_GPH,
     LPM_TO_GPM,
@@ -91,6 +111,7 @@ from .unit_convert import (
     sensors_input_to_metric,
     zone_input_to_metric,
 )
+from .water_balance_model import RUNNABLE_INPUTS, model_by_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -112,8 +133,165 @@ def _is_imperial(hass) -> bool:
     return hass.config.units is US_CUSTOMARY_SYSTEM
 
 
-def _sensors_schema(is_imperial: bool) -> vol.Schema:
-    """Sensors + ET parameters form for initial setup, unit-aware."""
+#: The optional bindings that unlock the richer ET methods, with the device
+#: class that makes the entity picker useful. Declared once and rendered into
+#: both forms: setup and options must offer the same vocabulary, or a site
+#: could declare a sensor it can never edit.
+#:
+#: The daily temperature extremes are **deliberately absent**. NeverDry already
+#: reads a thermometer continuously, so asking for its own max and min is asking
+#: the user to build with helpers something the integration can observe — and it
+#: invites the worst version of the mistake: the same entity in both boxes gives
+#: a zero diurnal range, which Hargreaves turns into an evapotranspiration of
+#: exactly zero. A deficit that never grows is a garden that is never watered,
+#: and nothing anywhere says so.
+#:
+#: Radiation is asked for as **solar** radiation — what a pyranometer reports,
+#: and what a consumer weather station exposes. The *net* radiation the FAO-56
+#: equation uses is computed from it, per eq. 38-40; asking for it directly
+#: would be asking for an instrument almost nobody owns.
+_EXTRA_SENSORS: tuple[tuple[str, str | None], ...] = (
+    (CONF_HUMIDITY_SENSOR, "humidity"),
+    (CONF_WIND_SPEED_SENSOR, "wind_speed"),
+    (CONF_NET_RADIATION_SENSOR, "irradiance"),
+)
+
+
+def _extra_sensor_fields(current: dict | None = None) -> dict:
+    """Entity pickers for the optional inputs, pre-filled when editing."""
+    fields = {}
+    for key, device_class in _EXTRA_SENSORS:
+        marker = (
+            vol.Optional(key, description={"suggested_value": current.get(key)})
+            if current is not None
+            else vol.Optional(key)
+        )
+        config = selector.EntitySelectorConfig(domain="sensor")
+        if device_class:
+            config = selector.EntitySelectorConfig(domain="sensor", device_class=device_class)
+        fields[marker] = selector.EntitySelector(config)
+    return fields
+
+
+def _et_method_field(current: dict | None = None) -> dict:
+    """The method dropdown, offering every method rather than only the usable ones.
+
+    Deliberately not filtered to what the site currently satisfies. The form does
+    not react to what you type, so a list narrowed at render time would go stale
+    the moment a sensor is picked in the same submission — and a user who cannot
+    see Penman-Monteith has no way to learn which sensor unlocks it. The choice
+    is validated on submit instead, and the error names the missing sensors.
+
+    Every method a *site* may choose, that is. The probe models are not among
+    them and never were offered as one for long: an entry that still stores one
+    opens on ``auto``, which is what the running model already degrades to.
+    """
+    suggestion = _suggest(current, CONF_ET_METHOD)
+    stored = (suggestion.get("description") or {}).get("suggested_value")
+    if stored is not None and stored not in ET_METHOD_OPTIONS:
+        # Home Assistant renders a select whose value is not one of its options
+        # as an empty box, and an empty box submitted back changes the method
+        # without anyone choosing to. Saying `auto` here says out loud what the
+        # entry is already doing, instead of leaving a blank that means it.
+        suggestion = {"description": {"suggested_value": ET_METHOD_AUTO}}
+    return {
+        vol.Optional(
+            CONF_ET_METHOD,
+            default=DEFAULT_ET_METHOD,
+            **suggestion,
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                # A list, not the tuple in const: Home Assistant validates this
+                # field with voluptuous, which refuses a tuple outright.
+                options=list(ET_METHOD_OPTIONS),
+                translation_key="et_method",
+                mode="dropdown",
+            )
+        )
+    }
+
+
+def _alpha_selector() -> selector.NumberSelector:
+    """The ET coefficient box, with its unit translated where Home Assistant can."""
+    config = selector.NumberSelectorConfig(
+        min=0.05,
+        max=1.0,
+        step=0.01,
+        mode="box",
+        unit_of_measurement="mm/°C/day",
+    )
+    try:
+        # The catalogue is keyed by unit and Hassfest only accepts a slug there.
+        return selector.NumberSelector(
+            {**config, "unit_of_measurement": "mm_per_celsius_per_day", "translation_key": "et_coefficient"}
+        )
+    except vol.Invalid:
+        # Home Assistant before 2025.8 rejects translation_key on a number selector.
+        return selector.NumberSelector(config)
+
+
+def _et_method_error(user_input: dict) -> str | None:
+    """Reject a method the declared sensors cannot support, naming what is missing.
+
+    The same rule the integration runs on decides the form's answer: an
+    :class:`~.environment.Environment` is built from what was just submitted and
+    asked whether it satisfies the model. Duplicating the check in a form-shaped
+    variant is how the two would drift, and the drift would only show up as a
+    model silently degrading after setup.
+
+    ``auto`` is always valid: it *is* the promise to pick what the sensors allow.
+    """
+    method = user_input.get(CONF_ET_METHOD, DEFAULT_ET_METHOD)
+    if method == ET_METHOD_AUTO:
+        return None
+    model = model_by_id(method)
+    if model is None:
+        return "et_method_unknown"
+    if not model.site_selectable:
+        # A probe model named as the site's. It reads the soil of one zone, so
+        # a site-level environment has nothing to give it however many sensors
+        # are declared: the way to choose it is to attach the probe to the zone
+        # that sits in that soil. Answering "sensors are missing" here sent the
+        # user looking for a binding that no form has offered since the probe
+        # moved onto the zone. Reachable from an entry stored before the option
+        # left the dropdown, or edited by hand.
+        return "et_method_zone_probe"
+    if model.input_type not in RUNNABLE_INPUTS:
+        # Written and tested, but nothing builds its input yet. It is not in the
+        # dropdown either; this is the second lock, for an entry edited by hand
+        # or restored from a version where the option existed.
+        return "et_method_unknown"
+    env = Environment(
+        temperature_sensor=user_input.get(CONF_TEMP_SENSOR) or "",
+        rain_sensor=user_input.get(CONF_RAIN_SENSOR) or "",
+        humidity_sensor=user_input.get(CONF_HUMIDITY_SENSOR),
+        wind_speed_sensor=user_input.get(CONF_WIND_SPEED_SENSOR),
+        net_radiation_sensor=user_input.get(CONF_NET_RADIATION_SENSOR),
+        temp_max_sensor=user_input.get(CONF_TEMP_MAX_SENSOR),
+        temp_min_sensor=user_input.get(CONF_TEMP_MIN_SENSOR),
+    )
+    return None if env.satisfies(model.required_sensors) else "et_method_missing_sensors"
+
+
+def _sensors_schema(is_imperial: bool, current: dict | None = None) -> vol.Schema:
+    """Sensors + ET parameters form for initial setup, unit-aware.
+
+    ``current`` is a rejected submission being handed back, and every field is
+    seeded from it. An ET method the declared sensors cannot support is the one
+    way out of this step that is not forward, and without the seeding it also
+    emptied the two sensor pickers the user had just filled in — the same trap
+    the zone form had in GH #196, one step earlier.
+
+    **No soil probe here.** A probe measures one patch of soil, with one kind of
+    planting above it and its own watering history, so a probe declared for the
+    installation was answering a question nobody asked: it drove zones it knows
+    nothing about. It is declared per zone now.
+
+    The key survives in ``const`` and ``Environment`` on purpose: installations
+    that already have one keep working until they say which zone it belongs to
+    (the repair issue), and removing the field is what stops a *new* one being
+    created.
+    """
     t_unit = "°F" if is_imperial else "°C"
     d_unit = "in" if is_imperial else "mm"
     t_base_default = _c_to_f(DEFAULT_T_BASE) if is_imperial else DEFAULT_T_BASE
@@ -121,36 +299,22 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
 
     return vol.Schema(
         {
-            vol.Required(CONF_TEMP_SENSOR): selector.EntitySelector(
+            vol.Required(CONF_TEMP_SENSOR, **_suggest(current, CONF_TEMP_SENSOR)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
             ),
-            vol.Required(CONF_RAIN_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
-            vol.Optional(CONF_RAIN_SENSOR_TYPE, default=DEFAULT_RAIN_SENSOR_TYPE): selector.SelectSelector(
+            vol.Required(CONF_RAIN_SENSOR, **_suggest(current, CONF_RAIN_SENSOR)): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_RAIN_SENSOR_TYPE, default=DEFAULT_RAIN_SENSOR_TYPE, **_suggest(current, CONF_RAIN_SENSOR_TYPE)
+            ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[RAIN_TYPE_EVENT, RAIN_TYPE_DAILY_TOTAL],
                     translation_key="rain_sensor_type",
                     mode="dropdown",
                 )
             ),
-            vol.Optional(CONF_ALPHA, default=DEFAULT_ALPHA): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.05,
-                    max=1.0,
-                    step=0.01,
-                    mode="box",
-                    unit_of_measurement="mm/°C/day",
-                )
-            ),
-            vol.Optional(CONF_T_BASE, default=t_base_default): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=23.0 if is_imperial else -5.0,
-                    max=68.0 if is_imperial else 20.0,
-                    step=1.0 if is_imperial else 0.5,
-                    mode="box",
-                    unit_of_measurement=t_unit,
-                )
-            ),
-            vol.Optional(CONF_D_MAX, default=d_max_default): selector.NumberSelector(
+            vol.Optional(CONF_D_MAX, default=d_max_default, **_suggest(current, CONF_D_MAX)): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0.5 if is_imperial else 10.0,
                     max=20.0 if is_imperial else 500.0,
@@ -159,7 +323,25 @@ def _sensors_schema(is_imperial: bool) -> vol.Schema:
                     unit_of_measurement=d_unit,
                 )
             ),
-            vol.Optional(CONF_VWC_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+            # The method comes immediately before alpha, and that adjacency is the
+            # whole design: a form cannot show or hide a field in reaction to a
+            # dropdown within one step, so the only way to express "this box
+            # belongs to that choice" is to put it underneath it. The label says
+            # which method uses it; the confirm step says so again if it is inert.
+            **_et_method_field(current),
+            vol.Optional(CONF_ALPHA, default=DEFAULT_ALPHA, **_suggest(current, CONF_ALPHA)): _alpha_selector(),
+            vol.Optional(
+                CONF_T_BASE, default=t_base_default, **_suggest(current, CONF_T_BASE)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=23.0 if is_imperial else -5.0,
+                    max=68.0 if is_imperial else 20.0,
+                    step=1.0 if is_imperial else 0.5,
+                    mode="box",
+                    unit_of_measurement=t_unit,
+                )
+            ),
+            **_extra_sensor_fields(current),
         }
     )
 
@@ -206,19 +388,17 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
                     mode="dropdown",
                 )
             ),
-            vol.Optional(
-                CONF_VWC_SENSOR,
-                description={"suggested_value": current.get(CONF_VWC_SENSOR)},
-            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
-            vol.Optional(CONF_ALPHA, default=DEFAULT_ALPHA, **_stored(CONF_ALPHA)): selector.NumberSelector(
+            vol.Optional(CONF_D_MAX, default=d_max_default, **_stored(CONF_D_MAX, _as_depth)): selector.NumberSelector(
                 selector.NumberSelectorConfig(
-                    min=0.05,
-                    max=1.0,
-                    step=0.01,
+                    min=0.5 if is_imperial else 10.0,
+                    max=20.0 if is_imperial else 500.0,
+                    step=0.01 if is_imperial else 10.0,
                     mode="box",
-                    unit_of_measurement="mm/°C/day",
+                    unit_of_measurement=d_unit,
                 )
             ),
+            **_et_method_field(current),
+            vol.Optional(CONF_ALPHA, default=DEFAULT_ALPHA, **_stored(CONF_ALPHA)): _alpha_selector(),
             vol.Optional(
                 CONF_T_BASE, default=t_base_default, **_stored(CONF_T_BASE, _as_temp)
             ): selector.NumberSelector(
@@ -230,15 +410,7 @@ def _model_params_schema(is_imperial: bool, current: dict) -> vol.Schema:
                     unit_of_measurement=t_unit,
                 )
             ),
-            vol.Optional(CONF_D_MAX, default=d_max_default, **_stored(CONF_D_MAX, _as_depth)): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.5 if is_imperial else 10.0,
-                    max=20.0 if is_imperial else 500.0,
-                    step=0.01 if is_imperial else 10.0,
-                    mode="box",
-                    unit_of_measurement=d_unit,
-                )
-            ),
+            **_extra_sensor_fields(current),
         }
     )
 
@@ -277,9 +449,15 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
     def _sug(key: str) -> dict:
         return _suggest(current, key)
 
-    # Nothing is collapsed here: a zone being created has to be seen once in
-    # full. The edit form collapses everything instead — there you already
-    # know what you came to change.
+    # Everything starts collapsed, here as in the edit form. The earlier reading
+    # was that a zone being created should be seen once in full; the form as it
+    # actually stands is seventeen fields, and opening all of them at once shows
+    # the length rather than the shape. Three closed headings say what will be
+    # asked and let it be answered one question at a time.
+    #
+    # Only the starting state can be set. Home Assistant renders each section as
+    # an independent collapsible: there is no way to make opening one close the
+    # others, because the form does not react to what the user does with it.
     return vol.Schema(
         {
             vol.Required(CONF_ZONE_NAME, **_sug(CONF_ZONE_NAME)): selector.TextSelector(),
@@ -305,6 +483,48 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
                         vol.Optional(CONF_ZONE_KC, **_sug(CONF_ZONE_KC)): selector.NumberSelector(
                             selector.NumberSelectorConfig(min=0.1, max=2.0, step=0.01, mode="box")
                         ),
+                        # The probe belongs here, in the zone, not to the
+                        # installation: it measures one patch of soil with one
+                        # planting above it and its own watering history, and a
+                        # reading from somebody else's patch says nothing about
+                        # this one. A zone that declares one stops estimating
+                        # and starts measuring.
+                        vol.Optional(CONF_ZONE_VWC_SENSOR, **_sug(CONF_ZONE_VWC_SENSOR)): selector.EntitySelector(
+                            selector.EntitySelectorConfig(domain="sensor", device_class="moisture")
+                        ),
+                        # The two numbers that turn the reading above into
+                        # millimetres, and by doing so hand it the deficit. Left
+                        # empty the probe stays what it was, a measurement shown
+                        # beside the model's estimate; filled in, the zone reads
+                        # its water from the soil. No default on purpose: this
+                        # pair is a decision, and a decision nobody made must not
+                        # arrive pre-made.
+                        vol.Optional(CONF_ZONE_ROOT_DEPTH, **_sug(CONF_ZONE_ROOT_DEPTH)): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=2.0 if is_imperial else 0.05,
+                                max=79.0 if is_imperial else 2.0,
+                                step=0.5 if is_imperial else 0.05,
+                                mode="box",
+                                unit_of_measurement="in" if is_imperial else "m",
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_ZONE_SOIL_TYPE, default=DEFAULT_SOIL_TYPE, **_sug(CONF_ZONE_SOIL_TYPE)
+                        ): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=list(SOIL_TYPES.keys()),
+                                translation_key="soil_type",
+                                mode="dropdown",
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_ZONE_FIELD_CAPACITY, **_sug(CONF_ZONE_FIELD_CAPACITY)
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(min=0.05, max=0.6, step=0.01, mode="box")
+                        ),
+                        vol.Optional(CONF_ZONE_WILTING_POINT, **_sug(CONF_ZONE_WILTING_POINT)): selector.NumberSelector(
+                            selector.NumberSelectorConfig(min=0.01, max=0.4, step=0.01, mode="box")
+                        ),
                         vol.Optional(
                             CONF_ZONE_EXPOSURE, default=DEFAULT_EXPOSURE, **_sug(CONF_ZONE_EXPOSURE)
                         ): selector.SelectSelector(
@@ -326,13 +546,20 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
                         ),
                     }
                 ),
-                {"collapsed": False},
+                {"collapsed": True},
             ),
             vol.Required(SECTION_VALVE): section(
                 vol.Schema(
                     {
+                        # Both domains: a `valve.*` entity is driven with valve
+                        # services by the same adapter the driver uses, so the
+                        # selector no longer has to lie about what is supported
+                        # (GH #94). Widened only after the command path and the
+                        # controller's own state checks went through that adapter
+                        # — offering it earlier would have shown a valve that
+                        # saved without error and never opened.
                         vol.Optional(CONF_ZONE_VALVE, **_sug(CONF_ZONE_VALVE)): selector.EntitySelector(
-                            selector.EntitySelectorConfig(domain="switch")
+                            selector.EntitySelectorConfig(domain=["switch", "valve"])
                         ),
                         vol.Optional(
                             CONF_ZONE_DELIVERY_MODE, default=DEFAULT_DELIVERY_MODE, **_sug(CONF_ZONE_DELIVERY_MODE)
@@ -394,7 +621,7 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
                         ),
                     }
                 ),
-                {"collapsed": False},
+                {"collapsed": True},
             ),
             vol.Required(SECTION_SCHEDULING): section(
                 vol.Schema(
@@ -432,46 +659,151 @@ def _zone_schema_initial(is_imperial: bool, current: dict | None = None) -> vol.
                         ),
                     }
                 ),
-                {"collapsed": False},
+                {"collapsed": True},
             ),
         }
     )
 
 
-def _unusual_zone_values(zone: dict, imperial: bool) -> list[str]:
+async def warning_texts(hass) -> dict[str, str]:
+    """The warning catalogue, in the user's language, as ``key -> template``.
+
+    This module resolves translated text, which `test_translation_decoupling`
+    otherwise forbids, and the exception is the same one already granted to
+    ``valve_notifier.py`` for the same reason. A config flow hands Home
+    Assistant a **finished** string: ``description_placeholders`` substitutes
+    values into a translated description, it does not translate the values. So
+    there is no later layer to hand an identifier to - either the sentence is
+    resolved here, or the user reads English inside a form that is otherwise
+    entirely in their language.
+
+    Which is what happened. Twelve warnings, all of them explaining why
+    something the user configured will not do what they expect, reached every
+    installation in English (GH #286).
+
+    Resolved once per form submission and passed down, rather than looked up
+    per sentence: the lookup is an await, and the functions below are pure.
+    """
+    resources = await async_get_translations(hass, hass.config.language, "common", {DOMAIN})
+    prefix = f"component.{DOMAIN}.common."
+    return {k[len(prefix) :]: v for k, v in resources.items() if k.startswith(prefix)}
+
+
+def _warn(texts: dict[str, str], key: str, **values) -> str:
+    """One warning line, filled in. Falls back to the key rather than crashing.
+
+    A missing key is a bug in the catalogue, not a reason to refuse a form: the
+    user sees an identifier, which is ugly and visible, instead of a form that
+    will not open.
+    """
+    template = texts.get(key)
+    if not template:
+        return key
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError):
+        return template
+
+
+def _unusual_zone_values(zone: dict, imperial: bool, texts: dict[str, str]) -> list[str]:
     """Detect implausible zone values for the soft-confirm guard.
 
-    Takes a zone dict in metric storage units (area m², flow L/min) and
-    returns human-readable warning lines in the user's display units.
-    An empty list means all values look plausible.
+    Takes a zone dict in metric storage units (area m², flow L/min) and returns
+    warning lines already in the user's language and display units. An empty
+    list means all values look plausible.
+
+    The numbers are formatted here and handed to the catalogue as text: the
+    sentence is translated, the quantity is not, and a template that tried to
+    carry both would need a unit system it cannot see.
     """
     warnings: list[str] = []
     area = zone.get(CONF_ZONE_AREA)
     if area is not None and area < UNUSUAL_AREA_MIN_M2:
         if imperial:
-            warnings.append(f"area {area * _M2_TO_FT2:.1f} ft² < {UNUSUAL_AREA_MIN_M2 * _M2_TO_FT2:.0f} ft²")
+            shown = f"{area * _M2_TO_FT2:.1f} ft²"
+            floor = f"{UNUSUAL_AREA_MIN_M2 * _M2_TO_FT2:.0f} ft²"
         else:
-            warnings.append(f"area {area:.1f} m² < {UNUSUAL_AREA_MIN_M2:.0f} m²")
+            shown, floor = f"{area:.1f} m²", f"{UNUSUAL_AREA_MIN_M2:.0f} m²"
+        warnings.append(_warn(texts, "warn_area_small", area=shown, minimum=floor))
     flow = zone.get(CONF_ZONE_FLOW_RATE)
     mode = zone.get(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE)
     if mode in (DELIVERY_MODE_FLOW_METER, DELIVERY_MODE_VOLUME_PRESET) and not flow:
         # Deprecation-style notice, not an error: gives existing installs a
         # smooth transition window before the guard flow becomes mandatory.
-        warnings.append(
-            "guard flow rate not set — used for expected duration and safety-timeout"
-            " scaling; will become required in a future release (target: v1.0)"
-        )
+        warnings.append(_warn(texts, "warn_guard_flow_missing"))
     if flow is not None and flow > 0:
         if imperial:
-            shown, unit = flow * _LPM_TO_GPH, "gal/h"
+            shown_flow, unit = flow * _LPM_TO_GPH, "gal/h"
             low, high = UNUSUAL_FLOW_MIN_LPM * _LPM_TO_GPH, UNUSUAL_FLOW_MAX_LPM * _LPM_TO_GPH
         else:
-            shown, unit = flow * _LPM_TO_LPH, "L/h"
+            shown_flow, unit = flow * _LPM_TO_LPH, "L/h"
             low, high = UNUSUAL_FLOW_MIN_LPM * _LPM_TO_LPH, UNUSUAL_FLOW_MAX_LPM * _LPM_TO_LPH
         if flow < UNUSUAL_FLOW_MIN_LPM:
-            warnings.append(f"flow rate {shown:.1f} {unit} < {low:.1f} {unit}")
+            warnings.append(_warn(texts, "warn_flow_low", flow=f"{shown_flow:.1f} {unit}", minimum=f"{low:.1f} {unit}"))
         elif flow > UNUSUAL_FLOW_MAX_LPM:
-            warnings.append(f"flow rate {shown:.0f} {unit} > {high:.0f} {unit}")
+            warnings.append(
+                _warn(texts, "warn_flow_high", flow=f"{shown_flow:.0f} {unit}", maximum=f"{high:.0f} {unit}")
+            )
+    return warnings
+
+
+def _device_resolver(hass):
+    """Return ``entity_id -> device_id`` as the entity registry answers it.
+
+    Degrades to "cannot say" rather than raising: a registry hiccup must not
+    turn into an accusation about the user's configuration.
+    """
+
+    def resolve(entity_id):
+        if not entity_id:
+            return None
+        try:
+            entry = er.async_get(hass).async_get(entity_id)
+        except Exception:  # pragma: no cover - registry unavailable
+            return None
+        return entry.device_id if entry else None
+
+    return resolve
+
+
+def meter_ownership_warnings(zone, other_zones, device_of, texts: dict[str, str]) -> list[str]:
+    """Report a flow meter that does not belong to this zone, and a mode without one.
+
+    ``device_of`` maps an entity id to its device id (the entity registry's
+    answer), or ``None`` when it cannot say.
+
+    Only one ownership case is reported: the meter belongs to the valve of
+    *another configured zone*. A meter on a device of its own is left alone,
+    because an in-line meter on the pipe is a legitimate installation and
+    NeverDry consumes whatever entity the user points at rather than dictating
+    the plumbing. Warning on every separate device would train the user to
+    ignore the warning that matters.
+
+    Warnings, never rejections: a valid setup we failed to imagine must not be
+    made impossible to configure.
+    """
+    warnings: list[str] = []
+    meter = zone.get(CONF_ZONE_FLOW_METER_SENSOR)
+    mode = zone.get(CONF_ZONE_DELIVERY_MODE, DEFAULT_DELIVERY_MODE)
+
+    if not meter:
+        if mode == DELIVERY_MODE_FLOW_METER:
+            warnings.append(_warn(texts, "warn_meter_mode_without_meter"))
+        return warnings
+
+    meter_device = device_of(meter)
+    if meter_device is None:
+        # A registry that cannot answer is not evidence of a wrong meter.
+        return warnings
+    if meter_device == device_of(zone.get(CONF_ZONE_VALVE)):
+        return warnings
+
+    for other in other_zones:
+        if other.get(CONF_ZONE_NAME) == zone.get(CONF_ZONE_NAME):
+            continue
+        if device_of(other.get(CONF_ZONE_VALVE)) == meter_device:
+            warnings.append(_warn(texts, "warn_meter_of_another_zone", zone=other.get(CONF_ZONE_NAME)))
+            break
     return warnings
 
 
@@ -501,6 +833,25 @@ PRESET_OVERRIDE_PAIRS = (
         CONF_ZONE_MICROCLIMATE_FACTOR,
         "microclimate_factor_required",
         "Microclimate factor",
+    ),
+    (
+        CONF_ZONE_SOIL_TYPE,
+        SOIL_TYPES,
+        "field_capacity",
+        CONF_ZONE_FIELD_CAPACITY,
+        "field_capacity_required",
+        "Field capacity",
+    ),
+    # The other end of the same reservoir. Asked for rather than estimated:
+    # somebody who picks Custom has measured their soil, and a number we made up
+    # would be indistinguishable from one they measured while being worse.
+    (
+        CONF_ZONE_SOIL_TYPE,
+        SOIL_TYPES,
+        "wilting_point",
+        CONF_ZONE_WILTING_POINT,
+        "wilting_point_required",
+        "Wilting point",
     ),
 )
 
@@ -542,6 +893,8 @@ def _flatten_sections(user_input: dict) -> dict:
 _SECTION_OF_FIELD = {
     CONF_ZONE_EFFICIENCY: SECTION_VALVE,
     CONF_ZONE_KC: SECTION_GROUND,
+    CONF_ZONE_FIELD_CAPACITY: SECTION_GROUND,
+    CONF_ZONE_WILTING_POINT: SECTION_GROUND,
     CONF_ZONE_MICROCLIMATE_FACTOR: SECTION_GROUND,
     CONF_ZONE_FLOW_RATE: SECTION_VALVE,
     CONF_ZONE_FLOW_METER_SENSOR: SECTION_VALVE,
@@ -634,15 +987,86 @@ def _zone_errors(user_input: dict) -> dict[str, str]:
     key rendered at the top of the form.
     """
     errors = _delivery_mode_errors(user_input)
-    for key, code in _override_errors(user_input).items():
-        if key == "base":
-            errors.setdefault("base", code)
-        else:
-            errors[key] = code
+    for source in (_override_errors(user_input), _soil_interval_errors(user_input)):
+        for key, code in source.items():
+            if key == "base":
+                errors.setdefault("base", code)
+            else:
+                errors.setdefault(key, code)
     return errors
 
 
-def _ignored_override_warnings(zone: dict) -> list[str]:
+def _soil_interval_errors(user_input: dict) -> dict[str, str]:
+    """Two numbers that describe the same soil have to describe a real one.
+
+    The pair is a reservoir: full at the field capacity, empty at the wilting
+    point, and what a probe reads is where the ground sits between them. Put the
+    floor at or above the ceiling and the reservoir is zero or negative, which
+    does not fail loudly - it produces a zone that either never waters or asks
+    for a nonsensical volume, from two values the form accepted without a word.
+
+    Only checked when both are the user's to give. A soil picked from the list
+    brings a pair that cannot contradict itself.
+    """
+    errors: dict[str, str] = {}
+    if not _preset_is_custom(SOIL_TYPES, user_input.get(CONF_ZONE_SOIL_TYPE), "field_capacity"):
+        return errors
+    ceiling = user_input.get(CONF_ZONE_FIELD_CAPACITY)
+    floor = user_input.get(CONF_ZONE_WILTING_POINT)
+    if ceiling is None or floor is None:
+        # Missing rather than contradictory: _override_errors says so already,
+        # and saying it twice would put two messages on one field.
+        return errors
+    if floor >= ceiling:
+        _add_field_error(errors, CONF_ZONE_WILTING_POINT, "wilting_point_above_capacity")
+    return errors
+
+
+def _custom_soil_missing_an_end(zone: dict) -> bool:
+    """A Custom soil that carries only one of the two numbers a probe needs."""
+    if zone.get(CONF_ZONE_SOIL_TYPE, DEFAULT_SOIL_TYPE) != SOIL_TYPE_CUSTOM:
+        return False
+    return zone.get(CONF_ZONE_FIELD_CAPACITY) is None or zone.get(CONF_ZONE_WILTING_POINT) is None
+
+
+def _probe_role_warnings(zone: dict, texts: dict[str, str]) -> list[str]:
+    """Say which role the probe will actually play, and on what ground.
+
+    The defect this exists for is not a wrong number, it is a belief. A user who
+    binds a soil probe to a zone reasonably concludes that the zone now waters by
+    what the soil says; nothing contradicted that, and the deficit went on coming
+    from the weather. The report that led here said it in those words: the sensor
+    is "ignored completely, but still in the settings".
+
+    The second warning is the price of the automatic soil. Assuming a middle
+    ground is a fair default, and it is only fair while it is **said**: an
+    assumption nobody is told about is the hardcoded constant we just removed,
+    with a dropdown in front of it.
+
+    Warned rather than refused, on the soft-confirm step that already carries the
+    ignored-override warnings. Requiring the depth would make anyone who opened a
+    zone to change its area decide about its model, and turn an edit into a
+    change of behaviour.
+    """
+    probe = zone.get(CONF_ZONE_VWC_SENSOR)
+    depth = zone.get(CONF_ZONE_ROOT_DEPTH)
+
+    if probe and depth is None:
+        return [_warn(texts, "warn_probe_no_depth")]
+    if not probe and depth is not None:
+        return [_warn(texts, "warn_depth_no_probe")]
+    if probe and depth is not None and _custom_soil_missing_an_end(zone):
+        # The third way a probe stays silent, and the one that went unsaid. Both
+        # boxes are asked for now, so a zone can only reach this state if it was
+        # saved before they were - which is precisely the zone whose owner has
+        # been waiting for an explanation.
+        return [_warn(texts, "warn_probe_custom_soil_incomplete")]
+    if probe and zone.get(CONF_ZONE_SOIL_TYPE, DEFAULT_SOIL_TYPE) == SOIL_TYPE_AUTO:
+        return [_warn(texts, "warn_probe_assumed_soil")]
+    return []
+
+
+def _ignored_override_warnings(zone: dict, texts: dict[str, str]) -> list[str]:
     """Tell the user which values will not be used, and why.
 
     A preset is selected *and* the box holds a value: the preset wins, so the
@@ -665,11 +1089,16 @@ def _ignored_override_warnings(zone: dict) -> list[str]:
         # only ever read behind Custom — so it would be dropped in silence,
         # which is the failure mode this whole rule exists to remove.
         chosen = f"'{table[selected]['label']}' is selected" if known else "nothing is selected"
-        warnings.append(
-            f"{label}: {chosen}, so your custom value {value} will not be used"
-            f" — choose 'Custom' to apply it, or clear the field"
-        )
+        warnings.append(_warn(texts, "warn_override_ignored", label=label, chosen=chosen, value=value))
     return warnings
+
+
+#: Where the probe's scale is explained. It lives in a placeholder rather than in
+#: the string because hassfest refuses a URL inside a translation and says so:
+#: "the string should not contain URLs, please use description placeholders
+#: instead". The link matters enough to keep -- the reading is used uncalibrated
+#: and the form says which way the error points -- so it travels as a value.
+SOIL_DOC_URL = "https://github.com/never-dry/NeverDry/blob/main/docs/design/soil-moisture-model.md"
 
 
 class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -700,13 +1129,21 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
         """Step 1: Select sensors and ET model parameters."""
         imperial = _is_imperial(self.hass)
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._data = _sensors_input_to_metric(user_input, imperial)
-            return await self.async_step_zone()
+            if error := _et_method_error(user_input):
+                errors[CONF_ET_METHOD] = error
+            else:
+                self._data = _sensors_input_to_metric(user_input, imperial)
+                return await self.async_step_zone()
 
+        # Same as the zone step: user_input is here only if it was rejected,
+        # and it is still in form units — the conversion to metric happens on
+        # the accepted path.
         return self.async_show_form(
             step_id="user",
-            data_schema=_sensors_schema(imperial),
+            data_schema=_sensors_schema(imperial, user_input),
+            errors=errors,
         )
 
     async def async_step_zone(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
@@ -724,8 +1161,12 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors.update(zone_errors)
             else:
                 zone_metric = _zone_input_to_metric(user_input, imperial)
-                self._pending_warnings = _unusual_zone_values(zone_metric, imperial) + _ignored_override_warnings(
-                    zone_metric
+                texts = await warning_texts(self.hass)
+                self._pending_warnings = (
+                    _unusual_zone_values(zone_metric, imperial, texts)
+                    + _probe_role_warnings(zone_metric, texts)
+                    + _ignored_override_warnings(zone_metric, texts)
+                    + meter_ownership_warnings(zone_metric, self._zones, _device_resolver(self.hass), texts)
                 )
                 if self._pending_warnings:
                     self._pending_zone = zone_metric
@@ -745,6 +1186,7 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={
                 "zone_count": str(len(self._zones)),
+                "soil_doc": SOIL_DOC_URL,
             },
         )
 
@@ -803,8 +1245,15 @@ class NeverDryConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _create_entry(self) -> config_entries.ConfigFlowResult:
         """Create the config entry with all collected data."""
         self._data[CONF_ZONES] = self._zones
-        title = f"NeverDry ({len(self._zones)} zone{'s' if len(self._zones) != 1 else ''})"
-        return self.async_create_entry(title=title, data=self._data)
+        # The entry title is stored once, in whatever language the installer happened to be
+        # using, and never revisited: Home Assistant does not translate it and does not
+        # recompute it. Both of the things the old title carried were therefore wrong by
+        # construction - the English word "zone", and a count that froze at creation and
+        # went stale the moment a zone was added (#225). What is left is the brand name,
+        # which needs no translation and cannot go out of date. A user running more than one
+        # installation can rename the entry, which was always the only thing that survived
+        # a rename anyway.
+        return self.async_create_entry(title="NeverDry", data=self._data)
 
     @staticmethod
     @callback
@@ -865,23 +1314,39 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
     ) -> config_entries.ConfigFlowResult:
         """Edit ET model parameters."""
         imperial = _is_imperial(self.hass)
+        errors: dict[str, str] = {}
         if user_input is not None:
-            user_input = _sensors_input_to_metric(user_input, imperial)
-            new_data = {**self._config_entry.data, **user_input}
-            # An optional entity field cleared by the user is simply absent
-            # from user_input — the merge above would silently keep the old
-            # value, so drop it explicitly.
-            if CONF_VWC_SENSOR not in user_input:
-                new_data.pop(CONF_VWC_SENSOR, None)
-            if new_data != dict(self._config_entry.data):
-                changed = [k for k in new_data if new_data[k] != self._config_entry.data.get(k)]
-                _LOGGER.debug("Config updated via model_params — changed keys: %s", changed)
-                self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
-            return self.async_create_entry(data={})
+            if error := _et_method_error(user_input):
+                errors[CONF_ET_METHOD] = error
+            else:
+                user_input = _sensors_input_to_metric(user_input, imperial)
+                new_data = {**self._config_entry.data, **user_input}
+                # An optional entity field cleared by the user is simply absent
+                # from user_input, and the merge above would silently keep the
+                # old value, so drop it explicitly: a method stays available on
+                # a sensor the user believes they removed, which is worse than
+                # the method disappearing, because the number keeps looking
+                # authoritative.
+                #
+                # Only fields this form actually renders. The site probe is not
+                # one of them any more, and an absent key that was never on
+                # screen is not a cleared box: leaving it here deleted the
+                # legacy binding on every save, which on a multi-zone entry
+                # meant losing the probe before the repair could ask which zone
+                # it belongs to, and the repair then vanished unanswered.
+                for key in (k for k, _ in _EXTRA_SENSORS):
+                    if key not in user_input:
+                        new_data.pop(key, None)
+                if new_data != dict(self._config_entry.data):
+                    changed = [k for k in new_data if new_data[k] != self._config_entry.data.get(k)]
+                    _LOGGER.debug("Config updated via model_params — changed keys: %s", changed)
+                    self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
+                return self.async_create_entry(data={})
 
         return self.async_show_form(
             step_id="model_params",
             data_schema=_model_params_schema(imperial, self._config_entry.data),
+            errors=errors,
         )
 
     async def async_step_add_zone(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
@@ -907,8 +1372,20 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                     step_id="add_zone",
                     data_schema=_zone_schema_initial(imperial, submitted),
                     errors=errors,
+                    description_placeholders={"soil_doc": SOIL_DOC_URL},
                 )
-            self._pending_warnings = _unusual_zone_values(user_input, imperial) + _ignored_override_warnings(user_input)
+            texts = await warning_texts(self.hass)
+            self._pending_warnings = (
+                _unusual_zone_values(user_input, imperial, texts)
+                + _probe_role_warnings(user_input, texts)
+                + _ignored_override_warnings(user_input, texts)
+                + meter_ownership_warnings(
+                    user_input,
+                    self._config_entry.data.get(CONF_ZONES, []),
+                    _device_resolver(self.hass),
+                    texts,
+                )
+            )
             if self._pending_warnings:
                 self._pending_zone = user_input
                 self._pending_form = submitted
@@ -921,6 +1398,7 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="add_zone",
             data_schema=_zone_schema_initial(imperial, self._take_pending_form()),
+            description_placeholders={"soil_doc": SOIL_DOC_URL},
         )
 
     def _save_added_zone(self, zone: dict[str, Any]) -> config_entries.ConfigFlowResult:
@@ -974,8 +1452,17 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
             user_input = _zone_input_to_metric(user_input, imperial)
             errors = _zone_errors(user_input)
             if not errors:
-                self._pending_warnings = _unusual_zone_values(user_input, imperial) + _ignored_override_warnings(
-                    user_input
+                texts = await warning_texts(self.hass)
+                self._pending_warnings = (
+                    _unusual_zone_values(user_input, imperial, texts)
+                    + _probe_role_warnings(user_input, texts)
+                    + _ignored_override_warnings(user_input, texts)
+                    + meter_ownership_warnings(
+                        user_input,
+                        self._config_entry.data.get(CONF_ZONES, []),
+                        _device_resolver(self.hass),
+                        texts,
+                    )
                 )
                 if self._pending_warnings:
                     self._pending_zone = user_input
@@ -991,7 +1478,6 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         flow_unit = "gal/h" if imperial else "L/h"
         depth_unit = "in" if imperial else "mm"
 
-        # Helper to get current value or UNDEFINED
         # Helpers returning what to *suggest*, never what to default to. None
         # means "leave the box empty": a field the user cleared has to come back
         # cleared, and only a suggestion can do that.
@@ -1027,7 +1513,10 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         ]
         pf_opts = list(PLANT_FAMILIES.keys())
         ex_opts = list(EXPOSURES.keys())
-        ent_sw = selector.EntitySelectorConfig(domain="switch")
+        # Both domains, as in the creation form: the adapter drives a `valve.*`
+        # with valve services, so restricting this to switches would hide a
+        # capability that works (GH #94).
+        ent_sw = selector.EntitySelectorConfig(domain=["switch", "valve"])
         ent_sn = selector.EntitySelectorConfig(domain="sensor")
         ent_nr = selector.EntitySelectorConfig(domain="number")
 
@@ -1072,6 +1561,50 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
                                     step=0.01,
                                     mode="box",
                                 )
+                            ),
+                            vol.Optional(
+                                CONF_ZONE_VWC_SENSOR,
+                                description={"suggested_value": _d(CONF_ZONE_VWC_SENSOR, None)},
+                            ): selector.EntitySelector(
+                                selector.EntitySelectorConfig(domain="sensor", device_class="moisture")
+                            ),
+                            # Empty here too on a zone that never had them: a
+                            # suggestion would be the same unchosen value,
+                            # switching on a model with one less chance of being
+                            # noticed.
+                            vol.Optional(
+                                CONF_ZONE_ROOT_DEPTH,
+                                description={"suggested_value": _d(CONF_ZONE_ROOT_DEPTH, None)},
+                            ): selector.NumberSelector(
+                                selector.NumberSelectorConfig(
+                                    min=2.0 if imperial else 0.05,
+                                    max=79.0 if imperial else 2.0,
+                                    step=0.5 if imperial else 0.05,
+                                    mode="box",
+                                    unit_of_measurement="in" if imperial else "m",
+                                )
+                            ),
+                            vol.Optional(
+                                CONF_ZONE_SOIL_TYPE,
+                                description={"suggested_value": _d(CONF_ZONE_SOIL_TYPE, DEFAULT_SOIL_TYPE)},
+                            ): selector.SelectSelector(
+                                selector.SelectSelectorConfig(
+                                    options=list(SOIL_TYPES.keys()),
+                                    translation_key="soil_type",
+                                    mode="dropdown",
+                                )
+                            ),
+                            vol.Optional(
+                                CONF_ZONE_FIELD_CAPACITY,
+                                description={"suggested_value": _d(CONF_ZONE_FIELD_CAPACITY, None)},
+                            ): selector.NumberSelector(
+                                selector.NumberSelectorConfig(min=0.05, max=0.6, step=0.01, mode="box")
+                            ),
+                            vol.Optional(
+                                CONF_ZONE_WILTING_POINT,
+                                description={"suggested_value": _d(CONF_ZONE_WILTING_POINT, None)},
+                            ): selector.NumberSelector(
+                                selector.NumberSelectorConfig(min=0.01, max=0.4, step=0.01, mode="box")
                             ),
                             vol.Optional(
                                 CONF_ZONE_EXPOSURE,
@@ -1235,7 +1768,10 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
             step_id="edit_zone_detail",
             data_schema=schema,
             errors=errors,
-            description_placeholders={"zone_name": self._edit_zone_name},
+            description_placeholders={
+                "zone_name": self._edit_zone_name,
+                "soil_doc": SOIL_DOC_URL,
+            },
         )
 
     def _save_edited_zone(self, zone: dict[str, Any]) -> config_entries.ConfigFlowResult:
@@ -1298,8 +1834,13 @@ class NeverDryOptionsFlow(config_entries.OptionsFlow):
         imperial = _is_imperial(self.hass)
         zones = self._config_entry.data.get(CONF_ZONES, [])
         findings = []
+        texts = await warning_texts(self.hass)
         for z in zones:
-            findings.extend(f"- {z[CONF_ZONE_NAME]}: {w}" for w in _unusual_zone_values(z, imperial))
+            findings.extend(f"- {z[CONF_ZONE_NAME]}: {w}" for w in _unusual_zone_values(z, imperial, texts))
+            findings.extend(
+                f"- {z[CONF_ZONE_NAME]}: {w}"
+                for w in meter_ownership_warnings(z, zones, _device_resolver(self.hass), texts)
+            )
         return self.async_show_form(
             step_id="check_zones",
             data_schema=vol.Schema({}),

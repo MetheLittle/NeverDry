@@ -10,6 +10,7 @@ from never_dry.button import (
     ResetYearlyRainButton,
     ResetYearlyWaterButton,
     StopButton,
+    ValveTestButton,
     _create_buttons,
 )
 from never_dry.const import (
@@ -58,10 +59,11 @@ class TestButtonCreation:
     def test_valve_zone_gets_stop_and_reset_buttons(self, hass_mock):
         config = {CONF_ZONES: [{CONF_ZONE_NAME: "Orto", "valve": "switch.valve_orto"}]}
         buttons = _create_buttons(hass_mock, config)
-        # Mark + Irrigate + Stop + Reset per zone, plus the hub buttons
-        assert len(buttons) == 4 + HUB_BUTTONS
+        # Mark + Irrigate + Stop + Reset + Valve test, plus hub
+        assert len(buttons) == 5 + HUB_BUTTONS
         assert any(isinstance(b, StopButton) for b in buttons)
         assert any(isinstance(b, ResetMaintenanceButton) for b in buttons)
+        assert any(isinstance(b, ValveTestButton) for b in buttons)
 
     def test_hub_reset_buttons_always_created(self, hass_mock):
         config = {CONF_ZONES: [{CONF_ZONE_NAME: "Orto"}]}
@@ -75,7 +77,7 @@ class TestButtonProperties:
 
     def test_name(self, hass_mock):
         btn = MarkIrrigatedButton(hass_mock, "Orto")
-        assert btn._attr_name == "Mark irrigated"
+        assert btn._attr_translation_key == "mark_irrigated"
 
     def test_unique_id(self, hass_mock):
         btn = MarkIrrigatedButton(hass_mock, "Orto")
@@ -122,7 +124,7 @@ class TestStopButton:
 
     def test_name(self, hass_mock):
         btn = StopButton(hass_mock, "Orto")
-        assert btn._attr_name == "Stop"
+        assert btn._attr_translation_key == "stop"
 
     def test_unique_id(self, hass_mock):
         btn = StopButton(hass_mock, "Vegetable Garden")
@@ -173,7 +175,7 @@ class TestIrrigateButton:
 
     def test_name(self, hass_mock):
         btn = IrrigateButton(hass_mock, "Orto")
-        assert btn._attr_name == "Irrigate"
+        assert btn._attr_translation_key == "irrigate"
 
     def test_unique_id(self, hass_mock):
         btn = IrrigateButton(hass_mock, "Orto")
@@ -204,7 +206,7 @@ class TestResetYearlyRainButton:
         assert ResetYearlyRainButton(hass_mock)._attr_unique_id == "reset_yearly_rain"
 
     def test_name(self, hass_mock):
-        assert ResetYearlyRainButton(hass_mock)._attr_name == "Reset yearly rain"
+        assert ResetYearlyRainButton(hass_mock)._attr_translation_key == "reset_yearly_rain"
 
     @pytest.mark.asyncio
     async def test_press_calls_reset_yearly_rain_service(self, hass_mock):
@@ -227,7 +229,7 @@ class TestResetYearlyWaterButton:
         assert ResetYearlyWaterButton(hass_mock)._attr_unique_id == "reset_yearly_water"
 
     def test_name(self, hass_mock):
-        assert ResetYearlyWaterButton(hass_mock)._attr_name == "Reset yearly water"
+        assert ResetYearlyWaterButton(hass_mock)._attr_translation_key == "reset_yearly_water"
 
     @pytest.mark.asyncio
     async def test_press_calls_reset_yearly_water_service(self, hass_mock):

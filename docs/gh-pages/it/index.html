@@ -119,57 +119,63 @@
 
 <section class="features">
     <div class="container">
-        <h2>Funzionalit&agrave;</h2>
+        <h2>Cosa fa NeverDry per te</h2>
+        <p class="vision-lead" style="text-align: center; max-width: 46em; margin: 0 auto 1.6em; font-size: 1.1em; line-height: 1.5;">Irrigare bene richiede agronomia, idraulica e un po' di ingegneria elettrica. NeverDry se ne fa carico al posto tuo, e ti chiede solo ci&ograve; che puoi vedere: le tue piante, le tue valvole, il tuo giardino.</p>
         <div class="feature-grid">
             <div class="feature-card">
                 <div class="icon">🌡️</div>
-                <h3>Modello ET scientifico</h3>
-                <p>Bilancio idrico ispirato allo standard FAO-56 in forma semplificata. L'evapotraspirazione &egrave; stimata a partire dalla temperatura con due parametri calibrabili.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🌱</div>
-                <h3>Dieci famiglie di piante</h3>
-                <p>Coefficiente colturale (K<sub>c</sub>) per zona con variazione stagionale: prato, ortaggi, succulente, alberi da frutto e altri profili predefiniti. L'andamento si adatta automaticamente all'emisfero di installazione.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🚿</div>
-                <h3>Controllo diretto delle valvole</h3>
-                <p>Apertura e chiusura automatica delle valvole, irrigazione multi-zona in sequenza per evitare cali di pressione e arresto di emergenza disponibile in qualsiasi momento.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">📊</div>
-                <h3>Deficit per zona</h3>
-                <p>Ogni zona mantiene il proprio deficit idrico del suolo. Piante diverse si asciugano a ritmi diversi e ricevono acqua di conseguenza.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🌧️</div>
-                <h3>Sensibile alla pioggia</h3>
-                <p>L'irrigazione viene saltata quando le precipitazioni hanno gi&agrave; ricostituito la riserva idrica. Il deficit diminuisce a ogni pioggia rilevata dal sensore.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">⚙️</div>
-                <h3>Configurazione da interfaccia</h3>
-                <p>Tutta la configurazione avviene dall'interfaccia di Home Assistant, senza modifiche a file YAML.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🔄</div>
-                <h3>Aggiornamenti senza interruzioni</h3>
-                <p>Le release sono pubblicate automaticamente tramite GitHub Actions e la migrazione di configurazione preserva le impostazioni tra una versione e l'altra. L'aggiornamento avviene con un clic da HACS.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">🖐️</div>
-                <h3>Apertura manuale riconosciuta</h3>
-                <p>Quando la valvola viene aperta dal pulsante fisico, dall'applicazione Zigbee o dallo switch di Home Assistant, NeverDry rileva la sessione, aggiorna il deficit e chiude la valvola al minore fra il volume necessario e il timeout di sicurezza.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon">💧</div>
-                <h3>Tutte le modalit&agrave; di innesco</h3>
-                <p>Irrigazione programmata, pulsante &laquo;Irriga&raquo; sulla scheda della zona, automazioni di Home Assistant, pulsante a bordo valvola e registrazione di un'irrigazione effettuata con mezzi esterni (ad esempio canna o tubo): in tutti i casi il deficit resta coerente con la realt&agrave; del giardino.</p>
+                <h3>Sa quando il tuo giardino ha sete</h3>
+                <p>Segue giorno per giorno evaporazione e pioggia. Quando il deficit idrico del suolo supera la tua soglia, NeverDry apre la valvola esattamente per il tempo necessario - niente timer fissi, niente irrigazioni a occhio.</p>
             </div>
             <div class="feature-card">
                 <div class="icon">🛡️</div>
-                <h3>Sicurezza a pi&ugrave; livelli</h3>
-                <p>Tre strati di sicurezza indipendenti prevengono l'apertura prolungata della valvola: watchdog software (task asyncio), interlock hardware che programma il timer sul dispositivo via entit&agrave; Zigbee o MQTT, e timeout di consegna. Se un livello fallisce, il successivo interviene.</p>
+                <h3>La valvola si chiude sempre</h3>
+                <p>Se una valvola smette di rispondere, NeverDry continua a provare - sei tentativi, con una pausa sempre pi&ugrave; lunga fra l'uno e l'altro - e solo allora blocca quella zona e mostra un avviso nella tua dashboard. Tre meccanismi di sicurezza indipendenti impediscono che l'acqua scorra all'infinito.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌱</div>
+                <h3>Ogni pianta ha il suo programma</h3>
+                <p>Prato, rose, agrumi, succulente - 10 profili di piante con variazione stagionale. A luglio il tuo prato beve pi&ugrave; di quanto la tua lavanda berr&agrave; mai. NeverDry ne tiene conto da solo.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📊</div>
+                <h3>Le zone sono indipendenti</h3>
+                <p>L'aiuola di rose e il prato si asciugano a velocit&agrave; diverse. Ogni zona tiene il proprio deficit idrico del suolo - basta con un unico programma per tutto il giardino.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌧️</div>
+                <h3>Salta l'irrigazione dopo la pioggia</h3>
+                <p>NeverDry misura quanta pioggia &egrave; caduta e la sottrae automaticamente dal deficit. Mai pi&ugrave; irrigare il giorno dopo un temporale.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🖐️</div>
+                <h3>Hai preso la canna? Basta dirlo a NeverDry</h3>
+                <p>Apri la valvola a mano, usa il pulsante fisico o annaffia con la canna: "Segna come irrigata" mantiene il deficit corretto, comunque tu abbia irrigato.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">💧</div>
+                <h3>Irriga da dove vuoi</h3>
+                <p>Pulsante della dashboard, automazione, programmatore, valvola fisica - NeverDry registra sempre cosa &egrave; successo e aggiorna il deficit di conseguenza.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">⚙️</div>
+                <h3>Si configura dall'interfaccia</h3>
+                <p>Nessun file YAML. Zone, piante, valvole e soglie si configurano direttamente dall'interfaccia di Home Assistant.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🔄</div>
+                <h3>Si aggiorna con un clic</h3>
+                <p>HACS ti avvisa quando esce una nuova versione. Un clic, riavvii HA - impostazioni e storico restano sempre al loro posto.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📡</div>
+                <h3>Funziona anche senza valvole</h3>
+                <p>Niente hardware? NeverDry ti manda una notifica quando serve irrigare e con quanta acqua. Una modalit&agrave; di solo monitoraggio, senza alcun hardware.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌍</div>
+                <h3>Metrico e imperiale</h3>
+                <p>Tutti i sensori dichiarano la device class corretta di Home Assistant - deficit in mm o pollici, volumi in litri o galloni, portata in L/h o gal/h. Le unit&agrave; seguono automaticamente le preferenze del tuo HA.</p>
             </div>
         </div>
     </div>
@@ -253,6 +259,16 @@
     </div>
 </section>
 
+<!-- Get Help -->
+<section class="support" style="background: #f8f8f8;">
+    <h2>Serve aiuto?</h2>
+    <p style="margin-bottom: 1.5em;">Domande sulla configurazione o sul funzionamento? Partecipa alla discussione.</p>
+    <div style="display: flex; gap: 1em; justify-content: center; flex-wrap: wrap;">
+        <a class="kofi-btn" style="background: #24292e;" href="https://github.com/never-dry/NeverDry/issues">🐛 GitHub Issues</a>
+        <a class="kofi-btn" style="background: #03a9f4;" href="https://community.home-assistant.io/t/neverdry-smart-irrigation-that-calculates-when-and-how-long-to-water-fao-56-water-balance-hacs/1013835">💬 HA Community</a>
+    </div>
+</section>
+
 <!-- The companion project -->
 <section class="how-it-works" style="background: #fff;">
     <div class="container" style="max-width: 760px;">
@@ -300,7 +316,7 @@
     </div>
 </section>
 
-<section style="background: var(--accent-light); padding: 16px 20px; text-align: center; font-size: 0.85em; color: #555;">
+<section data-translation-notice style="background: var(--accent-light); padding: 16px 20px; text-align: center; font-size: 0.85em; color: #555;">
     <div class="container">
         Questa pagina &egrave; tradotta in italiano. Per segnalazioni o miglioramenti puoi
         <a href="https://github.com/never-dry/NeverDry/issues" style="color: var(--accent);">aprire una issue</a> o inviare una pull request.

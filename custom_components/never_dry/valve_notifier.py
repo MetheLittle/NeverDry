@@ -29,6 +29,9 @@ from enum import StrEnum
 from typing import ClassVar
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.translation import async_get_translations
+
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +46,10 @@ class NotificationKind(StrEnum):
     UNREACHABLE_PASSIVE = "unreachable_passive"
     UNREACHABLE_AT_IRRIGATION = "unreachable_at_irrigation"
     FLOW_METER_DEAD = "flow_meter_dead"
+    # Same fault, different consequence, so a different condition rather than a
+    # sentence passed in by the caller: the volume could not be estimated
+    # either, and the zone's deficit is left standing.
+    DELIVERY_UNCREDITED = "delivery_uncredited"
     STUCK_OPEN = "stuck_open"
     LEAK_DETECTED = "leak_detected"
     ZONE_DISABLED = "zone_disabled"
@@ -51,6 +58,10 @@ class NotificationKind(StrEnum):
     MODEL_DRIFT = "model_drift"
     WATER_ME_NOW = "water_me_now"
     WATCHDOG_TRIGGERED = "watchdog_triggered"
+    # A deficit far past where irrigation should have brought it back.
+    # Not a fault of its own: the symptom of one further upstream, which
+    # is why it says to go and look rather than naming a cause.
+    DEFICIT_ANOMALY = "deficit_anomaly"
 
 
 class Severity(StrEnum):
@@ -61,80 +72,38 @@ class Severity(StrEnum):
     CRITICAL = "critical"
 
 
-# ── Templates ─────────────────────────────────────────────────────────
+# ── Text ────────────────────────────────────────────────────
+
+# The title and body of every notification live in the translation catalogue, under
+# ``common``, as ``notification_<kind>_title`` and ``notification_<kind>_body``.
+#
+# ``common`` rather than ``issues`` on purpose. A repair issue is a statement about the
+# *installation*: a setting is deprecated, a credential expired, go and check something in
+# your configuration. What arrives here is a statement about the *garden*: a valve is stuck
+# open and water is running. Filing the second under the catalogue built for the first would
+# make the text translatable at the cost of saying something untrue about what it is, and it
+# would put "shut off your mains" on the same page as housekeeping. The condition itself
+# belongs in an entity the user can automate on; this catalogue only holds the words.
+#
+# The category is not free choice either: hassfest validates ``strings.json`` against a
+# closed schema, so a ``notifications`` key of our own fails CI. ``common`` is the neutral
+# bucket that schema does provide.
+_TEXT_PREFIX = f"component.{DOMAIN}.common.notification_"
 
 
-@dataclass(frozen=True)
-class _Template:
-    """Static title + body template for one :class:`NotificationKind`."""
+async def _resolve(hass: HomeAssistant, kind: NotificationKind) -> tuple[str, str]:
+    """Title and body for one kind, in the user's language.
 
-    title: str
-    body: str
-
-
-_TEMPLATES: dict[NotificationKind, _Template] = {
-    NotificationKind.COMMAND_FAILED: _Template(
-        title="Valve command failed",
-        body="Zone '{zone}': {operation} failed ({error_detail}).",
-    ),
-    NotificationKind.UNREACHABLE_PASSIVE: _Template(
-        title="Valve unreachable",
-        body="Zone '{zone}' valve has been unavailable for {duration}.",
-    ),
-    NotificationKind.UNREACHABLE_AT_IRRIGATION: _Template(
-        title="Valve unreachable at irrigation time",
-        body=(
-            "Could not start irrigation for zone '{zone}': valve unavailable "
-            "({reason}). Check the valve battery / Zigbee mesh before retrying."
-        ),
-    ),
-    NotificationKind.FLOW_METER_DEAD: _Template(
-        title="Flow meter unavailable",
-        body="Zone '{zone}' flow meter became unavailable during irrigation.",
-    ),
-    NotificationKind.STUCK_OPEN: _Template(
-        title="Valve stuck open — shut off mains water",
-        body=(
-            "Zone '{zone}' valve switch reports OFF but water is still flowing "
-            "({flow}). The integration has already attempted recovery and "
-            "triggered an emergency stop for every other zone. "
-            "**Manually shut off your main water valve now** and inspect "
-            "the affected valve before resuming irrigation."
-        ),
-    ),
-    NotificationKind.LEAK_DETECTED: _Template(
-        title="Leak detected",
-        body="Flow detected while every valve is closed. Last reading: {flow}.",
-    ),
-    NotificationKind.ZONE_DISABLED: _Template(
-        title="Zone disabled",
-        body="Zone '{zone}' auto-disabled after {failures} consecutive failures.",
-    ),
-    NotificationKind.BATTERY_LOW: _Template(
-        title="Battery low",
-        body="Battery for {sensor_name} is at {percent}%.",
-    ),
-    NotificationKind.IRRIGATION_INEFFECTIVE: _Template(
-        title="Irrigation appears ineffective",
-        body="Zone '{zone}': soil moisture did not rise after the last irrigation.",
-    ),
-    NotificationKind.MODEL_DRIFT: _Template(
-        title="Model drift detected",
-        body="Zone '{zone}': moisture/model correlation has dropped to {correlation}.",
-    ),
-    NotificationKind.WATER_ME_NOW: _Template(
-        title="Manual irrigation suggested",
-        body="Zone '{zone}': deficit {deficit} above threshold; water by hand.",
-    ),
-    NotificationKind.WATCHDOG_TRIGGERED: _Template(
-        title="Valve force-closed by safety watchdog",
-        body=(
-            "Zone '{zone}' valve was open for more than {duration_min} min with no "
-            "close command received. NeverDry forced it closed as a safety measure. "
-            "Check that the automation or delivery logic is working correctly."
-        ),
-    ),
-}
+    Home Assistant loads English first and lays the requested language over it, so a key a
+    translator has not reached yet degrades to English rather than to nothing. A key missing
+    everywhere would degrade to the raw identifier, which is why there is a test that will not
+    let one exist.
+    """
+    resources = await async_get_translations(hass, hass.config.language, "common", {DOMAIN})
+    return (
+        resources.get(f"{_TEXT_PREFIX}{kind.value}_title", kind.value),
+        resources.get(f"{_TEXT_PREFIX}{kind.value}_body", ""),
+    )
 
 
 # ── Internal entry ────────────────────────────────────────────────────
@@ -177,7 +146,7 @@ class ValveNotifier:
 
     async def notify(
         self,
-        zone: str,
+        zone: str | None,
         kind: NotificationKind,
         severity: Severity = Severity.WARNING,
         context: dict | None = None,
@@ -187,12 +156,20 @@ class ValveNotifier:
         Returns ``True`` when the call created or updated a notification,
         ``False`` when the call was deduplicated (same zone, kind and
         context as the currently active one).
+
+        ``zone`` is ``None`` for a condition that belongs to the installation
+        rather than to one patch of ground - nothing is configured to water
+        with, say. Such a notice is about the whole garden, so there is one of
+        it: the dedup key and the notification id both collapse to a single
+        entry instead of one per zone, which is what makes a second call
+        replace the first rather than pile up beside it.
         """
         ctx = dict(context or {})
-        ctx.setdefault("zone", zone)
-        template = _TEMPLATES[kind]
+        if zone is not None:
+            ctx.setdefault("zone", zone)
+        title_text, body_text = await _resolve(self._hass, kind)
         try:
-            message = template.body.format(**ctx)
+            message = body_text.format(**ctx)
         except KeyError as missing:
             _LOGGER.error(
                 "Notification %s/%s missing context key %s; using raw template",
@@ -200,7 +177,7 @@ class ValveNotifier:
                 kind.value,
                 missing,
             )
-            message = template.body
+            message = body_text
 
         key = (zone, kind)
         existing = self._active.get(key)
@@ -208,7 +185,7 @@ class ValveNotifier:
             return False
 
         notification_id = self._notification_id(zone, kind)
-        title = f"[{severity.value.upper()}] {template.title}"
+        title = f"[{severity.value.upper()}] {title_text}"
         await self._hass.services.async_call(
             self._DOMAIN,
             "create",
@@ -230,7 +207,23 @@ class ValveNotifier:
         )
         return True
 
-    async def clear(self, zone: str, kind: NotificationKind) -> bool:
+    async def phrase(self, name: str) -> str:
+        """One catalogue string by name, for text a caller must assemble itself.
+
+        The manual-watering notice carries a line per dry zone, and those lines
+        are built where the zones are known rather than here. Built in code they
+        would be text no translator ever sees - the notice framed in German
+        around an English list, which is the defect this whole class exists to
+        stop. So the line is a catalogue entry too, and the caller asks for it
+        by name.
+
+        Returns the empty string for a name the catalogue does not carry, which
+        a caller can see and fall back from.
+        """
+        resources = await async_get_translations(self._hass, self._hass.config.language, "common", {DOMAIN})
+        return resources.get(f"{_TEXT_PREFIX}{name}", "")
+
+    async def clear(self, zone: str | None, kind: NotificationKind) -> bool:
         """Dismiss the notification for ``(zone, kind)``.
 
         Returns ``True`` when something was dismissed, ``False`` when no
@@ -265,7 +258,7 @@ class ValveNotifier:
             await self.clear(zone, kind)
         return len(keys)
 
-    def is_active(self, zone: str, kind: NotificationKind) -> bool:
+    def is_active(self, zone: str | None, kind: NotificationKind) -> bool:
         """Return ``True`` if a notification is currently active for ``(zone, kind)``."""
         return (zone, kind) in self._active
 
@@ -276,7 +269,11 @@ class ValveNotifier:
     # ── Internals ────────────────────────────────────────────────────
 
     @classmethod
-    def _notification_id(cls, zone: str, kind: NotificationKind) -> str:
-        """Build a deterministic notification id for ``(zone, kind)``."""
-        safe_zone = re.sub(r"\W+", "_", zone.strip().lower()).strip("_") or "global"
+    def _notification_id(cls, zone: str | None, kind: NotificationKind) -> str:
+        """Build a deterministic notification id for ``(zone, kind)``.
+
+        ``None`` and a zone whose name is all punctuation land on the same
+        ``global`` id, which is correct for both: neither names a zone.
+        """
+        safe_zone = re.sub(r"\W+", "_", (zone or "").strip().lower()).strip("_") or "global"
         return f"{cls._ID_PREFIX}_{safe_zone}_{kind.value}"

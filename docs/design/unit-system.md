@@ -48,9 +48,13 @@ value and unit when the instance is US-customary:
 
 - mm → in
 - L → gal
-- L/min → gal/min
 - m² → ft²
 - mm/h → in/h
+
+Flow rates are the exception. The design and measured flow rate sensors
+convert from the stored L/min themselves and declare L/h, or gal/h on a
+US-customary instance, because HA does not auto-convert them to the per-hour
+unit the form uses (`ZoneFlowRateSensor` in `sensor.py`).
 
 The integration **writes metric; HA renders imperial.** A regression suite
 (`tests/test_sensor_device_classes.py`) asserts the `device_class` of every
@@ -61,7 +65,8 @@ imperial users.
 
 When `hass.config.units` is US-customary, the config flow:
 
-1. renders imperial labels and bounds (°F, in, ft², gal/min);
+1. renders imperial labels and bounds (°F, in, ft², gal/h; L/h on a metric instance, since the flow rate is
+   entered per hour and stored per minute);
 2. pre-fills fields by converting the stored metric value to the display unit;
 3. on submit, converts the input **back to metric before persisting**.
 

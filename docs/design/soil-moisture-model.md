@@ -10,10 +10,17 @@ water balance), `design_domain_object_model.md` (where objects live).
 answers a different question that we got wrong: **once a probe is in the ground,
 what is its reading allowed to mean?**
 
-It is deliberately unfinished. The reasoning below is derived from soil physics
-and from reading the code; the parts that need contact with a real garden are
-marked **OPEN** and are the subject of the questions in #126. Nothing here should
-be implemented before those answers arrive.
+It is partly settled and partly open, and the two are marked, because for a
+while they were not and this note read as though none of it had shipped.
+
+**Settled and running:** §5, who owns a zone's deficit - a completely declared
+per-zone probe measures it, every other zone estimates it, and a probe that
+falls silent hands back. That is in the product.
+
+**Still open:** §4, whether field capacity should be observed rather than
+declared, and the calibration question behind it. Those need contact with a real
+garden, are marked **OPEN**, and are the subject of the questions in #126.
+Nothing marked OPEN should be implemented before those answers arrive.
 
 ---
 
@@ -240,6 +247,127 @@ This is a safety net, **not a sensor model**. It cannot distinguish a calibrated
 percentage from an uncalibrated one, so it settles the scale and leaves §4 — what the
 number is worth once it is on the right scale — exactly where it was.
 
+### The scale question, reopened by the field ([#234](https://github.com/never-dry/NeverDry/issues/234))
+
+The paragraph above was accurate and it was not enough. The scale was settled; what
+the number is worth was left open, as it says. Then a probe was given ownership of a
+zone's deficit in 0.12.0-beta.5 **using that number anyway**, and the sentence "read
+before implementing" at the top of this document turned out to be the only thing
+standing between the two, which is not a mechanism.
+
+Two installations reported the same result within a day of each other:
+
+| Reporter | Probe | Soil | Zone deficit | Symptom |
+|---|---|---|---|---|
+| MeTheLittle | 21 % | not stated | 0.0 mm | never waters; root depth changes nothing |
+| maintainer | 94-100 % on four probes | mixed | 0.0 mm | never waters; any probe on any zone |
+
+The mechanism is the one named in §4, arriving exactly where §4 predicted. With
+`(field_capacity − reading)`, a reading above the declared field capacity makes the
+bracket negative, and the clamp that keeps a deficit from going negative pins it at
+zero. **The zone never waters, and 0.0 mm on the card is indistinguishable from soil
+that has just been watered.** The multiplication by root depth happens after the
+subtraction, which is why the reporter found that trying 1, 0.3 and 0.08 m changed
+nothing: there was nothing left to scale.
+
+A second defect rode along, and it did not go away when the probe was unplugged. The
+published `deficit_mm` is the number the zone acts on: the soil's, while a probe
+drives. Restoring it on startup wrote the **estimate**, so every Home Assistant
+restart replaced the weather reserve with whatever the probe happened to say. Field
+evidence: one zone at 0.03 mm while its three siblings, through the same restart,
+held 0.31, 1.52 and 2.38. The reserve is precisely what the zone falls back on when
+the probe stops being believed, so this is the failure the feature set out to
+prevent, arriving through the restore path instead of through a dead battery.
+
+#### What the code does now
+
+One scale, declared by the product rather than guessed per reading. The probe is read
+on **0-100 and on nothing else**, which is what garden probes publish, and the form
+says so under the field. A value outside the range withdraws the measurement rather
+than being held, because a held reading stays *fresh* and so keeps a probe talking
+nonsense in charge for good.
+
+The reading is taken for what it can honestly be, where the ground sits between dry
+and wet, and therefore as the share of the soil's **available** water still present:
+
+```
+deficit = (1 − reading/100) × (field_capacity − wilting_point) × root_depth × 1000
+                                └──────────── available water ────────────┘
+```
+
+The wilting point was already in every row of `SOIL_TYPES` with no code reading it,
+so nothing new is asked of the user. The result is bounded by construction: the full
+reservoir at a reading of 0, zero only at a reading of 100, and no reading can invert
+it. That last property is the one the previous formula lacked, and lacking it is what
+produced a permanent zero.
+
+A `Custom` soil can no longer drive a probe: it supplies a field capacity and no
+wilting point, and half an interval is not a reservoir. Deriving the missing end would
+put an invented number under a figure the user reads as a measurement, and the ratio
+between the two is not constant across soils: 0.40 on sand, 0.48 on loam, 0.61 on
+clay.
+
+#### The limit of that, stated plainly
+
+This **does not** close §4, and it must not be read as closing it. It replaces an
+unbounded mismatch with a bounded interpretation, which is a change of failure mode,
+not the arrival of a measurement.
+
+The formula assumes the probe's 0 and 100 are the ends of the *soil's* interval: that
+a reading of 0 means wilting point and 100 means field capacity. The field input
+recorded in §4 says they are not. They are dry air and open water, and neither is a
+soil state, so the interval that matters sits **somewhere inside** the reported range
+and its position is unknown:
+
+```
+probe scale    0 ─────────────────────────────────── 100
+               dry air                          submerged
+
+what matters        [ wilting point ... field capacity ]
+                          ~20?                ~45?
+```
+
+Suppose that for one probe in one soil, field capacity really reads 45. On clay at
+0.30 m, a 42 mm reservoir:
+
+| Probe reads | True state of the soil | Water actually needed | What the formula returns |
+|---|---|---|---|
+| 45 | full, just finished draining | **0 mm** | 23 mm, waters a full soil |
+| 30 | moderately dry | ~17 mm | 29 mm, waters too much |
+| 20 | plant in distress | **42 mm** | 34 mm, waters too little |
+
+So the error is systematic, and across most of the range it points one way: it
+**overstates** the need. The readings between 94 and 100 seen on the maintainer's
+instance are the exception rather than the test case, since a soil that far past the
+plateau really does need nothing.
+
+The trade is deliberate and worth naming, because it is the argument for shipping the
+interpretation before the calibration:
+
+| | before | now |
+|---|---|---|
+| Failure | never waters, silently, for good | waters by an unknown scale factor |
+| Visible | no: 0.0 mm reads as healthy soil | yes: water and the bill |
+| Reversible for the plant | no | yes |
+
+#### What actually closes it
+
+The observation this document has argued for since §4, and which nothing has yet
+supplied: 24 to 48 hours after a good soaking, with no rain and no irrigation, the
+reading falls and then **flattens**. The value it settles on *is* field capacity,
+expressed on that probe's own scale. Substituted for the 100 in the formula above, both
+terms finally live in the same units and the calibration error largely cancels, which
+is §4's original claim, unchanged.
+
+Until then, the fallback remains the one from the field input: let the user declare the
+reading that corresponds to a full soil, defaulting to 100, which is today's behaviour.
+Recorded here as the next step and **not** implemented, deliberately: a default nobody
+measured would be a third invented number, and the observation is cheap to obtain from
+an installation that already has four probes reporting.
+
+**OPEN.** Where the plateau sits on a consumer probe in a real garden, and whether it
+is stable enough across a season to be worth storing per zone.
+
 ## 5. Which model is in charge — **the decision this document exists to force**
 
 Everything above is about *where* a probe is. This section is about something
@@ -251,7 +379,76 @@ bypassed. Two models therefore coexist with no declared relationship: one is
 silently switched off by the presence of a config field. That switch is precisely
 the mechanism that produces the defect in §3.
 
-**Recommendation: ET is always primary; a probe is a corrector, never an owner.**
+**Decided 2026-08-17 — and narrower than the recommendation below: a probe
+calibrates the *soil*, it does not correct the *deficit*.**
+
+The owner's argument, from his own garden, closes the question. Two zones with
+the same soil sit at systematically different moisture: one is always wetter
+than the other because the **irrigation is unbalanced** and because it has far
+**more shade on the ground**. Both are local circumstances of a spot, not
+properties of the zone's water balance. Anchoring the deficit to that reading
+would take an imbalance in the plumbing and a difference in canopy and feed them
+back as if they were information about how much water the soil needs.
+
+So the probe's output is not a deficit and not a correction to one. What a point
+measurement legitimately generalises is what the *soil* does:
+
+* **field capacity** — the plateau the curve settles at after drainage, which
+  §4 already argues should be observed rather than declared;
+* **the soil's dynamics** — how fast it drains and dries, which is a property of
+  the texture rather than of the plant above it.
+
+Those transfer. The instantaneous water content does not.
+
+**And a gap this exposes: soil type is nowhere in the model.** `field_capacity`
+and root depth are two global defaults (0.30 and 0.30 m), identical for clay,
+sand and peat — soils whose available water differs by a factor of two or more.
+The probe is one way to learn a zone's real value; asking the user which soil
+they have is the other, and it works for everyone rather than only for the few
+with a probe. See AI-172 (soil-type presets driving `field_capacity` / root
+depth).
+
+**Settled 2026-09-27, and it is the "not foreclosed" path below rather than a
+reversal.** The rejection above is of probe ownership *by default*. What ships
+is the declared path that paragraph anticipates, and the rule is worth stating
+plainly because until now it was only in the code:
+
+> **A zone whose probe is completely declared measures its deficit. Every other
+> zone estimates it. A zone that was measuring and loses its probe goes back to
+> estimating, and says so.**
+
+"Completely declared" is three things, and the third is the one that surprises
+people:
+
+1. a moisture sensor bound to that zone;
+2. the depth its roots reach - the number no table holds, and the one that makes
+   the declaration deliberate rather than accidental;
+3. a soil with **both** ends of its interval. Every named soil carries them off
+   one texture row; Custom asks for them (see the entry for 2026-09-27 in the
+   revision history).
+
+Miss any one and the probe is shown beside the zone's figures and nothing else
+changes. That is why the depth is the switch: binding a sensor is something a
+user does casually, giving a root depth is not, so the deliberate act is what
+turns ownership on. The form says which of the three is missing rather than
+leaving the sensor sitting there ignored.
+
+**The fallback is not a mode, it is what happens when the measurement stops
+being one.** The weather model runs underneath the whole time, for every zone,
+whether or not a probe is driving. So a probe that goes quiet past its own
+observed rhythm costs an afternoon on the estimate rather than a season: the
+reading is set aside, the zone falls back, and a line goes in the log. Nothing
+has to be rebuilt, because nothing was ever switched off.
+
+That is also the reason the two numbers must not be confused: the measured
+deficit and the estimated one are on different scales, and moving between them
+without saying so is a change of ruler that reads as a change of weather
+(GH #234, 2026-09-27).
+
+---
+
+**Earlier recommendation (superseded by the above, kept for the reasoning):
+ET is always primary; a probe is a corrector, never an owner.**
 
 1. **ET is the only model that exists for every zone.** It is the universal
    substrate — every zone always has it. Making the primary model depend on
@@ -343,4 +540,6 @@ needing a lab reproduction.
 |---|---|
 | 2026-08-08 | Initial draft. Written after the per-zone site exposure review (#147) surfaced the question of where a microclimate correction belongs, which in turn exposed the soil-probe model. Pending field input on #126. |
 | 2026-08-13 | The scale question of §4 is settled and shipped: readings are normalised to a fraction at the boundary, and anything that is not a water content on either scale is refused rather than clamped (#170). It changes nothing about §4 or §5 — a probe now reads on the right scale, which says nothing yet about what its number is worth or who owns the deficit. |
+| 2026-09-14 | The scale question is reopened by the field (#234): two installations report a zone pinned at zero deficit and never watering, which is the §4 mismatch arriving exactly where §4 predicted, plus a restore path that overwrote the weather reserve with the probe's number on every restart. Both are fixed. The probe is now read on the 0-100 scale alone, as the share of available water still present, which is bounded and cannot invert. §4 is **not** closed by this and says so: the interpretation assumes the probe's ends are the soil's ends, which the 2026-08-10 field input says they are not, so the deficit is now wrong by an unknown scale factor instead of being silently zero. Status stays **Draft**: §5 is still open, and so is the plateau observation that would make the number a measurement. |
+| 2026-09-27 | §5 settled, along the "not foreclosed" path rather than against it: a completely declared per-zone probe owns that zone's deficit, everything else estimates, and a probe that falls silent hands back to the estimate. Recorded because the behaviour had been shipping for three betas while this section still called it something to revisit before offering to anyone. The third condition, a soil with both ends of its interval, stopped being a restriction the same day: the Custom entry used to ask for the field capacity alone, which left the one gardener who had measured their own soil as the only one whose probe could not drive (#234). |
 | 2026-08-10 | Field input arrived on #126 and is recorded in §4. It confirms the unit-mismatch hypothesis and names its mechanism (factory calibration against dry air and open water, neither of which is a soil state), reports the probe depth (~8 cm against a fixed 0.30 m root depth), and proposes a two-point calibration — recorded as the fallback to observing the drainage plateau, not as the primary answer. The percentage-vs-fraction input scale (#150) is called out as a separate, smaller problem. Status stays **Draft**: §5, the decision this document exists to force, is still open. |

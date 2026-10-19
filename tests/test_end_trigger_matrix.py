@@ -72,8 +72,8 @@ def _idle_operator():
     """Operator stub: opens/closes OK and reads IDLE — the state it shows
     right after processing a hardware 'off' event (ZFE self-close)."""
     op = MagicMock(state=ValveState.IDLE)
-    op.open = AsyncMock(return_value=OperationResult(status=OperationStatus.OK))
-    op.close = AsyncMock(return_value=OperationResult(status=OperationStatus.OK))
+    op.async_turn_on = AsyncMock(return_value=OperationResult(status=OperationStatus.OK))
+    op.async_turn_off = AsyncMock(return_value=OperationResult(status=OperationStatus.OK))
     return op
 
 
@@ -187,7 +187,9 @@ def _assert_partial_with_residual(zone, *, max_running_s):
     assert zone._last_irrigation_source != "manual"
     # History written once: totals match the single credited session.
     assert zone._total_water_delivered == pytest.approx(delivered, abs=0.06)
-    assert zone._session_water_delivered == pytest.approx(delivered, abs=0.06)
+    assert zone._last_volume_delivered == pytest.approx(delivered, abs=0.06)
+    # However the session ended, its running total stops running with it.
+    assert zone._session_water_delivered == 0.0
     assert zone._last_irrigated is not None
     # Running time coherent with the credited volume (guard-flow credit:
     # delivered = FLOW x elapsed / 60 -> elapsed = delivered x 60 / FLOW).

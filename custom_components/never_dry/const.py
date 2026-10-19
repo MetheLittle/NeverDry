@@ -1,13 +1,59 @@
 """Constants for the NeverDry integration."""
 
 DOMAIN = "never_dry"
-CONFIG_VERSION = 3
+CONFIG_VERSION = 4
 
 # ── Sensor inputs ─────────────────────────────────────────
 CONF_TEMP_SENSOR = "temperature_sensor"
 CONF_RAIN_SENSOR = "rain_sensor"
 CONF_VWC_SENSOR = "vwc_sensor"
 CONF_RAIN_SENSOR_TYPE = "rain_sensor_type"
+
+# Optional inputs that unlock the richer evapotranspiration methods. All
+# optional by design: a site declares what it has, and the models it may choose
+# follow from that (Environment.declared_sensors >= model.required_sensors).
+# Declaring none of these leaves the integration exactly as it was.
+CONF_HUMIDITY_SENSOR = "humidity_sensor"
+CONF_WIND_SPEED_SENSOR = "wind_speed_sensor"
+CONF_NET_RADIATION_SENSOR = "net_radiation_sensor"
+CONF_TEMP_MAX_SENSOR = "temp_max_sensor"
+CONF_TEMP_MIN_SENSOR = "temp_min_sensor"
+
+# Which water-balance method to run. ``auto`` is not a method: it means "the
+# best one my sensors support", which is what every existing installation has
+# been doing implicitly. Stored as the model's own identifier otherwise, so the
+# class can move without invalidating the choice.
+# Height above ground of the anemometer, in metres. FAO-56 works with wind at
+# 2 m; a station on a mast reads faster air, and the correction is systematic —
+# the same direction every hour — so the default is the WMO standard mast rather
+# than the equation's own reference.
+CONF_ANEMOMETER_HEIGHT = "anemometer_height_m"
+DEFAULT_ANEMOMETER_HEIGHT_M = 10.0
+
+CONF_ET_METHOD = "et_method"
+ET_METHOD_AUTO = "auto"
+DEFAULT_ET_METHOD = ET_METHOD_AUTO
+
+# The dropdown's options, richest first: the methods a *site* may choose, which
+# is to say the model its zones run on when they have no probe of their own. A
+# zone that declares a soil probe never reads this, it runs on the measurement.
+#
+# Two exclusions, and they are not the same kind. A method whose input the host
+# cannot build yet would raise on its first reading, so it joins this list in
+# the same change that feeds it, not before. A method that is not a site-wide
+# choice at all is excluded for good: the probe models read the soil of one
+# zone, and the way to pick one is to attach a probe to that zone.
+#
+# Duplicated from ``water_balance_model`` on purpose: the form must offer these
+# without importing the model module, and a static list is what the translation
+# guard can check its labels against. tests/test_water_balance_model.py asserts
+# the two agree, so the mirror cannot drift.
+ET_METHOD_OPTIONS = (
+    ET_METHOD_AUTO,
+    "penman_monteith",
+    "hargreaves",
+    "et_simple",
+)
 
 # Rain sensor types
 RAIN_TYPE_EVENT = "event"  # mm per event (tipping bucket pulse)
@@ -45,6 +91,73 @@ CONF_ZONE_VOLUME_ENTITY = "volume_entity"
 CONF_ZONE_FLOW_METER_SENSOR = "flow_meter_sensor"
 CONF_ZONE_DELIVERY_TIMEOUT = "delivery_timeout"
 CONF_ZONE_BATTERY_SENSOR = "battery_sensor"
+# A soil-moisture probe belonging to THIS zone. A probe measures one patch of
+# soil, with one kind of planting above it and its own watering history, so its
+# reading is not transferable to a zone watered independently — which is why the
+# installation-wide binding it replaces was a design error, not a shortcut.
+CONF_ZONE_VWC_SENSOR = "vwc_sensor"
+# What turns that reading into millimetres:
+#
+#     D = (1 - reading/100) * (field_capacity - wilting_point) * root_depth * 1000
+#
+# The reading is on the 0-100 scale and on no other: that is the scale garden
+# probes publish, the form says so, and anything outside the range is refused
+# rather than rescaled. It is read as the share of the *available* water still
+# in the ground, not as a volumetric water content, because a consumer probe
+# does not report one whatever its datasheet says.
+#
+# The earlier formula subtracted the reading from the field capacity, which
+# required the two to be the same quantity. When they were not, the bracket went
+# negative, the clamp turned it into zero, and the zone stopped watering for good
+# behind a figure indistinguishable from well-watered soil (GH #234). The form
+# above it is where the scale is now stated, because that is the only place a
+# user can act on it.
+#
+# The soil type below supplies both soil numbers, so the one number left to
+# declare is the root depth, and the root depth is therefore the switch. A probe
+# declared without it is telemetry, exactly as before; a probe declared with it
+# owns the zone's deficit.
+#
+# Optional on purpose: making it required would force a decision about the model
+# on anyone who opened the zone to change its area, and the form warns instead,
+# which is the mechanism this project already uses where refusing would trap the
+# user.
+#
+# Root depth is a property of the *planting* and no table has it: a lawn, a hedge
+# and a pot differ by a factor of four on the same ground. So it stays a figure,
+# with deliberately no default, because a value nobody chose would switch on a
+# model nobody asked for and a deficit scaled by a guess still looks like a
+# measurement. The soil is the opposite case, which is why it gets a dropdown.
+CONF_ZONE_ROOT_DEPTH = "root_depth_m"
+#: The ground, chosen rather than typed. Supplies both ends of the reservoir,
+#: which is why the two boxes below are only read behind the Custom entry.
+CONF_ZONE_SOIL_TYPE = "soil_type"
+CONF_ZONE_FIELD_CAPACITY = "field_capacity"
+#: The other end, and the reason Custom used to cost a zone its probe. A probe
+#: reading says where the ground sits *between* dry and wet, so both ends are
+#: needed to turn it into millimetres; Custom supplied the top one only, and a
+#: zone whose owner had gone to the trouble of measuring their own soil was the
+#: one zone the probe could not drive. Asked for here rather than assumed.
+CONF_ZONE_WILTING_POINT = "wilting_point"
+
+#: A reading older than this is refused however rarely the probe speaks. It is a
+#: backstop, not the verdict: the verdict comes from the probe's own observed
+#: cadence (``environment.silence_floor``), which needs samples this may not yet
+#: have: a probe dead since installation never establishes one. A soil probe
+#: that cannot manage a reading a day cannot inform a daily irrigation anyway.
+PROBE_STALE_BACKSTOP_S = 24 * 3600
+
+#: How far back the freshness bar remembers, in seconds. Measured in days and
+#: not in samples, and that is the whole point of it: a probe reports on change,
+#: so it speaks every thirty seconds while the ground dries and once an hour
+#: while it sits still. A window counted in samples fills with the fast readings
+#: and evicts the slow ones, which are the only evidence of the device's real
+#: heartbeat -- so the bar ends up below the cadence the probe has always had
+#: and the probe is called dead for behaving normally (field, 2026-09-16). A
+#: week is long enough to hold a probe's slowest honest stretch and short enough
+#: that a one-off outage stops counting once the week has turned.
+PROBE_CADENCE_MEMORY_S = 7 * 24 * 3600
+
 CONF_ZONE_IRRIGATION_MODE = "irrigation_mode"
 CONF_ZONE_IRRIGATION_TIME = "irrigation_time"
 CONF_ZONE_HW_MAX_DURATION_TOPIC = "hw_max_duration_topic"
@@ -138,6 +251,45 @@ EXPOSURES = {
     EXPOSURE_CUSTOM: {"label": "Custom (set the factor)", "factor": None},
 }
 
+# ── Soil type: the ground under the zone ────────────────────────────────
+# Field capacity and wilting point are not two questions. They are read off the
+# same texture table and a gardener has neither number to hand, so asking for
+# both as figures would be asking twice for something nobody owns. One choice
+# supplies the pair.
+#
+# Values are mid-range from FAO-56 Table 19 (typical soil water characteristics,
+# m3/m3). The spread inside a texture class is wide, which is the honest reason
+# the Custom entry exists: anyone who has measured their own field capacity has
+# a better number than any table.
+#
+# ``field_capacity: None`` marks the custom entry, per the preset/override
+# contract above. ``label`` is developer-facing only, as everywhere else: the
+# dropdown text comes from selector.soil_type in the translations.
+#
+# The wilting point is the floor of the reservoir: the water a soil still holds
+# when a plant can no longer pull any out. It arrives with its companion from
+# the same row, because splitting the row would mean revisiting this table to
+# add a column nobody could sanity-check on its own.
+#
+# ``Custom`` carries None for both. The pair is then asked for in the form
+# instead, which is the one place the "nobody owns these numbers" argument does
+# not hold: somebody who picks Custom has measured their soil.
+SOIL_TYPE_AUTO = "auto"
+SOIL_TYPE_SANDY = "sandy"
+SOIL_TYPE_LOAM = "loam"
+SOIL_TYPE_CLAY = "clay"
+SOIL_TYPE_CUSTOM = "custom"
+
+SOIL_TYPES = {
+    SOIL_TYPE_AUTO: {"label": "Automatic (a middle soil)", "field_capacity": 0.25, "wilting_point": 0.12},
+    SOIL_TYPE_SANDY: {"label": "Sandy / light, drains fast", "field_capacity": 0.15, "wilting_point": 0.06},
+    SOIL_TYPE_LOAM: {"label": "Loam / medium", "field_capacity": 0.25, "wilting_point": 0.12},
+    SOIL_TYPE_CLAY: {"label": "Clay / heavy, holds water", "field_capacity": 0.36, "wilting_point": 0.22},
+    SOIL_TYPE_CUSTOM: {"label": "Custom (set the field capacity)", "field_capacity": None, "wilting_point": None},
+}
+
+DEFAULT_SOIL_TYPE = SOIL_TYPE_AUTO
+
 DEFAULT_EXPOSURE = EXPOSURE_FULL_SUN
 DEFAULT_MICROCLIMATE_FACTOR = 1.0
 # Floored above zero: at 0 the deficit never accrues, so every irrigation
@@ -186,6 +338,10 @@ SERVICE_STOP = "stop"
 SERVICE_STOP_ZONE = "stop_zone"
 SERVICE_MARK_IRRIGATED = "mark_irrigated"
 SERVICE_RESET_VALVE = "reset_valve"
+#: Supervised one-minute valve test: measures what the guard flow rate only claims.
+SERVICE_TEST_VALVE = "test_valve"
+#: Write the flow rate the last supervised test measured into the zone's config.
+EVENT_VALVE_TEST_COMPLETE = "never_dry_valve_test_complete"
 SERVICE_SET_DEFICIT = "set_deficit"
 
 ATTR_ZONE_NAME = "zone_name"
@@ -201,6 +357,8 @@ DEFAULT_D_MAX = 100.0
 DEFAULT_EFFICIENCY = 0.85
 DEFAULT_THRESHOLD = 20.0
 DEFAULT_FIELD_CAPACITY = 0.30
+#: Floor of the reservoir when nothing better is known: the middle soil's.
+DEFAULT_WILTING_POINT = 0.12
 DEFAULT_ROOT_DEPTH = 0.30
 DEFAULT_INTER_ZONE_DELAY = 30
 DEFAULT_KC = 1.0

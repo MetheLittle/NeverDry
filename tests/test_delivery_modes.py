@@ -1,5 +1,7 @@
 """Tests for the three valve delivery modes."""
 
+import re
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -24,6 +26,7 @@ from never_dry.const import (
 )
 from never_dry.controller import IrrigationController
 from never_dry.sensor import IrrigationZoneSensor
+from never_dry.valve_notifier import NotificationKind
 
 
 def _make_zone(hass_mock, di_sensor, **overrides):
@@ -225,7 +228,17 @@ class TestFlowMeterDelivery:
         assert len(close_calls) >= 1
 
     @pytest.mark.asyncio
-    async def test_unavailable_sensor_skips(self, hass_mock, di_sensor):
+    async def test_unavailable_sensor_waters_on_the_estimate(self, hass_mock, di_sensor):
+        """A silent meter is far more likely than a dry pipe.
+
+        This test used to assert the opposite — that the session was skipped and
+        no valve was opened. Skipping is the larger harm: a flaky sensor dries
+        the garden out while the integration reports nothing wrong. The same
+        judgement is already made mid-session, where a run that measures zero
+        with the valve open is credited from the flow rate rather than believed.
+        A meter already silent when the session opens is the same fault, and now
+        gets the same answer.
+        """
         zone = _make_zone(
             hass_mock,
             di_sensor,
@@ -241,15 +254,22 @@ class TestFlowMeterDelivery:
         hass_mock.states.get = MagicMock(return_value=unavailable)
 
         ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl._wait_with_stop_check = AsyncMock(side_effect=lambda d, **kwargs: d)
         result = await ctrl._deliver_flow_meter(zone)
 
-        assert result == 0.0
-        # No valve should have been opened
+        assert result > 0.0
         open_calls = [c for c in hass_mock.services.async_call.call_args_list if "turn_on" in str(c)]
-        assert len(open_calls) == 0
+        assert len(open_calls) == 1
 
     @pytest.mark.asyncio
-    async def test_no_flow_meter_entity_returns_false(self, hass_mock, di_sensor):
+    async def test_no_meter_entity_waters_on_the_estimate(self, hass_mock, di_sensor):
+        """Unreachable from the form now, but an older entry can still say this.
+
+        The three entry points all refuse ``flow_meter`` without its meter
+        (GH #196), so this shape only arrives from an entry edited by hand or
+        restored from a schema that allowed it. It is still a zone somebody
+        wants watered.
+        """
         zone = _make_zone(
             hass_mock,
             di_sensor,
@@ -258,9 +278,10 @@ class TestFlowMeterDelivery:
         zone._zone_deficit = 5.0
 
         ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        ctrl._wait_with_stop_check = AsyncMock(side_effect=lambda d, **kwargs: d)
         result = await ctrl._deliver_flow_meter(zone)
 
-        assert result == 0.0
+        assert result > 0.0
 
     @pytest.mark.asyncio
     async def test_meter_reset_adjusts_baseline(self, hass_mock, di_sensor):
@@ -542,8 +563,8 @@ class TestSettleWaterAccounting:
 
         assert zone._zone_deficit == 0.0
         assert zone._total_water_delivered == pytest.approx(total_before + target, abs=0.2)
-        assert zone._session_water_delivered == pytest.approx(target, abs=0.2)
         assert zone._last_volume_delivered == pytest.approx(target, abs=0.2)
+        assert zone._session_water_delivered == 0.0, "the cycle closed, so its running total did too"
 
     @pytest.mark.asyncio
     async def test_partial_flow_meter_delivery_credits_actual_volume(self, controller, zone_orto):
@@ -562,7 +583,8 @@ class TestSettleWaterAccounting:
         # Partial: deficit reduced but not zero, counters reflect partial volume.
         assert zone._zone_deficit > 0.0
         assert zone._total_water_delivered == pytest.approx(partial, abs=0.2)
-        assert zone._session_water_delivered == pytest.approx(partial, abs=0.2)
+        assert zone._last_volume_delivered == pytest.approx(partial, abs=0.2)
+        assert zone._session_water_delivered == 0.0
 
     def test_estimated_flow_no_timeout_in_attributes(self, hass_mock, di_sensor):
         zone = _make_zone(hass_mock, di_sensor)
@@ -830,3 +852,594 @@ class TestStalledFlowMeter:
         assert elapsed_s == bound_s  # stopped at the job's bound...
         assert elapsed_s <= 2 * expected_s  # ...roughly ten minutes, not an hour
         assert elapsed_s < DEFAULT_DELIVERY_TIMEOUT_S / 6
+
+
+class TestTimeoutCapIsVisibleWhereItApplies:
+    """The safety timeout can be shorter than the job, and that must be visible.
+
+    Found in the field: a zone whose real flow was four times lower than the
+    configured guard needed 77 minutes to deliver its target and had a one-hour
+    allowance. It opens, runs out of allowance, closes — under-watering every
+    single cycle with nothing in the interface to say so. The backend already
+    logged a warning; a log nobody reads is not a signal.
+
+    The comparison stays in the entity, not in the card: a second copy in
+    JavaScript would be a second source of truth for a safety bound.
+    """
+
+    def _zone(self, hass_mock, di_sensor, **over):
+        zone = _make_zone(hass_mock, di_sensor, **over)
+        return zone
+
+    def test_estimated_mode_publishes_neither_key(self, hass_mock, di_sensor):
+        """In estimated mode the duration is the criterion, so the bound cannot bite."""
+        attrs = self._zone(hass_mock, di_sensor).extra_state_attributes
+        assert "delivery_timeout_s" not in attrs
+        assert "timeout_caps_duration" not in attrs
+
+    def test_flow_meter_mode_publishes_the_bound_and_the_verdict(self, hass_mock, di_sensor):
+        from never_dry.const import CONF_ZONE_DELIVERY_MODE, CONF_ZONE_FLOW_METER_SENSOR, DELIVERY_MODE_FLOW_METER
+
+        zone = self._zone(
+            hass_mock,
+            di_sensor,
+            **{
+                CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
+                CONF_ZONE_FLOW_METER_SENSOR: "sensor.meter",
+            },
+        )
+        attrs = zone.extra_state_attributes
+        assert "delivery_timeout_s" in attrs
+        assert isinstance(attrs["timeout_caps_duration"], bool)
+
+    def test_the_verdict_follows_the_clamp_and_not_a_guess(self, hass_mock, di_sensor):
+        """A generous allowance is not flagged; a short one is — same input, one field apart."""
+        from never_dry.const import (
+            CONF_ZONE_DELIVERY_MODE,
+            CONF_ZONE_DELIVERY_TIMEOUT,
+            CONF_ZONE_FLOW_METER_SENSOR,
+            DELIVERY_MODE_FLOW_METER,
+        )
+
+        base = {
+            CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
+            CONF_ZONE_FLOW_METER_SENSOR: "sensor.meter",
+        }
+        roomy = self._zone(hass_mock, di_sensor, **{**base, CONF_ZONE_DELIVERY_TIMEOUT: 36000})
+        tight = self._zone(hass_mock, di_sensor, **{**base, CONF_ZONE_DELIVERY_TIMEOUT: 1})
+
+        # There has to BE water to deliver, or both answers are "no" for the
+        # boring reason and the test proves nothing. A fresh zone starts dry of
+        # deficit, so the first version of this test passed on zeroes.
+        roomy._zone_deficit = tight._zone_deficit = 10.0
+
+        # Same zone, same water to deliver: only the allowance differs.
+        assert roomy._guard_duration_s == tight._guard_duration_s > 0
+        assert roomy.timeout_caps_duration is False
+        assert tight.timeout_caps_duration is True
+
+    def test_no_water_to_deliver_is_not_a_capped_job(self, hass_mock, di_sensor):
+        """At the end of every session the volume is zero — that must not flag."""
+        from never_dry.const import (
+            CONF_ZONE_DELIVERY_MODE,
+            CONF_ZONE_DELIVERY_TIMEOUT,
+            CONF_ZONE_FLOW_METER_SENSOR,
+            DELIVERY_MODE_FLOW_METER,
+        )
+
+        zone = self._zone(
+            hass_mock,
+            di_sensor,
+            **{
+                CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
+                CONF_ZONE_FLOW_METER_SENSOR: "sensor.meter",
+                CONF_ZONE_DELIVERY_TIMEOUT: 1,
+            },
+        )
+        zone._zone_deficit = 0.0
+        assert zone._guard_duration_s == 0
+        assert zone.timeout_caps_duration is False
+
+
+# ---------------------------------------------------------------------------
+# The card's own languages, read from the card. Never a literal.
+#
+# This block replaces an assertion that counted occurrences and compared the total
+# to 2. It broke the first time somebody contributed a third language, and it broke
+# on the contributor's pull request rather than on ours: the translation was complete
+# and correct, and the test was counting to a number the project had outgrown.
+#
+# Counting was the weaker check anyway. A total of three is satisfied by one language
+# holding a code twice and another not holding it at all. What matters is presence in
+# each dictionary, which is what the parametrised test below asserts.
+
+_CARD = Path(__file__).resolve().parents[1] / "custom_components/never_dry/www/never-dry-zone-card.js"
+_WARNING_CODES = {"timeout_caps_duration", "no_guard_flow", "valve_unreachable"}
+
+
+def _balanced_block(src: str, opening: int) -> str:
+    """Return ``src`` from the brace at ``opening`` through its matching close.
+
+    Quoted strings are skipped while counting, so a brace inside a label cannot end the
+    object early.
+    """
+    depth, i, quote = 0, opening, ""
+    while i < len(src):
+        ch = src[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+        elif ch in "\"'`":
+            quote = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return src[opening : i + 1]
+        i += 1
+    raise AssertionError(f"unbalanced braces in {_CARD.name}")
+
+
+def _card_object(name: str) -> str:
+    """The body of ``const <name> = { ... }`` in the card."""
+    src = _CARD.read_text(encoding="utf-8")
+    return _balanced_block(src, src.index(f"const {name} = {{") + len(f"const {name} = "))
+
+
+def _card_languages() -> list[str]:
+    """Every language the card ships, in the order it declares them."""
+    return re.findall(r"\n  (\w+): \{", _card_object("I18N"))
+
+
+def _card_dictionary(language: str) -> str:
+    """The body of one language block inside ``I18N``."""
+    body = _card_object("I18N")
+    return _balanced_block(body, body.index(f"\n  {language}: {{") + len(f"\n  {language}: "))
+
+
+class TestWarningsAreCodesNotSentences:
+    """The zone publishes what is wrong as codes; the card owns the wording.
+
+    A rendered sentence here would need a second home for every language, and
+    would put user-facing copy in the layer that decides irrigation.
+    """
+
+    def _flow_meter_zone(self, hass_mock, di_sensor, **over):
+        from never_dry.const import CONF_ZONE_DELIVERY_MODE, CONF_ZONE_FLOW_METER_SENSOR, DELIVERY_MODE_FLOW_METER
+
+        base = {
+            CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
+            CONF_ZONE_FLOW_METER_SENSOR: "sensor.meter",
+        }
+        return _make_zone(hass_mock, di_sensor, **{**base, **over})
+
+    def test_a_healthy_zone_publishes_no_warnings_key_at_all(self, hass_mock, di_sensor):
+        """Absent, not an empty list: the card collapses the box on absence."""
+        zone = self._flow_meter_zone(hass_mock, di_sensor)
+        zone._zone_deficit = 1.0
+        assert zone.active_warnings == []
+        assert "warnings" not in zone.extra_state_attributes
+
+    def test_a_short_allowance_is_reported(self, hass_mock, di_sensor):
+        from never_dry.const import CONF_ZONE_DELIVERY_TIMEOUT
+
+        zone = self._flow_meter_zone(hass_mock, di_sensor, **{CONF_ZONE_DELIVERY_TIMEOUT: 1})
+        zone._zone_deficit = 10.0
+        assert "timeout_caps_duration" in zone.extra_state_attributes["warnings"]
+
+    def test_a_missing_guard_flow_is_reported(self, hass_mock, di_sensor):
+        from never_dry.const import CONF_ZONE_FLOW_RATE
+
+        zone = self._flow_meter_zone(hass_mock, di_sensor, **{CONF_ZONE_FLOW_RATE: 0.0})
+        zone._zone_deficit = 10.0
+        assert "no_guard_flow" in zone.extra_state_attributes["warnings"]
+
+    def test_estimated_mode_reports_none_of_them(self, hass_mock, di_sensor):
+        """The timeout is not the closing criterion there, so neither bound applies."""
+        from never_dry.const import CONF_ZONE_DELIVERY_TIMEOUT
+
+        zone = _make_zone(hass_mock, di_sensor, **{CONF_ZONE_DELIVERY_TIMEOUT: 1})
+        zone._zone_deficit = 10.0
+        assert zone.active_warnings == []
+
+    @pytest.mark.parametrize("language", _card_languages())
+    @pytest.mark.parametrize("code", sorted(_WARNING_CODES))
+    def test_every_code_has_a_string_in_every_language(self, code, language):
+        """A code the card cannot name would render as the raw code to a user."""
+        assert f"warn_{code}" in _card_dictionary(language), (
+            f"warn_{code} has no wording in the card's '{language}' dictionary; "
+            f"a zone raising it would show the raw code to a user of that language"
+        )
+
+    # `monkeypatch`, not a hand-rolled swap: patching the property on the class and
+    # then *deleting* it in a finally removes the real one, and every later test in
+    # the run finds no `valve_reachable` at all. That mistake cost 45 red tests.
+    def test_an_unreachable_valve_is_reported_in_every_mode(self, hass_mock, di_sensor, monkeypatch):
+        """Not a configuration nuance, and not gated on delivery mode."""
+        from never_dry.sensor import IrrigationZoneSensor
+
+        zone = _make_zone(hass_mock, di_sensor)  # estimated_flow, the gated mode
+        zone._zone_deficit = 10.0
+        monkeypatch.setattr(IrrigationZoneSensor, "valve_reachable", property(lambda self: False))
+        assert zone.active_warnings == ["valve_unreachable"]
+
+    def test_reachability_not_yet_judged_is_not_trouble(self, hass_mock, di_sensor, monkeypatch):
+        """`None` means nobody has asked the valve yet — silence, not an alarm."""
+        from never_dry.sensor import IrrigationZoneSensor
+
+        zone = _make_zone(hass_mock, di_sensor)
+        zone._zone_deficit = 10.0
+        monkeypatch.setattr(IrrigationZoneSensor, "valve_reachable", property(lambda self: None))
+        assert zone.active_warnings == []
+
+
+class TestTheCapVerdictIsAboutTheJobNotItsHeadroom:
+    """Boundary test for the comparison that decides the warning.
+
+    The first version compared the job *times the safety margin* against the
+    allowance, which is a different quantity: that product is the bound used to
+    tighten a short job's timeout, not the time the job needs. With a 4969 s job
+    and a 5400 s allowance it announced that the zone would stop short — of
+    nothing. Reported from the field within an hour of the warning becoming
+    visible, by a user who had just raised the timeout and saw no change.
+    """
+
+    def _zone_needing(self, hass_mock, di_sensor, timeout_s):
+        from never_dry.const import (
+            CONF_ZONE_DELIVERY_MODE,
+            CONF_ZONE_DELIVERY_TIMEOUT,
+            CONF_ZONE_FLOW_METER_SENSOR,
+            DELIVERY_MODE_FLOW_METER,
+        )
+
+        zone = _make_zone(
+            hass_mock,
+            di_sensor,
+            **{
+                CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
+                CONF_ZONE_FLOW_METER_SENSOR: "sensor.meter",
+                CONF_ZONE_DELIVERY_TIMEOUT: timeout_s,
+            },
+        )
+        zone._zone_deficit = 10.0
+        return zone
+
+    def test_an_allowance_above_the_job_does_not_warn(self, hass_mock, di_sensor):
+        probe = self._zone_needing(hass_mock, di_sensor, 10**6)
+        needed = probe._guard_duration_s
+        assert needed > 0
+        assert self._zone_needing(hass_mock, di_sensor, needed + 1).timeout_caps_duration is False
+
+    def test_an_allowance_below_the_job_warns(self, hass_mock, di_sensor):
+        needed = self._zone_needing(hass_mock, di_sensor, 10**6)._guard_duration_s
+        assert self._zone_needing(hass_mock, di_sensor, needed - 1).timeout_caps_duration is True
+
+    def test_exactly_enough_is_not_a_warning(self, hass_mock, di_sensor):
+        """Equality means it finishes on the last second, which is not stopping short."""
+        needed = self._zone_needing(hass_mock, di_sensor, 10**6)._guard_duration_s
+        assert self._zone_needing(hass_mock, di_sensor, needed).timeout_caps_duration is False
+
+    def test_the_safety_margin_alone_never_triggers_it(self, hass_mock, di_sensor):
+        """The regression itself: allowance between the job and job x margin."""
+        from never_dry.const import DELIVERY_DURATION_MARGIN
+
+        needed = self._zone_needing(hass_mock, di_sensor, 10**6)._guard_duration_s
+        between = int(needed * (1 + DELIVERY_DURATION_MARGIN) / 2)
+        assert needed < between < needed * DELIVERY_DURATION_MARGIN
+        assert self._zone_needing(hass_mock, di_sensor, between).timeout_caps_duration is False
+
+
+class TestTheMeasuredFlowShowsTheHistoryNotTheLastRun:
+    """The sensor reports the median of real sessions, next to the design rate.
+
+    It used to read the last supervised test, and a button wrote that one run
+    over the configured value. Two things were wrong with that: flow follows
+    mains pressure, so a single run describes a moment rather than a zone; and
+    overwriting the design rate destroyed the only pair that means anything —
+    what the zone was built to deliver against what it delivers.
+    """
+
+    def _zone_with_history(self, hass_mock, di_sensor, samples=(), **test):
+        from never_dry.const import CONF_ZONE_DELIVERY_MODE, CONF_ZONE_FLOW_METER_SENSOR, DELIVERY_MODE_FLOW_METER
+
+        zone = _make_zone(
+            hass_mock,
+            di_sensor,
+            **{
+                CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
+                CONF_ZONE_FLOW_METER_SENSOR: "sensor.meter",
+            },
+        )
+        if samples:
+            from never_dry.session_flow import SessionFlowWindow
+
+            window = SessionFlowWindow()
+            for value in samples:
+                window.record(value)
+            operator = MagicMock()
+            operator.measured_flow_lpm = window.median_lpm()
+            operator.session_flow_diagnostics = window.as_dict()
+            zone.set_operator(operator)
+        if test:
+            zone.record_valve_test(test)
+        return zone
+
+    def test_no_history_yet_reads_none_and_not_a_zero(self, hass_mock, di_sensor):
+        """A zero would look like a measurement of no flow. Absence is not zero."""
+        from never_dry.sensor import ZoneMeasuredFlowSensor
+
+        sensor = ZoneMeasuredFlowSensor(self._zone_with_history(hass_mock, di_sensor))
+        assert sensor.native_value is None
+
+    def test_a_single_session_is_not_enough_to_report(self, hass_mock, di_sensor):
+        """One run is an anecdote — the median stays silent below its minimum."""
+        from never_dry.sensor import ZoneMeasuredFlowSensor
+
+        zone = self._zone_with_history(hass_mock, di_sensor, samples=(6.0,))
+        assert ZoneMeasuredFlowSensor(zone).native_value is None
+
+    def test_it_reports_the_median_in_litres_per_hour(self, hass_mock, di_sensor):
+        from never_dry.sensor import ZoneMeasuredFlowSensor
+
+        zone = self._zone_with_history(hass_mock, di_sensor, samples=(6.0, 6.0, 6.0))
+        assert ZoneMeasuredFlowSensor(zone).native_value == 360.0
+
+    def test_it_carries_the_design_rate_and_the_gap_beside_it(self, hass_mock, di_sensor):
+        """Seeing 205 next to 360 is the argument; the sensor must hold both."""
+        from never_dry.sensor import ZoneMeasuredFlowSensor
+
+        zone = self._zone_with_history(hass_mock, di_sensor, samples=(6.0, 6.0, 6.0), updates=6, smallest_step=1.0)
+        attrs = ZoneMeasuredFlowSensor(zone).extra_state_attributes
+        assert attrs["design_flow_lph"] == pytest.approx(zone._flow_rate * 60.0, abs=0.1)
+        assert attrs["vs_design_pct"] == pytest.approx(6.0 / zone._flow_rate * 100.0, abs=0.1)
+        assert attrs["sample_count"] == 3
+        assert attrs["smallest_step"] == 1.0
+        assert attrs["updates"] == 6
+
+    def test_it_is_diagnostic_and_recorded_as_a_measurement(self, hass_mock, di_sensor):
+        """The series is the point: statistics need a measurement state class."""
+        from homeassistant.components.sensor import SensorStateClass
+        from homeassistant.const import EntityCategory
+        from never_dry.sensor import ZoneMeasuredFlowSensor
+
+        sensor = ZoneMeasuredFlowSensor(self._zone_with_history(hass_mock, di_sensor))
+        assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
+        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+
+class TestSilentMeterReachesTheUser:
+    """A meter that stops reporting has to say so somewhere a person looks.
+
+    Watering on the estimate is the right answer, but it is also a quiet one:
+    the zone goes on being watered and nothing looks wrong, while the volumes
+    feeding the deficit are guesses. The log alone does not carry that — nobody
+    opens it while the garden looks fine.
+    """
+
+    @pytest.mark.asyncio
+    async def test_unavailable_meter_notifies(self, hass_mock, di_sensor):
+        zone = _make_zone(
+            hass_mock,
+            di_sensor,
+            **{
+                CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
+                CONF_ZONE_FLOW_METER_SENSOR: "sensor.flow_meter",
+            },
+        )
+        zone._zone_deficit = 5.0
+        unavailable = MagicMock()
+        unavailable.state = "unavailable"
+        hass_mock.states.get = MagicMock(return_value=unavailable)
+
+        notifier = AsyncMock()
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=notifier)
+        ctrl._wait_with_stop_check = AsyncMock(side_effect=lambda d, **kwargs: d)
+
+        await ctrl._deliver_flow_meter(zone)
+
+        notifier.notify.assert_awaited_once()
+        args, kwargs = notifier.notify.call_args
+        assert args[1] is NotificationKind.FLOW_METER_DEAD
+        # Facts only: the catalogue owns the wording, the caller owns the cause.
+        assert kwargs["context"] == {"detail": "'sensor.flow_meter' is unavailable"}
+
+    @pytest.mark.asyncio
+    async def test_nothing_to_estimate_with_is_a_different_condition(self, hass_mock, di_sensor):
+        """No flow rate, so the water is neither measured nor credited.
+
+        A separate kind rather than a sentence passed in by the caller: the
+        consequence differs — the deficit stands and the zone is watered again
+        next cycle — and that is what the user has to be told.
+        """
+        zone = _make_zone(hass_mock, di_sensor)
+        zone._flow_rate = 0.0
+        notifier = AsyncMock()
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=notifier)
+
+        scheduled = []
+        hass_mock.async_create_task = scheduled.append
+
+        assert ctrl._fallback_volume_estimate(zone, elapsed_s=600.0, measured=0.0) == 0.0
+
+        assert len(scheduled) == 1
+        await scheduled[0]
+        assert notifier.notify.call_args[0][1] is NotificationKind.DELIVERY_UNCREDITED
+
+    @pytest.mark.asyncio
+    async def test_a_measured_session_says_nothing(self, hass_mock, di_sensor):
+        """The notification is for a silent meter, not for every session."""
+        zone = _make_zone(hass_mock, di_sensor)
+        notifier = AsyncMock()
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0, notifier=notifier)
+
+        scheduled = []
+        hass_mock.async_create_task = scheduled.append
+
+        assert ctrl._fallback_volume_estimate(zone, elapsed_s=600.0, measured=12.0) == 12.0
+
+        assert scheduled == []
+        notifier.notify.assert_not_awaited()
+
+
+class TestTheRateToEstimateWith:
+    """Who decides which flow rate an estimate uses.
+
+    The controller used to work it out itself, reading the zone's private
+    design rate. That put the precedence rule — measured sessions when there
+    are enough of them, the design rate otherwise — in a second place, and the
+    second place had the worse answer: it ignored the very sessions the system
+    had measured. The zone answers now, and the driver decides.
+    """
+
+    def test_a_zone_with_a_driver_reports_what_the_driver_learned(self, hass_mock, di_sensor):
+        zone = _make_zone(hass_mock, di_sensor)
+        driver = MagicMock()
+        driver.effective_flow_lpm = 3.4
+        zone.set_operator(driver)
+
+        assert zone.effective_flow_lpm == 3.4
+
+    def test_without_a_driver_the_design_rate_stands(self, hass_mock, di_sensor):
+        """No valve, or a smart valve that doses itself: no history to consult."""
+        zone = _make_zone(hass_mock, di_sensor)
+        zone.set_operator(None)
+
+        assert zone.effective_flow_lpm == zone._flow_rate
+
+    def test_the_credited_estimate_follows_the_measured_sessions(self, hass_mock, di_sensor):
+        """The gap this closes is the one measured on the field installation.
+
+        A zone declared at 360 L/h delivering a median of 205: crediting the
+        design rate settles a debt that was not paid, and does so most
+        confidently on exactly the installations whose meter has gone quiet.
+        """
+        zone = _make_zone(hass_mock, di_sensor)
+        zone._flow_rate = 6.0  # design
+        driver = MagicMock()
+        driver.effective_flow_lpm = 3.4  # what it really delivers
+        zone.set_operator(driver)
+        ctrl = IrrigationController(hass_mock, di_sensor, [zone], inter_zone_delay=0)
+        # The credit also raises a notification; this test is about the number.
+        hass_mock.async_create_task = lambda coro: coro.close()
+
+        credited = ctrl._fallback_volume_estimate(zone, elapsed_s=600.0, measured=0.0)
+
+        assert credited == pytest.approx(3.4 * 600.0 / 60.0)
+
+
+class TestTheMeterFactsReachTheCard:
+    """The card reads the carrier entity's attributes; the facts must be there.
+
+    Without these the user cannot see why a zone behaves as it does: a meter
+    reporting every 300 s on a session lasting 359 s is visibly unfit to
+    supervise it, but only if the number is on screen. Diagnosing it took a
+    manual read of the recorder.
+    """
+
+    def _zone_with_meter(self, hass_mock, di_sensor, cadence, resolution):
+        zone = _make_zone(
+            hass_mock,
+            di_sensor,
+            **{
+                CONF_ZONE_DELIVERY_MODE: DELIVERY_MODE_FLOW_METER,
+                CONF_ZONE_FLOW_METER_SENSOR: "sensor.meter",
+            },
+        )
+        operator = MagicMock()
+        # What the card shows is the typical gap; the worst one rides along
+        # because it is what sizes the post-close wait.
+        operator.meter_publication_median_s = cadence
+        operator.meter_publication_peak_s = cadence
+        operator.meter_publication_samples = 7
+        operator.meter_refresh_cadence_s = cadence
+        operator.meter_refresh_samples = 7
+        operator.meter_refresh_kind = "periodic"
+        operator.meter_guard_usable = False
+        zone._operator = operator
+        return zone
+
+    def test_the_cadence_and_its_meaning_are_published(self, hass_mock, di_sensor):
+        zone = self._zone_with_meter(hass_mock, di_sensor, cadence=300.0, resolution=2.0)
+        attrs = zone.extra_state_attributes
+        assert attrs["meter_refresh_s"] == 300
+        assert attrs["meter_refresh_kind"] == "periodic"
+        assert attrs["meter_refresh_samples"] == 7
+        assert attrs["meter_guard_usable"] is False
+
+    def test_a_zone_without_a_meter_publishes_none_of_it(self, hass_mock, di_sensor):
+        """No meter, no meter facts: empty keys would read as measured zeroes."""
+        zone = _make_zone(hass_mock, di_sensor)
+        zone._operator = None
+        assert "meter_refresh_s" not in zone.extra_state_attributes
+
+    def test_an_unmeasured_cadence_is_absent_rather_than_zero(self, hass_mock, di_sensor):
+        zone = self._zone_with_meter(hass_mock, di_sensor, cadence=None, resolution=None)
+        zone._operator.meter_refresh_cadence_s = None
+        zone._operator.meter_refresh_kind = None
+        assert "meter_refresh_s" not in zone.extra_state_attributes
+        assert "meter_refresh_peak_s" not in zone.extra_state_attributes
+        assert zone.extra_state_attributes["meter_refresh_samples"] == 7
+
+
+class TestTheCardActuallyReadsTheDeliveryFacts:
+    """A static guard: the attributes existed for months and nothing read them.
+
+    ``delivery_mode`` and ``flow_meter_sensor`` were already published on the
+    carrier entity, and the card never mentioned either. The user could not
+    tell a zone dosing by time from one dosing by measured volume, which is
+    also the difference between who answers for the water. Reaching the card
+    is what makes a capability real, so it gets a test of its own.
+    """
+
+    def test_the_card_reads_the_delivery_mode(self):
+        src = _CARD.read_text(encoding="utf-8")
+        assert "delivery_mode" in src
+        for mode in ("estimated_flow", "flow_meter", "volume_preset"):
+            assert mode in src, f"the card cannot name {mode}"
+
+    def test_the_card_reads_the_meter_cadence(self):
+        src = _CARD.read_text(encoding="utf-8")
+        assert "meter_refresh_s" in src
+        assert "meter_refresh_kind" in src
+        assert "flow_meter_sensor" in src
+
+    def test_the_cell_is_rendered_and_not_merely_defined(self):
+        """The defect this whole change is about: defined, never called."""
+        src = _CARD.read_text(encoding="utf-8")
+        assert "_deliveryCell(" in src
+        assert src.count("_deliveryCell(") >= 2, "defined but never invoked"
+
+    def test_the_meter_has_a_cell_of_its_own_and_it_is_rendered(self):
+        """Three facts in one value are two facts nobody reads.
+
+        A cell value is clipped at one column's width, so the cadence appended
+        after the dosing mode was cut off on every zone that had one. Splitting
+        it is the fix, and a split cell that is never invoked is the same
+        defect wearing a different name.
+        """
+        src = _CARD.read_text(encoding="utf-8")
+        assert src.count("_meterRefreshCell(") >= 2, "defined but never invoked"
+
+    def test_the_card_can_tell_measuring_from_never_measured(self):
+        """Two silences that ask different things of the user.
+
+        "Not measured yet" invites a look at the configuration; "measuring
+        (1/3)" says the figure is on its way and there is nothing to do. The
+        threshold comes from the integration rather than a number retyped here,
+        because the two drifting apart is how a card starts lying quietly.
+        """
+        src = _CARD.read_text(encoding="utf-8")
+        assert "meter_refresh_min_samples" in src
+        assert "meterMeasuring" in src
+        assert "meterRefreshUnknown" in src
+
+    def test_the_qualifiers_moved_out_of_the_clipped_line(self):
+        """The guard caveat belongs to the label, which wraps, not the value."""
+        src = _CARD.read_text(encoding="utf-8")
+        cell = src.split("_meterRefreshCell(a) {", 1)[1].split("\n  }", 1)[0]
+        assert "meterGuardOff" in cell, "the caveat left the dosing cell but never arrived"
+        assert "label +=" in cell, "the caveat must lengthen the label, not the value"

@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from never_dry.valve_notifier import (
-    _TEMPLATES,
     NotificationKind,
     Severity,
     ValveNotifier,
+    _resolve,
 )
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -224,16 +224,50 @@ async def test_notification_id_falls_back_for_empty_zone(notifier, hass):
     assert payload["notification_id"] == "never_dry_global_leak_detected"
 
 
-# ── Templates coverage ──────────────────────────────────────────────
+# ── Catalogue coverage ──────────────────────────────────────────────
 
 
-def test_every_kind_has_a_template():
-    """Every NotificationKind must have a registered template."""
+async def test_every_kind_resolves_to_text(hass):
+    """Every NotificationKind must come back with a title and a body from the catalogue.
+
+    The lookup falls back to the bare identifier when a key is absent, so asserting the title
+    is merely non-empty would pass on a notification that reads ``stuck_open`` at the user.
+    The identifier is therefore what this refuses.
+    """
+    hass.config.language = "en"
     for kind in NotificationKind:
-        assert kind in _TEMPLATES
-        tpl = _TEMPLATES[kind]
-        assert tpl.title
-        assert tpl.body
+        title, body = await _resolve(hass, kind)
+        assert title and title != kind.value, f"{kind.value}: no title in the catalogue"
+        assert body, f"{kind.value}: no body in the catalogue"
+
+
+async def test_the_assembled_line_matches_what_the_caller_fills_in(notifier, hass):
+    """The manual-watering notice is a frame plus a line per dry zone.
+
+    The frame comes from the catalogue through ``notify``; the line comes from
+    here, because it is repeated once per zone and only the caller knows the
+    zones. That split is where it can break quietly: the template and the code
+    that fills it live in different files, so a placeholder renamed on one side
+    leaves the other formatting a name that is not there. The notice then goes
+    out with the raw template in place of the list, and every test that only
+    checks "a notification was sent" still passes.
+    """
+    hass.config.language = "en"
+
+    line = await notifier.phrase("water_me_now_zone_line")
+
+    assert line, "the line the manual-watering notice is built from is not in the catalogue"
+    for placeholder in ("{zone}", "{deficit}", "{liters}", "{minutes}"):
+        assert placeholder in line, f"the caller fills in {placeholder}, and the template does not ask for it"
+    # Filled with what the controller actually supplies, nothing is left over.
+    assert "{" not in line.format(zone="Orto", deficit="12.4", liters="48", minutes=22)
+
+
+async def test_a_fragment_the_catalogue_does_not_carry_comes_back_empty(notifier, hass):
+    """Empty rather than the raw name: a caller can see it and fall back."""
+    hass.config.language = "en"
+
+    assert await notifier.phrase("no_such_fragment") == ""
 
 
 @pytest.mark.parametrize(
@@ -245,7 +279,8 @@ def test_every_kind_has_a_template():
         ),
         (NotificationKind.UNREACHABLE_PASSIVE, {"duration": "6h"}),
         (NotificationKind.UNREACHABLE_AT_IRRIGATION, {}),
-        (NotificationKind.FLOW_METER_DEAD, {}),
+        (NotificationKind.FLOW_METER_DEAD, {"detail": "'sensor.meter' is unavailable"}),
+        (NotificationKind.DELIVERY_UNCREDITED, {"detail": "measured 0 L after 600s with the valve open"}),
         (NotificationKind.STUCK_OPEN, {"flow": "0.5 L/min"}),
         (NotificationKind.LEAK_DETECTED, {"flow": "0.3 L/min"}),
         (NotificationKind.ZONE_DISABLED, {"failures": 3}),
