@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-19
+
 The domain model stops being scaffolding and starts running the integration. Each
 entry below links the design note that explains it properly — this is the summary,
 not the argument.
@@ -454,6 +456,47 @@ not the argument.
   comes back filled in. The first step keeps what was typed too: an ET method the
   declared sensors cannot support used to take the sensor pickers down with it.
   What is refused, and where, is now one rule — see *Changed*.
+
+### Thanks
+
+Thank you to everyone who contributed to this release. Code and translations:
+
+- **@laurash96** for the native Spanish read-back of the whole catalogue
+  ([#265](https://github.com/never-dry/NeverDry/pull/265),
+  [#266](https://github.com/never-dry/NeverDry/pull/266)), and for fixes that
+  only a running Spanish install could find: the ET coefficient's unit
+  ([#278](https://github.com/never-dry/NeverDry/pull/278)), the estimated-flow
+  dropdown entry ([#317](https://github.com/never-dry/NeverDry/pull/317)) and
+  the model card's reason ([#331](https://github.com/never-dry/NeverDry/pull/331)).
+- **@MetheLittle** for the German translation and for keeping it current
+  through every beta, Austrian German included
+  ([#218](https://github.com/never-dry/NeverDry/pull/218),
+  [#342](https://github.com/never-dry/NeverDry/pull/342)), and for the reports
+  on the soil probe and on manual irrigation
+  ([#234](https://github.com/never-dry/NeverDry/issues/234),
+  [#216](https://github.com/never-dry/NeverDry/issues/216)).
+- **@Mr-Neutr0n** for the Spanish translation of the Lovelace card
+  ([#226](https://github.com/never-dry/NeverDry/pull/226)).
+
+Reports and design discussions. Some are fixed here; the open ones are
+shaping what comes next:
+
+- **@safepay** for a close reading of the scheduler and of the flow units
+  ([#318](https://github.com/never-dry/NeverDry/issues/318),
+  [#337](https://github.com/never-dry/NeverDry/issues/337) and the
+  [scheduler discussion](https://github.com/never-dry/NeverDry/discussions/239)).
+- **@rpatel3001** for the flow-metered valve that timed out
+  ([#173](https://github.com/never-dry/NeverDry/issues/173)).
+- **@BradleyFord** for the compact card
+  ([#269](https://github.com/never-dry/NeverDry/issues/269)).
+- **@laurafabry** for the zone form that cleared its own fields
+  ([#196](https://github.com/never-dry/NeverDry/issues/196)).
+- **@sanderaernouts** for watering that must finish before sunrise
+  ([#231](https://github.com/never-dry/NeverDry/issues/231)).
+- **@MrEcosse** for the master pump
+  ([#95](https://github.com/never-dry/NeverDry/issues/95)).
+- **@fpytloun** for the scheduling direction check
+  ([#74](https://github.com/never-dry/NeverDry/issues/74)).
 
 ## [0.11.2] - 2026-08-29
 
