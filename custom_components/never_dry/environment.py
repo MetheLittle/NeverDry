@@ -153,6 +153,46 @@ class RainSensorType(StrEnum):
     DAILY_TOTAL = "daily_total"
 
 
+class OperatingMode(StrEnum):
+    """What the person says about this place, and so what NeverDry may do to it.
+
+    Declared, not observed: the freeze interlock reads the thermometer, this
+    reads the person. Per Environment because an Environment is a climate - the
+    garden stops for the winter, a heated greenhouse with its own entry does not
+    (``docs/design/scheduler.md``, section 9.4).
+
+    The three properties below are the whole rule. Callers ask them rather than
+    comparing against a member, so a fourth mode is one line here and not a
+    search through every guard.
+    """
+
+    ACTIVE = "active"
+    #: Nobody is home to water by hand: valves keep working, requests stop.
+    AWAY = "away"
+    #: Off for the season: no commands, no expectations, no notifications.
+    STOPPED = "stopped"
+
+    @property
+    def sends_commands(self) -> bool:
+        """Whether NeverDry may operate a valve of its own accord."""
+        return self is not OperatingMode.STOPPED
+
+    @property
+    def expects_answers(self) -> bool:
+        """Whether a silent valve is a fault. Off season it may be in the shed."""
+        return self is not OperatingMode.STOPPED
+
+    @property
+    def notifies(self) -> bool:
+        """Whether any notification reaches the user, safety alarms included."""
+        return self is not OperatingMode.STOPPED
+
+    @property
+    def asks_a_person(self) -> bool:
+        """Whether NeverDry may ask someone to water by hand."""
+        return self is OperatingMode.ACTIVE
+
+
 @dataclass(frozen=True)
 class RainDelayPolicy:
     """Forecast-driven delay: *the signal*, not the decision.
@@ -217,6 +257,11 @@ class Environment:
     yearly_rain_mm: float = 0.0
     yearly_rain_year: int | None = None
 
+    # ── What the person declared about this place, right now ────────────────
+    # Runtime state set from the hub's select, not from the options form: saving
+    # that form reloads the entry and cuts short a run in progress (GH #282).
+    operating_mode: OperatingMode = OperatingMode.ACTIVE
+
     # ── Capability matching ─────────────────────────────────────────────────
 
     @property
@@ -261,6 +306,10 @@ class Environment:
     def reset_yearly_rain(self, *, year: int) -> Environment:
         """Return a copy with the yearly rain total cleared (user-invoked reset)."""
         return replace(self, yearly_rain_mm=0.0, yearly_rain_year=year)
+
+    def with_operating_mode(self, mode: OperatingMode) -> Environment:
+        """Return a copy declaring ``mode``. The balance is untouched: it keeps computing."""
+        return replace(self, operating_mode=OperatingMode(mode))
 
     def yearly_rain_liters(self, area_m2: float) -> float:
         """Project the yearly rain onto an area: 1 mm over 1 m² is 1 litre."""

@@ -127,7 +127,7 @@ from .const import (
     VALVE_STARTUP_GRACE_S,
 )
 from .controller import IrrigationController
-from .environment import DEFAULT_LATITUDE, Environment, QuietWatermark, RainSensorType
+from .environment import DEFAULT_LATITUDE, Environment, OperatingMode, QuietWatermark, RainSensorType
 from .services import async_setup_services
 from .session_flow import MIN_PUBLICATION_SAMPLES
 from .unit_convert import LITERS_TO_GALLONS, LPM_TO_GPH, LPM_TO_LPH
@@ -702,6 +702,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the NeverDry sensors from a config entry (UI)."""
     from .const import DOMAIN
+    from .select import mode_key
 
     config = dict(entry.data)
     entities, di_sensor, zone_sensors = _create_entities(hass, config, entry.entry_id)
@@ -710,6 +711,11 @@ async def async_setup_entry(
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][f"_controller_{entry.entry_id}"] = controller
     hass.data[DOMAIN][f"_operators_{entry.entry_id}"] = controller.valve_operators
+    # The hub's select may have restored a mode before this controller existed:
+    # the platforms are set up concurrently, so either side can come first.
+    restored = hass.data[DOMAIN].get(mode_key(entry.entry_id))
+    if restored is not None:
+        await controller.async_set_operating_mode(restored)
     # Domain services are registered once and dispatch across ALL entries'
     # controllers (GH #105) — never per controller, or the last entry to
     # load would capture every never_dry.* call.
@@ -1016,6 +1022,14 @@ class DrynessIndexSensor(SensorEntity, RestoreEntity):
     def environment(self) -> Environment:
         """The site this hub reads from. The zones need its latitude and frame."""
         return self._env
+
+    def set_operating_mode(self, mode: OperatingMode) -> None:
+        """Record the declared operating mode on the site (scheduler.md, 9.4).
+
+        The controller acts on the mode; the Environment is where the domain
+        says it lives, so diagnostics and the model read it from here.
+        """
+        self._env = self._env.with_operating_mode(mode)
 
     @property
     def _temp_sensor(self) -> str:
@@ -1821,6 +1835,9 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         self._irrigating = False
         self._awaiting_valve = False
         self._silence_verdict: bool | None = None
+        # False while the Environment is stopped: off season a valve may be in
+        # the shed, and a silence that was declared is not a fault to draw.
+        self._expects_answers = True
         self._no_guard_flow_warned = False
         # Reachability grace: when this zone was built, and whether its valve
         # has ever been seen alive. Monotonic, so a clock change cannot
@@ -2904,8 +2921,11 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
         fault: a zone with no valve, or one we have not heard from yet. The FSM
         clears ``last_failure`` on any clean cycle, so a recovered valve stops
         warning by itself.
+
+        While the Environment is stopped nothing is expected of the valve, so
+        there is no evidence to weigh and the answer is ``None``.
         """
-        if not self._valve:
+        if not self._valve or not self._expects_answers:
             return None
 
         state = self._hass.states.get(self._valve)
@@ -2939,6 +2959,10 @@ class IrrigationZoneSensor(SensorEntity, RestoreEntity):
     def is_irrigating(self) -> bool:
         """True if this zone is currently being irrigated."""
         return self._irrigating
+
+    def set_expects_answers(self, expects: bool) -> None:
+        """Whether this zone's valve is expected to answer (False while stopped)."""
+        self._expects_answers = expects
 
     def set_silence_verdict(self, silent: bool | None) -> None:
         """Record what the fleet-silence watch concluded about this valve.

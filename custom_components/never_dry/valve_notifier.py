@@ -32,6 +32,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.translation import async_get_translations
 
 from .const import DOMAIN
+from .environment import OperatingMode
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +63,12 @@ class NotificationKind(StrEnum):
     # Not a fault of its own: the symptom of one further upstream, which
     # is why it says to go and look rather than naming a cause.
     DEFICIT_ANOMALY = "deficit_anomaly"
+
+
+#: Kinds that ask a *person* to do something, as opposed to reporting a fault.
+#: ``AWAY`` silences these and only these: nobody is home to act on them, while
+#: a fault is exactly what the owner would ask a neighbour to look at.
+PERSON_REQUESTS: frozenset[NotificationKind] = frozenset({NotificationKind.WATER_ME_NOW})
 
 
 class Severity(StrEnum):
@@ -141,6 +148,33 @@ class ValveNotifier:
         """Bind the notifier to a Home Assistant instance."""
         self._hass = hass
         self._active: dict[tuple[str, NotificationKind], _ActiveNotification] = {}
+        self._mode = OperatingMode.ACTIVE
+
+    # ── Operating mode ───────────────────────────────────────────────
+
+    def admits(self, kind: NotificationKind) -> bool:
+        """Whether ``kind`` may reach the user under the current operating mode.
+
+        The one place the mode meets the notifications. Every caller already
+        goes through :meth:`notify`, so gating here covers them all without a
+        guard at each call site - and a call site added later is covered too.
+        """
+        if not self._mode.notifies:
+            return False
+        return not (kind in PERSON_REQUESTS and not self._mode.asks_a_person)
+
+    async def apply_operating_mode(self, mode: OperatingMode) -> int:
+        """Adopt ``mode`` and withdraw what it no longer admits.
+
+        A notice raised before the switch would otherwise stay on screen for the
+        whole holiday or the whole winter, saying something the mode has just
+        declared irrelevant. Returns the number of notifications dismissed.
+        """
+        self._mode = OperatingMode(mode)
+        withdrawn = [key for key in self._active if not self.admits(key[1])]
+        for zone, kind in withdrawn:
+            await self.clear(zone, kind)
+        return len(withdrawn)
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -163,7 +197,13 @@ class ValveNotifier:
         it: the dedup key and the notification id both collapse to a single
         entry instead of one per zone, which is what makes a second call
         replace the first rather than pile up beside it.
+
+        Returns ``False`` without a word to the user when the operating mode
+        does not admit ``kind`` (see :meth:`admits`); the log still has it.
         """
+        if not self.admits(kind):
+            _LOGGER.info("Notification %s/%s withheld: operating mode is %s", zone, kind.value, self._mode.value)
+            return False
         ctx = dict(context or {})
         if zone is not None:
             ctx.setdefault("zone", zone)

@@ -8,7 +8,7 @@ complements `../design_domain_object_model.md` (the map of the domain classes),
 
 **Status: Draft.** Open for comment. §14 tracks the questions this note raised:
 **Q1-Q3 have working answers** (2026-08-21) and the sections above are written
-to match them; **Q4-Q9 are open**, and they are what feedback is most wanted on.
+to match them; **Q4-Q8 and Q10 are open**, and they are what feedback is most wanted on.
 Q8 is the most consequential for the interface: it asks whether a zone should
 declare a time at all.
 
@@ -36,6 +36,11 @@ network was first a name on the entry, and moved to the zone the same day; on
 2026-10-11 the entry types by place were withdrawn, place and hand-watering
 being facts of the zone, and the valve coordinator became a third entry type, the
 network's sibling).
+
+**Added 2026-10-21**, and reflected in section 14 as Q10: section 9.4 (the
+operating mode of an Environment, declared: active, away or stopped). It gives
+the "winter mode" that section 8.4.2 already relied on a definition, and keeps
+it distinct from the freeze interlock of section 9.2, which is observed.
 
 Nothing is binding while the note is `Draft`: a working answer is still a
 proposal.
@@ -614,8 +619,8 @@ contradictions between zones:
    becomes the deficit: only observed rain and delivered water move that number.
    A forecast that does not arrive must leave the model exactly where it was,
    otherwise a dry garden is recorded as watered by weather that never came.
-4. **Frost and the winter interlock.** An outdoor zone is not watered when the
-   installation is in winter mode or the observed conditions say freezing
+4. **Frost and the winter interlock.** An outdoor zone is not watered when its
+   Environment is declared stopped (section 9.4) or the observed conditions say freezing
    (§9.2). Indoor zones are unaffected, which is the one place the zone's own
    declaration enters - and it is a statement of fact about the zone, not a
    preference.
@@ -1226,8 +1231,11 @@ This is the reframing the rest of the note depends on. The scheduler stops
 answering *"should this zone water?"* and starts answering
 **"what is admissible now?"**.
 
-Admissibility has two site-level gates and one per-zone gate. They are different
-in kind, and the difference decides how each is reported.
+Admissibility has three site-level gates and one per-zone gate. They are different
+in kind, and the difference decides how each is reported: a time window is
+declared (section 9.1), the freeze is observed (section 9.2), the operating
+mode is declared by the person rather than the plumbing (section 9.4), and a
+removed valve is declared per zone (section 9.3).
 
 ### 9.1 Time windows — declared
 
@@ -1367,6 +1375,109 @@ Two connections this opens:
   not register it until it melts, so the credit side under-reads — but the demand
   side is near zero over frozen ground under snow cover, so the two mostly
   cancel, and the melt arrives as measurable rain.
+
+### 9.4 The operating mode - declared, per Environment
+
+*Added 2026-10-21.* section 8.4.2 already refuses an outdoor run "in winter mode", and
+nothing defined it. This section does. It is the third site gate: declared like
+a time window, but by the person and about their own situation rather than
+about the plumbing, and it answers a different question from the other two.
+A window says *when* watering is useful, the freeze says whether operating a
+valve is *safe*; the mode says **whether NeverDry should act on this place at
+all**.
+
+**Three values, on the Environment:**
+
+| Mode | What the person is saying | What NeverDry does |
+|---|---|---|
+| `active` | Default: today's behaviour | Everything in this note |
+| `away` | "Nobody is here to water by hand" | Valves keep working; requests to a person stop |
+| `stopped` | "This place is off for the season" | No commands, no expectations, no notifications |
+
+**Why the Environment, and why for now.** An Environment is a climate (section 8.8):
+its sensors, its scheduler and the zones that sky falls on. That is exactly the
+unit that goes into winter together. A garden is stopped in November; a heated
+greenhouse with its own Environment keeps watering, and nothing more is needed
+to express it. A wider switch, one "no action" for the whole instance, is a
+plausible later step and is left to Q10: the per-Environment mode is the one
+whose meaning is already clear.
+
+**`away` stops the requests, not the automation.** Being away is precisely when
+the valves are worth having, so a valve zone waters as usual. What stops is
+everything that asks a *person* to act: the monitoring-mode notice
+(`WATER_ME_NOW`) and the alert a `BY_HAND` zone raises when it is
+due. Nobody is there to read them, and a stack of stale requests on return says
+nothing the deficit does not already say. Nothing is queued for later: whether a
+hand-watered zone is due is re-derivable, so the first evaluation after the
+return to `active` raises the request again if it is still true.
+
+Notifications about the installation itself (a valve that does not close, a
+meter gone silent, a battery) are **not** silenced by `away`. A fault while
+nobody is home is exactly what the owner wants to hear about, because it is
+what they would ask a neighbour to look at.
+
+**`stopped` means NeverDry takes no action on this place.** Three things follow,
+and each closes a path the others would leave open, as in section 9.2.
+
+1. **No commands.** Not scheduled runs, not reactive runs, not the service runs
+   NeverDry is asked for (*Irrigate* on a zone or on all zones), not the valve
+   test, not the liveness probe, not a close sent at startup, and not the
+   automatic close of a valve the user opened by hand (that session is still
+   recorded, and settled when the user closes it). A service run is
+   **refused with a message**, never queued: a request that silently waited for
+   spring would fire on the first day of the season with nobody expecting it.
+   The one command a stopped Environment still sends is at the moment it
+   **enters** the mode: a run in progress is stopped and its valve closed,
+   because leaving it open is the opposite of what was asked.
+2. **No expectations.** The silence judgement of `valve-reachability.md` and the
+   liveness probe are suspended, and no valve is reported unreachable. Off
+   season, a valve may well be unscrewed and in the shed: absent by intent, not
+   silent by fault (the same argument section 9.3 makes for one zone, here for the whole
+   place).
+3. **No notifications, of any kind.** That includes `STUCK_OPEN` and
+   `LEAK_DETECTED`, and the price is stated rather than hidden: **with the
+   Environment stopped, a burst pipe that a flow meter could reveal is not
+   reported.** The choice is deliberate. Off season the meter is often drained
+   or removed with the valves, so its readings are not evidence; and an alarm
+   system that speaks while declared off is the one a person learns to mute,
+   which costs the alarms that matter in summer. "No watering, still watching"
+   is a real need, and the design already has its answer: an Environment left
+   `active` while the freeze interlock of section 9.2 refuses the commands. **That
+   interlock is designed but not built** (2026-10-21), so until it is, the
+   combination does not exist and the user manual says so rather than promising
+   it.
+
+**Observing continues.** The mode governs what NeverDry *does*, not what it
+*knows*. The water balance keeps computing, rain keeps being credited, and a
+valve opened by the user from Zigbee2MQTT, the entity or the tap is recorded as
+a manual run, as section 9.2 already does during a freeze. Blocking or ignoring a
+person's own action would claim an authority the integration does not have.
+
+**It follows the rules of the freeze, for the same reasons.** A stopped zone is
+skipped, not deferred: it is a `SkipReason`, re-derivable at every evaluation,
+so it needs no memory and no budget. It does not consume the rain-delay budget
+of section 5, a zone that does not water while stopped is correct and must not be
+reported as the never-waters failure of section 3, and the physical override of section 5
+(a deficit near `d_max` lapses a delay) does not apply: the person said stop.
+
+**The two gates are independent.** `stopped` makes the freeze irrelevant, since
+there is nothing left for it to refuse. `active` and `away` remain subject to
+it: declaring a mode never switches off the interlock that protects the valves.
+
+**The deficit on resume is left as the model computed it.** Returning to
+`active` resets nothing. For an outdoor zone the model already keeps the winter
+on the zero floor (section 9.3); for a `PATIO` or `GREENHOUSE` zone, which gets no rain
+credit, the deficit climbs while stopped, and whether it should be frozen is the
+question Q7 already asks for a removed valve. The mode does not answer it
+separately.
+
+**Where it is set: an entity, not the options form.** A select on the
+Environment's device, restored across restarts. Not a field of the options
+form, because saving that form reloads the entry, and a reload cuts short a run
+in progress (GH #282): a mode switched to `away` on the morning of a trip must
+not interrupt the watering it is meant to leave running. An entity can also be
+driven by an automation (a calendar of trips, a date in November), which is how
+a mode switched twice a year is most likely to be switched.
 
 ## 10. Queued dispatch needs no queue
 
@@ -1536,8 +1647,8 @@ own deferral map has given that up.
 
 The questions this note raised, with the answers reached so far. **Q1–Q3 are
 settled** (2026-08-21) and the sections above have been written to match; **Q6 is
-settled in scope** but not in the form of its override (2026-08-24); **Q4, Q5,
-Q7, Q8 and Q9 are open**. Feedback on what remains open is what this note is circulated for.
+settled in scope** but not in the form of its override (2026-08-24); **Q9 is
+closed** (2026-10-10); **Q4, Q5, Q7, Q8 and Q10 are open**. Feedback on what remains open is what this note is circulated for.
 The numbering is referenced from the sections above.
 
 A settled answer here is still a *proposal* while the note is `Draft` — nothing
@@ -1864,6 +1975,27 @@ by every zone that draws from the same line, whichever entry it belongs to. An
 Environment entry is a climate, with its own scheduler; a valve coordinator is an
 entry of its own, the network's sibling. The failure the entry boundary allowed, two entries on one main, is now expressed by
 their zones naming the same network.
+
+**Q10 - What does the operating mode not yet say? - Open.** *(Raised 2026-10-21
+with section 9.4.)*
+
+Section 9.4 settles three values on the Environment and what each refuses. Three
+things it deliberately leaves open:
+
+- **A greenhouse may need a different `stopped`.** For an outdoor garden,
+  stopping means the valves are drained and nothing should move. A greenhouse
+  wintering its plants may still need a little water and still want its meter
+  watched. Today that is expressed by leaving its Environment `active`; whether
+  it deserves a value of its own is a question for the first greenhouse that
+  asks.
+- **One switch for the whole instance.** A person leaving for two weeks has to
+  set `away` on every Environment. An instance-wide "no action" is the obvious
+  convenience; it waits until a real installation with more than one
+  Environment finds the per-Environment switch tedious.
+- **A summary on return from `away`.** Nothing is queued while away, by design.
+  Whether the return should bring a single notice ("while you were away, these
+  plants became due") is a presentation question, and it can be added without
+  changing the rule.
 
 ## 15. Consequences for the domain model
 

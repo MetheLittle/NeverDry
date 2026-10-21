@@ -304,8 +304,10 @@ ALLOWED_DOMAIN_EDGES: dict[str, set[str]] = {
     # has, so the capability match is expressible at all. The reverse arrow must
     # never appear: the site knows nothing about the physics that reads it.
     "water_balance_model": {"environment"},
-    # Scheduling decides *which zone* comes next, so it reads zones.
-    "scheduler": {"zone"},
+    # Scheduling decides *which zone* comes next, so it reads zones; and whether
+    # anything may run at all is the site's declared operating mode, so it reads
+    # that from the environment (scheduler.md, section 9.4).
+    "scheduler": {"zone", "environment"},
     "environment": set(),
 }
 
