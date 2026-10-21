@@ -42,6 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from .environment import OperatingMode
 from .zone import Zone
 
 #: Minimum gap between two service calls with the same key. Mirrors
@@ -73,6 +74,10 @@ class SkipReason(StrEnum):
     BELOW_THRESHOLD = "below_threshold"
     ALREADY_RUNNING = "already_running"
     THROTTLED = "throttled"
+    #: The Environment is declared stopped. A skip, not a deferral: asked again
+    #: in ten minutes the answer is the same, so it spends no budget and is not
+    #: the never-waters failure (``docs/design/scheduler.md``, section 9.4).
+    STOPPED = "stopped"
 
 
 class ConcurrencyPolicy(StrEnum):
@@ -125,22 +130,38 @@ class Scheduler:
         """``True`` when a zone may start while another is already watering."""
         return self.concurrency is ConcurrencyPolicy.PARALLEL
 
-    def evaluate_scheduled(self, zone: Zone, *, is_running: bool) -> Decision:
+    def evaluate_scheduled(
+        self, zone: Zone, *, is_running: bool, mode: OperatingMode = OperatingMode.ACTIVE
+    ) -> Decision:
         """The daily top-up: water at the scheduled hour, threshold or not.
 
         The threshold is deliberately **not** consulted. A schedule means "top
         this zone back up at this hour", and gating it on the reactive threshold
         would silently turn every scheduled run into a reactive one (AI-183).
         The only zone with nothing to do is one that is already full.
+
+        A stopped Environment is asked first: the person said stop, and no
+        deficit argues them out of it.
         """
+        if not mode.sends_commands:
+            return Decision.skip(SkipReason.STOPPED)
         if zone.deficit.value_mm <= 0:
             return Decision.skip(SkipReason.NOTHING_TO_REFILL)
         if is_running and not self.allows_overlap:
             return Decision.skip(SkipReason.ALREADY_RUNNING)
         return Decision.go(Trigger.SCHEDULED)
 
-    def evaluate_reactive(self, zone: Zone, *, is_running: bool, is_throttled: bool = False) -> Decision:
+    def evaluate_reactive(
+        self,
+        zone: Zone,
+        *,
+        is_running: bool,
+        is_throttled: bool = False,
+        mode: OperatingMode = OperatingMode.ACTIVE,
+    ) -> Decision:
         """Mode A: water as soon as the deficit crosses the zone's threshold."""
+        if not mode.sends_commands:
+            return Decision.skip(SkipReason.STOPPED)
         if not zone.needs_water:
             return Decision.skip(SkipReason.BELOW_THRESHOLD)
         if is_running and not self.allows_overlap:

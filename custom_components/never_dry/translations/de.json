@@ -581,6 +581,16 @@
       "reset_yearly_water": {
         "name": "Jahresvolumen zurücksetzen"
       }
+    },
+    "select": {
+      "operating_mode": {
+        "name": "Betriebsmodus",
+        "state": {
+          "active": "Aktiv",
+          "away": "Abwesend",
+          "stopped": "Gestoppt"
+        }
+      }
     }
   },
   "services": {
@@ -732,6 +742,11 @@
           }
         }
       }
+    }
+  },
+  "exceptions": {
+    "environment_stopped": {
+      "message": "NeverDry ist für diesen Ort gestoppt: \"{zone}\" wurde nicht angesteuert. Stelle den Betriebsmodus wieder auf Aktiv, um zu bewässern."
     }
   }
 }

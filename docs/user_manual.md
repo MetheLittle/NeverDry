@@ -741,6 +741,32 @@ The zone card shows an **amber warning triangle** — *"Valve not responding —
 
 **A note on small gardens.** The warning works by comparing each valve with the others, which is what lets it work without you configuring any timeout: a valve is flagged when it is unusually quiet *for your installation*. With only one or two zones there is nothing to compare against, so NeverDry says nothing rather than guessing — three zones or more is where this becomes reliable.
 
+### 7.5 Away and off-season: the operating mode
+
+Each NeverDry hub has an **Operating mode** selector on its device page (`select.<hub>_operating_mode`). It tells NeverDry what you are doing, so it stops asking for things that make no sense right now.
+
+| Mode | When to use it | What NeverDry does |
+|---|---|---|
+| **Active** | Normal use (the default) | Everything described in this manual |
+| **Away** | You are on holiday | Valves keep watering as usual. NeverDry stops asking you to water by hand: no "Irrigation needed" notice, no alerts for hand-watered plants |
+| **Stopped** | The garden is off for the season, valves drained or taken indoors | NeverDry sends no command to any valve, does not expect them to answer, and sends no notification at all |
+
+**Away keeps the warnings that matter.** A valve that does not close, a flow meter gone silent or a flat battery is still reported while you are away: that is exactly what you would ask a neighbour to check.
+
+**Stopped is really silent, including about leaks.** With the hub stopped, NeverDry does not report a valve stuck open or water flowing through the meter. There is not yet a mode for "no watering, but keep watching for leaks": if leak alerts over the winter matter to you, **Stopped** is not the mode for it.
+
+**What still works while stopped:**
+
+- the water balance keeps computing, and rain keeps being counted;
+- if you open a valve yourself (from Zigbee2MQTT, the entity or the tap), the watering is recorded as usual. NeverDry does **not** close it for you, as it normally would after the recommended volume (section 7.3): that would be a command, so remember to close it yourself;
+- the **Irrigate** buttons and services are refused with a message, never saved for later, so nothing starts by surprise on the first day of spring.
+
+**Switching modes.** Changing the mode takes effect immediately and does not reload the integration, so a watering in progress is not cut short by switching to **Away**. Switching to **Stopped** during a watering stops it and closes the valve. Because it is an ordinary entity, you can also switch it from an automation, for example from a holiday calendar.
+
+**Coming back.** Returning to **Active** resets nothing. For an outdoor garden, winter rain normally keeps the deficit at zero, so the first spring watering is an ordinary one. A plant that became due while you were away is asked for again at the next check.
+
+**One hub at a time.** The mode belongs to one hub. If you have a separate hub for a heated greenhouse, you can stop the garden for the winter and leave the greenhouse active.
+
 ---
 
 ## 8. Setting up automations

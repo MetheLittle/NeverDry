@@ -92,7 +92,7 @@ def _teardown_file_logger(handler: logging.Handler) -> None:
     handler.close()
 
 
-PLATFORMS = ["sensor", "button"]
+PLATFORMS = ["sensor", "button", "select"]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -392,6 +392,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await hass.async_add_executor_job(_teardown_file_logger, handler)
         hass.data[DOMAIN].pop(entry.entry_id, None)
         hass.data[DOMAIN].pop(f"_operators_{entry.entry_id}", None)
+        # The select restores the mode again on the next setup.
+        hass.data[DOMAIN].pop(f"_operating_mode_{entry.entry_id}", None)
         # Drop the domain services when the last controller is gone.
         async_unload_services(hass)
     return unload_ok

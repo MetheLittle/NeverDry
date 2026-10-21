@@ -147,6 +147,28 @@ def _create_ha_stubs():
         },
     )
 
+    # homeassistant.components.select
+    select_mod = ModuleType("homeassistant.components.select")
+    select_mod.SelectEntity = type(
+        "SelectEntity",
+        (),
+        {"async_write_ha_state": lambda self: None},
+    )
+
+    # homeassistant.exceptions: a real exception class, so a refusal can be
+    # asserted with pytest.raises and its translation key read back.
+    exceptions_mod = ModuleType("homeassistant.exceptions")
+
+    class _HomeAssistantError(Exception):
+        def __init__(self, *args, translation_domain=None, translation_key=None, translation_placeholders=None):
+            super().__init__(*args)
+            self.translation_domain = translation_domain
+            self.translation_key = translation_key
+            self.translation_placeholders = translation_placeholders
+
+    exceptions_mod.HomeAssistantError = _HomeAssistantError
+    exceptions_mod.ServiceValidationError = type("ServiceValidationError", (_HomeAssistantError,), {})
+
     # homeassistant.components.repairs — the guided fix flows. Stubbed as a bare
     # base class: what the integration puts in it is ours and testable, what
     # Home Assistant does with it is not.
@@ -251,6 +273,8 @@ def _create_ha_stubs():
         "homeassistant.data_entry_flow": data_entry_flow_mod,
         "homeassistant.components": ModuleType("homeassistant.components"),
         "homeassistant.components.button": button_mod,
+        "homeassistant.components.select": select_mod,
+        "homeassistant.exceptions": exceptions_mod,
         "homeassistant.components.repairs": repairs_mod,
         "homeassistant.components.sensor": sensor_mod,
         "homeassistant.config_entries": config_entries_mod,
