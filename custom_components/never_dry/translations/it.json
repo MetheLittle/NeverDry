@@ -581,6 +581,16 @@
       "reset_yearly_water": {
         "name": "Azzera acqua annuale"
       }
+    },
+    "select": {
+      "operating_mode": {
+        "name": "Modalità",
+        "state": {
+          "active": "Attivo",
+          "away": "In vacanza",
+          "stopped": "Fermo"
+        }
+      }
     }
   },
   "services": {
@@ -732,6 +742,11 @@
           }
         }
       }
+    }
+  },
+  "exceptions": {
+    "environment_stopped": {
+      "message": "NeverDry è fermo per questo luogo: \"{zone}\" non è stata azionata. Riporta la modalità su Attivo per irrigare."
     }
   }
 }

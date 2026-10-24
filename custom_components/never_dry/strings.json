@@ -581,6 +581,16 @@
       "reset_yearly_water": {
         "name": "Reset yearly water"
       }
+    },
+    "select": {
+      "operating_mode": {
+        "name": "Operating mode",
+        "state": {
+          "active": "Active",
+          "away": "Away",
+          "stopped": "Stopped"
+        }
+      }
     }
   },
   "services": {
@@ -732,6 +742,11 @@
           }
         }
       }
+    }
+  },
+  "exceptions": {
+    "environment_stopped": {
+      "message": "NeverDry is stopped for this place: \"{zone}\" was not operated. Set the operating mode back to Active to water."
     }
   }
 }

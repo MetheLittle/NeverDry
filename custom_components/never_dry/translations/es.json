@@ -581,6 +581,16 @@
       "reset_yearly_water": {
         "name": "Poner a cero el riego anual"
       }
+    },
+    "select": {
+      "operating_mode": {
+        "name": "Modo de funcionamiento",
+        "state": {
+          "active": "Activo",
+          "away": "Ausente",
+          "stopped": "Detenido"
+        }
+      }
     }
   },
   "services": {
@@ -732,6 +742,11 @@
           }
         }
       }
+    }
+  },
+  "exceptions": {
+    "environment_stopped": {
+      "message": "NeverDry está detenido para este lugar: \"{zone}\" no se ha accionado. Vuelve a poner el modo de funcionamiento en Activo para regar."
     }
   }
 }

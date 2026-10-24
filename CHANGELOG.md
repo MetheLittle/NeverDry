@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-24
+
+One feature, for the season it arrives in: a way to tell NeverDry that the
+garden is resting for the winter, or that nobody is home to water by hand.
+
+### Added
+- **Away and off-season: an operating mode for each hub.** A new selector on the
+  hub's device page, *Operating mode*, tells NeverDry what you are doing. *Away*
+  keeps the valves watering and stops the requests to water by hand, since
+  nobody is home to act on them; warnings about the installation itself (a valve
+  that does not close, a silent meter, a flat battery) still arrive. *Stopped*
+  is for the off season: NeverDry sends no command to any valve, does not expect
+  them to answer, and sends no notification at all, leak alarms included. The
+  water balance keeps computing, a valve you open yourself is still recorded
+  (but no longer closed for you), and the *Irrigate* buttons are refused with a
+  message rather than saved for spring. Switching takes effect at once without
+  reloading the integration, so a watering in progress is not cut short by
+  going *Away*; going *Stopped* during a watering ends it and closes that
+  valve. The mode applies to the whole hub for now: a greenhouse and an outdoor
+  garden on the same hub share it until environments can be set independently.
+  ([design](https://github.com/never-dry/NeverDry/blob/main/docs/design/scheduler.md#94-the-operating-mode---declared-per-environment),
+  [user manual](https://github.com/never-dry/NeverDry/blob/main/docs/user_manual.md#75-away-and-off-season-the-operating-mode))
+
 ## [0.12.0] - 2026-10-19
 
 The domain model stops being scaffolding and starts running the integration. Each

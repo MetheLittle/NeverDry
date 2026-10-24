@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from typing import ClassVar
 
 from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_change,
@@ -37,6 +38,7 @@ from .const import (
     DELIVERY_MODE_ESTIMATED_FLOW,
     DELIVERY_MODE_FLOW_METER,
     DELIVERY_MODE_VOLUME_PRESET,
+    DOMAIN,
     EVENT_IRRIGATION_COMPLETE,
     EVENT_VALVE_TEST_COMPLETE,
     FLOW_METER_POLL_INTERVAL_S,
@@ -45,7 +47,7 @@ from .const import (
     UNUSUAL_FLOW_MIN_LPM,
 )
 from .driver import Driver, OperationStatus, ValveCommandAdapter
-from .environment import Reachability
+from .environment import OperatingMode, Reachability
 from .reachability_watch import FleetSilenceWatch
 from .scheduler import Decision, Scheduler, SkipReason
 from .valve_fsm import ValveState
@@ -126,6 +128,10 @@ class IrrigationController:
         # Serial is what the code has always done — two handlers each
         # checking 'is something running' — but nowhere did it say so.
         self._scheduler = Scheduler()
+        # Declared by the person from the hub's select (scheduler.md, 9.4). Held
+        # here because this is the object that acts on it; mirrored onto the
+        # hub's Environment, which is where the domain says it belongs.
+        self._operating_mode = OperatingMode.ACTIVE
         # Tunable from tests; default matches the production grace window.
         self.auto_open_grace_s: float = AUTO_OPEN_GRACE_S
         self._running = False
@@ -159,6 +165,80 @@ class IrrigationController:
         self._battery_to_zone: dict[str, str] = {
             zs.battery_sensor: zs.zone_name for zs in zone_sensors if zs.battery_sensor
         }
+
+    @property
+    def operating_mode(self) -> OperatingMode:
+        """What the person declared about this place: active, away or stopped."""
+        return self._operating_mode
+
+    async def async_set_operating_mode(self, mode: OperatingMode | str) -> None:
+        """Adopt a declared operating mode and carry out what changes at once.
+
+        Most of the mode is read where it bites - the scheduler, the service
+        handlers, the reachability poll, the notifier. Three things cannot wait
+        for the next evaluation and happen here:
+
+        - notices the new mode no longer admits are withdrawn, so a holiday
+          does not begin under a stale "water these plants";
+        - entering ``STOPPED`` stops a run in progress and closes its valve,
+          the last command a stopped place sends;
+        - leaving the valves unwatched clears the silence verdicts, so the card
+          does not keep an amber chip about a valve that is in the shed.
+        """
+        mode = OperatingMode(mode)
+        previous = self._operating_mode
+        if mode == previous:
+            return
+        self._operating_mode = mode
+        _LOGGER.info("Operating mode: %s -> %s", previous.value, mode.value)
+        with contextlib.suppress(AttributeError):
+            self._dryness.set_operating_mode(mode)
+        if self._notifier is not None:
+            await self._notifier.apply_operating_mode(mode)
+        for zone in self._zones.values():
+            zone.set_expects_answers(mode.expects_answers)
+            if not mode.expects_answers:
+                zone.set_silence_verdict(None)
+            zone.async_write_ha_state()
+        if not mode.expects_answers:
+            self._reachability_alerted.clear()
+        if not mode.sends_commands and self._running:
+            await self._stop_for_mode()
+
+    async def _stop_for_mode(self) -> None:
+        """Stop the run in progress and close only the valve it holds.
+
+        Not the emergency stop: that closes every configured valve, which is a
+        command to each of them, and a stopped place should send as few as
+        possible - here, exactly one.
+        """
+        self._stop_requested = True
+        valve = self._active_valve
+        _LOGGER.info("Operating mode stopped: ending the run in progress (valve=%s)", valve)
+        if valve:
+            with contextlib.suppress(Exception):
+                await self._close_valve(valve)
+        task = self._irrigation_task
+        if task is not None and not task.done():
+            with contextlib.suppress(Exception):
+                await task
+
+    def _refuse_when_stopped(self, what: str, zone_name: str | None) -> None:
+        """Refuse a request that would operate a valve while this place is stopped.
+
+        Refused with a message, never queued: a request that waited for spring
+        would open a valve on the first day of the season with nobody expecting
+        it (scheduler.md, 9.4).
+        """
+        if self._operating_mode.sends_commands:
+            return
+        _LOGGER.warning("%s refused for zone '%s': the operating mode is stopped", what, zone_name)
+        raise ServiceValidationError(
+            f"NeverDry is stopped for this place: '{zone_name}' was not operated",
+            translation_domain=DOMAIN,
+            translation_key="environment_stopped",
+            translation_placeholders={"zone": str(zone_name)},
+        )
 
     @property
     def is_monitoring_mode(self) -> bool:
@@ -297,6 +377,8 @@ class IrrigationController:
         refusing to try on statistical grounds would turn a warning into an
         outage.
         """
+        if not self._operating_mode.expects_answers:
+            return  # off season a quiet valve is absent by intent, not by fault
         drivers = {
             name: driver
             for name, zone in self._zones.items()
@@ -345,6 +427,7 @@ class IrrigationController:
         SkipReason.BELOW_THRESHOLD: "deficit below the zone threshold",
         SkipReason.ALREADY_RUNNING: "another irrigation is in progress",
         SkipReason.THROTTLED: "called again too soon",
+        SkipReason.STOPPED: "the operating mode is stopped",
     }
 
     def _act_on(self, decision: Decision, zone_name: str, zone) -> None:
@@ -386,7 +469,9 @@ class IrrigationController:
             if zone is None:
                 return
             self._act_on(
-                self._scheduler.evaluate_scheduled(zone.domain_zone, is_running=self._running),
+                self._scheduler.evaluate_scheduled(
+                    zone.domain_zone, is_running=self._running, mode=self._operating_mode
+                ),
                 zone_name,
                 zone,
             )
@@ -407,6 +492,7 @@ class IrrigationController:
                 # actually goes ahead, which is what the old ordering achieved
                 # by checking it last.
                 is_throttled=self._would_throttle("reactive", zone_name),
+                mode=self._operating_mode,
             )
             if decision.should_irrigate:
                 self._record_service_call("reactive", zone_name)
@@ -510,6 +596,7 @@ class IrrigationController:
     async def _handle_irrigate_zone(self, call: ServiceCall) -> None:
         """Irrigate a single zone by name."""
         zone_name = call.data.get(ATTR_ZONE_NAME)
+        self._refuse_when_stopped("irrigate_zone", zone_name)
         if self._is_throttled("irrigate_zone", zone_name):
             return
         if zone_name not in self._zones:
@@ -529,6 +616,11 @@ class IrrigationController:
 
     async def _handle_irrigate_all(self, call: ServiceCall) -> None:
         """Irrigate all zones sequentially."""
+        if not self._operating_mode.sends_commands:
+            # A global call fans out to every entry: a stopped place steps aside
+            # and lets the others water, rather than failing the whole call.
+            _LOGGER.info("irrigate_all: skipped here, the operating mode is stopped")
+            return
         if self._is_throttled("irrigate_all"):
             return
         if self._running:
@@ -694,6 +786,7 @@ class IrrigationController:
         domain — the adapter stays the only place that knows (GH #94).
         """
         zone_name = call.data.get(ATTR_ZONE_NAME)
+        self._refuse_when_stopped("test_valve", zone_name)
         if self._is_throttled("test_valve", zone_name):
             return
         zone = self._zones.get(zone_name)
@@ -1811,10 +1904,13 @@ class IrrigationController:
             zone.async_write_ha_state()
             # Active monitor: closes the valve at the minimum between
             # volume-needed (if we can measure or estimate it) and the
-            # safety delivery_timeout.
-            self._manual_safety_tasks[entity_id] = self._hass.async_create_task(
-                self._external_session_monitor(entity_id, zone_name),
-            )
+            # safety delivery_timeout. Not while stopped: the auto-close is a
+            # command, and the person who opened the valve is the one acting.
+            # The session is still recorded, and settled when they close it.
+            if self._operating_mode.sends_commands:
+                self._manual_safety_tasks[entity_id] = self._hass.async_create_task(
+                    self._external_session_monitor(entity_id, zone_name),
+                )
             _LOGGER.info(
                 "Manual valve open detected: zone='%s' (target=%.1fL, timeout=%ds)",
                 zone_name,
