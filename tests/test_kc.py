@@ -427,7 +427,9 @@ class TestZoneExposure:
         """kc must always equal kc_base * factor — the attributes explain each other."""
         zone = _make_zone_sensor(di_sensor, plant_family="vegetables", exposure=EXPOSURE_REFLECTED_HEAT)
         attrs = zone.extra_state_attributes
-        assert attrs["kc"] == pytest.approx(attrs["kc_base"] * attrs["microclimate_factor"], abs=0.001)
+        # Both attributes are rounded to 3 decimals and the base error is scaled by the factor.
+        tolerance = 0.0005 * attrs["microclimate_factor"] + 0.0005
+        assert attrs["kc"] == pytest.approx(attrs["kc_base"] * attrs["microclimate_factor"], abs=tolerance)
 
     def test_two_identical_zones_differ_by_exposure_only(self, di_sensor):
         """The #146 use case: same lawn, one shaded from 14:00."""
